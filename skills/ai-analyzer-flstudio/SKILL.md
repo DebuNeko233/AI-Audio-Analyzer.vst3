@@ -1,28 +1,28 @@
 ---
 name: ai-analyzer-flstudio
-description: Technical usage skill for Cherry Studio and AI Audio Analyzer MCP. Use it to discover and bind Analyzer instances, choose the correct MCP tools, interpret signal validity, time windows, spectrum, loudness, True Peak, RMS, Crest, spectral descriptors, stereo metrics, V0.6 temporal descriptors, project overview, and A/B snapshots. This Skill does not prescribe a mixing style, LUFS target, EQ/compression/sidechain recipe, or artistic preference.
+description: Technical usage skill for Cherry Studio + AI Audio Analyzer MCP. Teaches deterministic Analyzer discovery/binding, tool selection, measurement validity, level/loudness/spectrum/stereo/temporal semantics, project overview, Snapshot A/B, and MCP 0.7 masking-evidence interpretation. It does not prescribe a mixing style, LUFS target, EQ/compression/sidechain recipe, or aesthetic decision.
 ---
 
 # AI Audio Analyzer MCP Usage Skill
 
-This Skill has two responsibilities:
+This Skill has two responsibilities only:
 
-1. help the model call **AI Audio Analyzer MCP correctly**;
-2. help the model interpret the **technical meaning and validity** of MCP measurements correctly.
+1. help the model call **AI Audio Analyzer MCP** correctly;
+2. help the model interpret returned measurements and evidence without overstating them.
 
-This Skill does **not** provide style-specific mixing instructions. Do not turn a frequency, loudness, correlation, spectral-overlap, or temporal-overlap measurement directly into an EQ, compression, limiting, sidechain, panning, or mastering action. Artistic decisions should come from the user's goal, musical context, references, and the model's general knowledge—not from a fixed policy embedded in this Skill.
+It is **not a mixing-style guide**. Do not infer a mandatory EQ, compressor, limiter, sidechain, panning, stereo, or mastering action merely because a measurement is high, low, overlapping, correlated, or temporally coincident. Artistic decisions come from the user's goal, musical context, references, DAW state, and the model's own reasoning—not from this Skill.
 
-## 1. Check MCP and project readiness first
+## 1. Start at project level
 
-For project-level tasks, start with:
+For a project-level request, begin with:
 
 ```text
 audio_project_status()
 ```
 
-Use it to check Bridge/OSC health, Analyzer count, binding completeness, active signal, stale streams, duplicate names, and Master candidates.
+Use it to check Bridge/OSC health, live Analyzer count, deterministic bindings, active input, stale streams, duplicate names, and Master candidates.
 
-Only drill down when needed:
+Only descend when needed:
 
 ```text
 audio_bridge_status()
@@ -30,44 +30,47 @@ audio_list_tracks()
 audio_instance_map()
 ```
 
-Do not call every low-level tool unconditionally. Prefer the highest-level tool that already contains enough information for the current question.
+Do not call all tools mechanically. Prefer the highest-level tool that answers the question, then drill down.
 
-## 2. Multiple instances: establish deterministic mapping, never guess
+## 2. Deterministic multi-instance mapping
 
-AI Audio Analyzer V0.4+ gives each live instance a runtime UUID and exposes this host parameter:
+AI Audio Analyzer v0.4+ exposes a host-visible Boolean parameter:
 
 ```text
 Parameter ID: identify
 Display name: Identify
-Type: Boolean
 ```
 
-When `audio_instance_map()` reports unbound instances and the FL Studio control MCP can access plugin parameters, process one Analyzer at a time:
+When an Analyzer is unbound and an FL Studio control MCP can access plugin parameters:
 
-1. use the FL Studio MCP to locate the real Mixer Track and Plugin Slot;
-2. read the current `Identify` value;
-3. set it to the opposite value;
-4. immediately call `audio_last_identify()`;
-5. confirm the event is fresh and unconsumed;
-6. immediately call `audio_bind_last_identified(fl_track_index, fl_track_name, slot)`;
-7. verify the result with `audio_instance_map()`.
+```text
+find real Mixer Track / Plugin Slot
+→ read current Identify value
+→ toggle Identify
+→ audio_last_identify()
+→ verify fresh + unconsumed event
+→ audio_bind_last_identified(fl_track_index, fl_track_name, slot)
+→ audio_instance_map()
+```
 
-Each Identify event may be consumed only once. Never reuse an old Identify event for another track.
+One Identify event may be consumed only once.
 
-After binding, prefer selectors in this order:
+Preferred selector order after discovery:
 
 ```text
 mixer:<index>/slot:<slot>
-→ unique FL Mixer Track name
+→ unique FL Mixer track name
 → runtime UUID
 → unique Analyzer display name
 ```
 
-If one Mixer Track contains multiple Analyzer instances, include the `slot`. Runtime UUIDs and bindings are session-scoped.
+If multiple Analyzers exist on one Mixer Track, include `slot`.
 
-## 3. Validate measurements before interpreting them
+Do not guess mapping from names, spectrum shape, or musical content when Identify is available.
 
-Before content-related analysis, check:
+## 3. Validate data before interpreting it
+
+For content-related measurements check:
 
 ```text
 signal_present
@@ -75,17 +78,16 @@ analysis_valid
 active_ratio
 ```
 
-Current signal-detector semantics:
+Signal gate semantics are approximately:
 
 ```text
-close threshold   about -50 dBFS
-reopen threshold  about -48 dBFS
-hold              about 0.4 s
+close   below -50 dBFS for ~0.4 s
+reopen  above -48 dBFS
 ```
 
-When `signal_present=false`, the Bridge marks content-dependent spectrum/stereo fields as `null` or unavailable. `null` means **no valid measurement**, not numeric zero.
+`null` means **unavailable**, not numeric zero.
 
-For V0.6 temporal analysis, also check:
+For V0.6 temporal measurements also inspect:
 
 ```text
 temporal_supported
@@ -93,11 +95,9 @@ temporal_valid
 temporal_window_seconds
 ```
 
-Older Analyzer versions can still provide legacy measurements, but if `temporal_supported` is false or missing, do not invent V0.6 temporal data.
+A legacy Analyzer may still provide level/spectrum data while lacking V0.6 temporal evidence.
 
-Always interpret windowed tools together with `active_ratio`. For example, `active_ratio=0.2` over five seconds means only about 20% of sampled frames contained valid input; do not describe that result as continuously present over the full five seconds.
-
-## 4. Tool-selection strategy
+## 4. Tool selection
 
 ### Project readiness
 
@@ -105,57 +105,58 @@ Always interpret windowed tools together with `active_ratio`. For example, `acti
 audio_project_status()
 ```
 
-### Project-level recent-window overview
+### Project-wide recent overview
 
 ```text
 audio_mix_overview(seconds=10, max_tracks=32)
 ```
 
-`potential_spectral_conflicts` contains heuristic relative spectral-overlap candidates. It does not prove audible masking.
+Its `potential_spectral_conflicts` are coarse spectral candidates only.
 
-### Stable single-instance window
+### Project-wide stronger masking candidates — V0.7
+
+```text
+audio_project_masking_scan(seconds=5, max_pairs=8, alignment_tolerance_ms=80)
+```
+
+Use this when the user wants likely interaction candidates across the project. It starts from project spectral candidates and ranks them with the V0.7 auditory-band/relative-level/temporal evidence model.
+
+It is still a **candidate ranking**, not an automatic list of mix problems.
+
+### Stable single-track window
 
 ```text
 audio_average(track, seconds)
 ```
 
-Use this when the question concerns a stable recent interval rather than one instantaneous frame.
+Prefer this to a single frame for observations that should represent several seconds.
 
-### Latest single-instance frame
+### Current single frame
 
 ```text
 audio_snapshot(track)
 ```
 
-Use for current-state inspection, connection troubleshooting, or explicitly instantaneous measurements.
+Use for current-state/connection inspection, not as a substitute for a stable measurement window.
 
-### Single-instance temporal behavior
+### Single-track temporal profile — V0.6
 
 ```text
 audio_temporal_profile(track, seconds=5)
 ```
 
-Use it to read:
+Use for normalized spectral flux, RMS-rise evidence, low-band temporal energy, and threshold-based onset/change candidate density.
 
-```text
-spectral_flux_mean / spectral_flux_peak
-rms_rise_peak_db
-40-160 Hz temporal energy
-onset/change candidate density
-```
-
-Candidate events are threshold-based summaries. They are not ground-truth onset labels.
-
-### Two-instance spectral relationship
+### Two-track spectral comparison
 
 ```text
 audio_compare_tracks(track_a, track_b)
 audio_detect_masking(track_a, track_b)
 ```
 
-The current masking tool remains a heuristic spectral-overlap detector.
+`audio_detect_masking()` is the older spectral-overlap heuristic. Do not describe it as a validated psychoacoustic masking result.
 
-### Two-instance temporal relationship
+### Two-track temporal comparison — V0.6
 
 ```text
 audio_temporal_compare(
@@ -168,34 +169,47 @@ audio_temporal_compare(
 )
 ```
 
-Use it to inspect the selected band's:
+Use when the question depends on whether energy in a selected frequency range actually co-occurs or co-varies over time.
+
+### Two-track masking evidence — V0.7
 
 ```text
-coactive_ratio
-band_envelope_correlation
-normalized_band_temporal_overlap
-candidate_coincidence_ratio
+audio_masking_evidence(
+  track_a,
+  track_b,
+  seconds=5,
+  alignment_tolerance_ms=80,
+  max_regions=8
+)
 ```
 
-When the question is whether two tracks occupy a frequency region **at the same time**, use this tool in addition to static `spectral_overlap_score`.
+Use this for the most detailed current masking-related evidence. It combines:
 
-### Band-limited stereo correlation
+```text
+existing 32-band Analyzer spectrum
+→ 16 equal ERB-rate regions
+→ relative spectral occupancy
+→ directional relative-level weighting
+→ V0.6 selected-band temporal overlap
+```
+
+The ERB stage is **re-binning**, not a gammatone/cochlear filterbank. The score is **heuristic evidence**, not an audible-masking probability.
+
+### Stereo bands
 
 ```text
 audio_stereo_bands(track)
 ```
 
-### Master/bus technical summary
+### Master technical summary
 
 ```text
 audio_master_status(track="Master")
 ```
 
-This is a measurement summary, not a fixed mastering standard.
+It summarizes measurements; it does not define a universal mastering target.
 
-## 5. V0.5 Project Snapshot / A-B
-
-To capture two project states:
+### Snapshot A/B
 
 ```text
 audio_capture_snapshot("before", seconds=5)
@@ -203,90 +217,115 @@ audio_capture_snapshot("after", seconds=5)
 audio_compare_snapshots("before", "after")
 ```
 
-Use `audio_list_snapshots()` to list snapshots stored in the current Bridge session.
+Use comparable musical passages, similar window lengths, and comparable `active_ratio`. Snapshot deltas are `After - Before`. LUFS-I is session cumulative, not a reset per snapshot.
 
-For meaningful A/B comparison:
+## 5. How to read V0.7 masking evidence
 
-- use the same musical passage when practical;
-- use similar window lengths;
-- compare `active_ratio`;
-- interpret delta as `After - Before`;
-- remember that `LUFS-I` is session-integrated, not independently reset for each short snapshot.
+`audio_masking_evidence()` reports multiple transparent components instead of one opaque conclusion.
 
-## 6. Combining V0.6 temporal evidence with spectral evidence
+### `relative_spectral_overlap`
 
-Static spectral measurements answer:
+Each track's ERB-region powers are normalized to that track's own strongest ERB region. The score uses the minimum relative power of the two tracks.
 
-```text
-Do both tracks contain substantial energy in similar frequency regions?
-```
+It describes local spectral coexistence, not audibility or importance.
 
-V0.6 temporal tools add:
+### `level_delta_a_minus_b_db`
 
 ```text
-Does that energy appear or change at the same time?
+positive → A is stronger in that ERB region
+negative → B is stronger in that ERB region
 ```
 
-Therefore:
+This is a relative Analyzer level difference, not an auditory masking threshold.
 
-```text
-high spectral_overlap_score
-+
-high normalized_band_temporal_overlap
-```
+### `level_direction_weight_a_over_b` / `...b_over_a`
 
-means that both spectral and temporal coexistence evidence are relatively strong. It still does not prescribe any processing action.
+A bounded logistic weighting derived from the regional level difference. It only indicates which direction is more supported by relative level. It is not a probability.
 
-Likewise:
+### `spectral_level_evidence_*`
 
-```text
-high band_envelope_correlation
-```
+Combines relative spectral overlap with the directional level weight.
 
-means the selected-band envelopes tend to vary in the same direction. It does not identify which track should be changed.
+### `normalized_band_temporal_overlap`
 
-When interpreting `audio_temporal_compare()`, report alignment context as needed:
+Comes from aligned V0.6 band-energy envelopes. Higher values mean the two sources more often occupy strong states in that same region at the same time.
+
+### `combined_evidence_*`
+
+Combines spectral/level evidence with temporal overlap when temporal data is available.
+
+Do not compare these values to an undocumented universal threshold. Prefer relative ranking across regions/pairs within the same measurement context.
+
+### `masking_evidence_score`
+
+A compact summary of the strongest returned regions. Use it to rank candidates, not to label a pair as objectively "bad".
+
+## 6. Evidence quality matters
+
+When interpreting V0.6/V0.7 pair evidence, report or inspect:
 
 ```text
 window_seconds
-band_hz
-aligned_pairs
-usable_band_pairs
-alignment_tolerance_ms
-mean_abs_alignment_offset_ms
+active_ratio_a / active_ratio_b
+alignment.aligned_pairs
+alignment.tolerance_ms
+alignment.mean_abs_offset_ms
+temporal_usable_pairs
+ERB region low_hz / high_hz
 ```
 
-If there are too few aligned samples or alignment quality is weak, reduce confidence in correlation/overlap interpretation.
+Sparse, stale, mostly silent, or poorly aligned data should reduce confidence in the interpretation.
 
-## 7. Parameter interpretation rules
+## 7. Relationship between old and new masking tools
 
-Detailed semantics are in:
+Use the tools progressively:
+
+```text
+audio_mix_overview()
+    coarse project spectral candidates
+        ↓
+audio_project_masking_scan()
+    project ranking with V0.7 evidence
+        ↓
+audio_masking_evidence(a, b)
+    detailed ERB-region evidence
+        ↓
+audio_temporal_compare(a, b, custom band)
+    custom-frequency temporal drill-down when needed
+```
+
+Do not mechanically call every layer if the user's question is already answered.
+
+## 8. Parameter interpretation rules
+
+Detailed semantics:
 
 ```text
 references/parameters.md
+references/masking-evidence.md
 ```
 
-Tool and selector details are in:
+Tool/selector details:
 
 ```text
 references/analyzer-mcp.md
 ```
 
-Keep these distinctions explicit:
+Always keep these distinctions:
 
-- Sample Peak is not True Peak;
-- RMS is not LUFS;
-- LUFS-S is not session-integrated LUFS-I;
-- Spectrum dB values are machine features, not calibrated SPL;
-- Centroid, Rolloff, and Flatness are descriptive statistics, not quality scores;
-- Stereo Correlation and Width are measurements, not universal good/bad scores;
-- Spectral Flux describes normalized spectral change, not overall level change;
-- RMS Rise describes rapid level increase, not Crest Factor;
-- temporal overlap/correlation is evidence about timing relationships, not a masking probability;
-- `null` means unavailable, not zero;
-- windowed statistics must be interpreted with coverage duration, active ratio, and valid-frame count.
+- Sample Peak ≠ True Peak.
+- RMS ≠ LUFS.
+- LUFS-S ≠ cumulative LUFS-I.
+- Analyzer spectrum dB is not calibrated SPL.
+- Centroid/Rolloff/Flatness are descriptive statistics, not quality scores.
+- Stereo Correlation/Width are measurements, not good/bad scores.
+- Spectral Flux is normalized spectral redistribution, not simple gain change.
+- RMS Rise is rapid level-increase evidence, not Crest Factor or attack time.
+- Spectral overlap, temporal overlap, and V0.7 masking evidence are not probabilities of audible masking.
+- Onset candidates are threshold-based change candidates, not ground-truth labels.
+- `null` is unavailable, not zero.
 
-## 8. Boundary with the FL Studio control MCP
+## 9. Boundary with FL Studio control MCP
 
 AI Audio Analyzer MCP is responsible for:
 
@@ -294,35 +333,36 @@ AI Audio Analyzer MCP is responsible for:
 measure / read / compare / verify
 ```
 
-The FL Studio control MCP is responsible for:
+FL Studio control MCP is responsible for:
 
 ```text
-read DAW topology / access plugins / modify host state
+DAW topology / plugin access / host changes
 ```
 
-This Skill may instruct the model to use the FL Studio MCP for deterministic Identify mapping and to read Analyzer measurements after a DAW change, but it must **not** prescribe which parameter to change, by how much, or which mixing style to follow.
+This Skill may guide deterministic Identify mapping and measurement readback after an external DAW change. It must **not** prescribe what parameter to change, by how much, or which artistic style to follow.
 
-If the user asks for project changes, first inspect real tracks, slots, plugins, and parameters. Do not invent host/plugin parameters. Read back the actual host state after changes. Use Analyzer/Snapshot A-B when measurement verification is useful. Keep technical measurement claims separate from artistic judgments.
+If the user asks to modify the project, first read the actual DAW tracks/slots/plugins/parameters, do not invent controls, read back the host state after changes, and use Analyzer measurements only as technical evidence.
 
-## 9. Output discipline
+## 10. Output discipline
 
-When citing Analyzer measurements, include enough context to make the result interpretable, such as:
+When citing Analyzer evidence, include enough context to make it auditable:
 
 ```text
 instance / selector
-window length
-signal_present / active_ratio
-for temporal results: band_hz / temporal coverage / alignment quality
-key measurements
-measurement validity
+measurement window
+signal validity / active ratio
+frequency or ERB region when relevant
+alignment quality for temporal evidence
+measurement/evidence value
+what the metric can and cannot establish
 ```
 
-Do not present the following as facts measured by AI Audio Analyzer:
+Do not present these as Analyzer-measured facts:
 
-- "this sound should be warmer/brighter/more modern";
-- "this genre must hit a specific LUFS value";
-- "this frequency must be cut by a specific number of dB";
-- "spectral overlap means EQ or sidechain is mandatory";
-- "a particular correlation or temporal-overlap value is inherently good or bad".
+- a sound "should" be warmer, brighter, wider, louder, or more modern;
+- a genre must hit a fixed LUFS number;
+- a frequency must be cut/boosted by a specific amount;
+- spectral or V0.7 masking evidence automatically requires EQ or sidechain;
+- one correlation/evidence score is inherently good or bad.
 
-Those are musical judgments or processing strategies, not measurements produced by this MCP and not rules that belong in this Skill.
+Those are artistic or processing judgments, outside the measurement scope of this MCP and Skill.
