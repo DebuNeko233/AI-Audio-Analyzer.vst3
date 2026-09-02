@@ -50,6 +50,7 @@ AIAnalyzerAudioProcessor::AIAnalyzerAudioProcessor()
         static_cast<int>(aianalyzer::AnalysisProfile::Full));
     addParameter(analysisProfileParameter);
 
+    lastWorkerProfileIndex = static_cast<int>(aianalyzer::AnalysisProfile::Full);
     analysisWorker.setAnalysisProfile(aianalyzer::AnalysisProfile::Full);
     analysisWorker.setOscConfig(instanceId, oscHost, oscPort);
 }
@@ -61,8 +62,9 @@ AIAnalyzerAudioProcessor::~AIAnalyzerAudioProcessor()
 
 void AIAnalyzerAudioProcessor::prepareToPlay(double sampleRate, int)
 {
+    lastWorkerProfileIndex = getAnalysisProfileIndex();
     analysisWorker.setAnalysisProfile(
-        static_cast<aianalyzer::AnalysisProfile>(getAnalysisProfileIndex()));
+        static_cast<aianalyzer::AnalysisProfile>(lastWorkerProfileIndex));
     analysisWorker.prepare(sampleRate);
 
     juce::String currentInstance;
@@ -98,8 +100,15 @@ void AIAnalyzerAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer,
     if (numInputChannels <= 0 || buffer.getNumSamples() <= 0)
         return;
 
-    analysisWorker.setAnalysisProfile(
-        static_cast<aianalyzer::AnalysisProfile>(getAnalysisProfileIndex()));
+    // Profile reads are cheap; notify the background worker only when the host
+    // parameter actually changes. Normal realtime blocks do not signal/wake it.
+    const auto currentProfileIndex = getAnalysisProfileIndex();
+    if (currentProfileIndex != lastWorkerProfileIndex)
+    {
+        lastWorkerProfileIndex = currentProfileIndex;
+        analysisWorker.setAnalysisProfile(
+            static_cast<aianalyzer::AnalysisProfile>(currentProfileIndex));
+    }
 
     const auto* left = buffer.getReadPointer(0);
     const auto* right = numInputChannels > 1 ? buffer.getReadPointer(1) : nullptr;
@@ -197,6 +206,7 @@ void AIAnalyzerAudioProcessor::setAnalysisProfileIndex(int profileIndex, bool no
             analysisProfileParameter->setValue(normalized);
     }
 
+    lastWorkerProfileIndex = profileIndex;
     analysisWorker.setAnalysisProfile(
         static_cast<aianalyzer::AnalysisProfile>(profileIndex));
 }
