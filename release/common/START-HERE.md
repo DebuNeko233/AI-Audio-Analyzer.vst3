@@ -30,21 +30,13 @@ Intel/x86_64 macOS is not included.
 
 ### Windows
 
-Double-click:
-
-```text
-Install.cmd
-```
+Double-click `Install.cmd`.
 
 The installer copies the VST3, installs the standalone MCP runtime for the current user, runs the MCP self-test, generates `cherry-studio-mcp.json`, and installs the Skill.
 
 ### macOS Apple Silicon
 
-Double-click:
-
-```text
-Install.command
-```
+Double-click `Install.command`.
 
 If macOS blocks the downloaded script, right-click it and choose **Open**, or run:
 
@@ -58,9 +50,13 @@ The installer copies the arm64 VST3 and standalone arm64 MCP runtime, removes qu
 
 ## MCP 0.7
 
-The packaged runtime uses `server_v07.py` internally and exposes 20 tools.
+The packaged runtime and source fallback both use one stable entrypoint:
 
-V0.7 adds stronger masking-related evidence:
+```text
+server.py
+```
+
+MCP/protocol versions are metadata rather than versioned server filenames. MCP 0.7 exposes 20 tools and adds:
 
 ```text
 audio_masking_evidence()
@@ -81,12 +77,11 @@ Windows 用户直接双击 `Install.cmd`；macOS Release 仅支持 Apple Silicon
 
 普通用户不需要自己安装 Python、pip、MCP SDK，也不依赖 PyPI / 清华 / 阿里云镜像。Release 已把 Python Runtime 和 MCP 依赖打包进 `mcp/runtime/`。
 
+源码 fallback 与 PyInstaller 都统一使用 `server.py`，以后不再使用 `server_vXX.py` 版本化入口。
+
 0.7 的 MCP 新增 `audio_masking_evidence()` 和 `audio_project_masking_scan()`，用于提供更强的遮蔽相关证据，但这些结果只是透明的 heuristic evidence，不是“可听遮蔽概率”，也不会自动给出 EQ / Sidechain 等处理方案。
 
-如果自动安装失败或希望完全手动控制安装，请阅读：
-
-- `INSTALL.zh-CN.md`：完整中文教程；
-- `INSTALL.en.md`：English manual.
+如果自动安装失败或希望完全手动控制安装，请阅读 `INSTALL.zh-CN.md` 或 `INSTALL.en.md`。
 
 配套 FL Studio 控制 MCP：
 
