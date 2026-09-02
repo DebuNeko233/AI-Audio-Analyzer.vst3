@@ -101,6 +101,9 @@ jobs:
           expected = {
               "audio_bridge_status",
               "audio_list_tracks",
+              "audio_last_identify",
+              "audio_bind_last_identified",
+              "audio_instance_map",
               "audio_snapshot",
               "audio_average",
               "audio_stereo_bands",
@@ -111,8 +114,8 @@ jobs:
           missing = expected - names
           assert not missing, f"Missing MCP tools: {sorted(missing)}"
 
-          # V0.3 protocol smoke test: two same-name instances must coexist and
-          # resolving by the duplicate human name must fail as ambiguous.
+          # V0.3 protocol: two same-name instances coexist; raw human name is
+          # ambiguous until V0.4 deterministic binding gives DAW context.
           base = [
               "Bass", 48000.0, 1.0, -20.0, -30.0, 10.0,
               500.0, 5000.0, 0.1, 0.8, 0.2,
@@ -121,6 +124,9 @@ jobs:
           with server._lock:
               server._tracks.clear()
               server._history.clear()
+              server._bindings.clear()
+              server._identify_events.clear()
+              server._identify_sequence = 0
 
           server._on_frame("/aianalyzer/frame", *(base + [1, -20.0, 0.0, "uuid-a"]))
           server._on_frame("/aianalyzer/frame", *(base + [1, -20.0, 0.0, "uuid-b"]))
@@ -131,21 +137,48 @@ jobs:
           except ValueError as exc:
               assert "Ambiguous analyzer instance name" in str(exc)
           else:
-              raise AssertionError("Duplicate analyzer names must be ambiguous")
+              raise AssertionError("Duplicate analyzer names must be ambiguous before binding")
+
+          # V0.4 identify event can be consumed exactly once and produces a
+          # deterministic FL mixer track/slot -> runtime UUID binding.
+          server._on_identify("/aianalyzer/identify", "uuid-a", "Bass", 2.0, "0.4")
+          last = server.audio_last_identify()
+          assert last["runtime_id"] == "uuid-a"
+          assert last["consumed"] is False
+
+          bound = server.audio_bind_last_identified(7, "Bass Sub", 9)
+          assert bound["binding"]["runtime_id"] == "uuid-a"
+          assert server._resolve_track("mixer:7/slot:9") == "uuid-a"
+          assert server._resolve_track("Bass Sub") == "uuid-a"
+
+          try:
+              server.audio_bind_last_identified(8, "Wrong Bass", 9)
+          except ValueError as exc:
+              assert "already consumed" in str(exc)
+          else:
+              raise AssertionError("An Identify event must not bind twice")
+
+          topology = server.audio_instance_map()
+          assert topology["bound_count"] == 1
+          assert topology["unbound_count"] == 1
 
           # Silent V0.3 frame: spectral/stereo outputs must become None while
           # LUFS-I remains a valid accumulated session value.
           silent = list(base)
           silent[3] = -80.0
           server._on_frame("/aianalyzer/frame", *(silent + [0, -80.0, 4.0, "uuid-a"]))
-          snapshot = server._snapshot("uuid-a")
+          snapshot = server._snapshot("mixer:7/slot:9")
           assert snapshot["signal_present"] is False
           assert snapshot["bands_db"] is None
           assert snapshot["stereo_correlation"] is None
           assert snapshot["lufs_s"] is None
           assert snapshot["lufs_i"] == -14.0
+          assert snapshot["binding"]["fl_track_name"] == "Bass Sub"
 
-          print(f"AI Audio Analyzer MCP v{mcp_version}: {len(names)} tools registered; V0.3 protocol OK")
+          print(
+              f"AI Audio Analyzer MCP v{mcp_version}: {len(names)} tools registered; "
+              "V0.4 identify/mapping protocol OK"
+          )
           PY
 
       - name: Package bridge
