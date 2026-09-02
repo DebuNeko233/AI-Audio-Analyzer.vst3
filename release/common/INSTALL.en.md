@@ -2,138 +2,252 @@
 
 [中文安装教程](INSTALL.zh-CN.md)
 
-This package is intended for Cherry Studio + FL Studio workflows and contains the VST3 analyzer, Analyzer MCP bridge, and Cherry Studio Skill in one archive.
-
-## Package layout
-
-```text
-AI Audio Analyzer.vst3
-mcp/
-  server.py
-  requirements.txt
-  cherry-studio.example.json
-skill/
-  SKILL.md
-  references/
-START-HERE.md
-INSTALL.en.md
-INSTALL.zh-CN.md
-Install.cmd / Install.ps1        Windows package
-Install.command / install.sh     macOS package
-```
+The Release package contains the VST3, a **PyInstaller-packaged standalone Analyzer MCP runtime**, the Cherry Studio Skill, and automatic installers. Normal users do **not** need to install Python, pip, or access PyPI.
 
 Companion FL Studio control MCP:
 
 https://github.com/rosasynthesiz/flstudio-mcp
 
+## Package layout
+
+Windows:
+
+```text
+AI Audio Analyzer.vst3
+mcp/
+├─ runtime/
+│  └─ ai-audio-analyzer-mcp/
+│     ├─ ai-audio-analyzer-mcp.exe
+│     └─ _internal/...
+└─ source/
+   ├─ server.py
+   ├─ server_v05.py
+   ├─ project_tools.py
+   ├─ requirements.txt
+   └─ cherry-studio.example.json
+skill/
+Install.cmd
+Install.ps1
+```
+
+macOS:
+
+```text
+AI Audio Analyzer.vst3
+mcp/
+├─ runtime/
+│  ├─ arm64/ai-audio-analyzer-mcp/...
+│  └─ x86_64/ai-audio-analyzer-mcp/...
+└─ source/...
+skill/
+Install.command
+install.sh
+```
+
+The macOS archive contains native MCP runtimes for both Apple Silicon and Intel. The installer selects the correct runtime automatically; Rosetta is not required for the MCP.
+
 ## Recommended automatic installation
 
 ### Windows
 
-Double-click `Install.cmd`.
+Double-click:
 
-If Windows asks for UAC permission, allow it. Administrator access is needed to copy the VST3 into the standard system VST3 directory.
-
-Advanced usage from PowerShell:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\Install.ps1
+```text
+Install.cmd
 ```
 
-Select a PyPI source explicitly if needed:
+UAC is requested only for copying the VST3 into the standard `Program Files` location. MCP and Skill files remain under the current user's application-data directory:
 
-```powershell
-.\Install.ps1 -PyPI official
-.\Install.ps1 -PyPI tsinghua
-.\Install.ps1 -PyPI aliyun
+```text
+%LOCALAPPDATA%\AI Audio Analyzer\
 ```
 
-The default `auto` mode tries official PyPI first and then falls back to Tsinghua TUNA and Aliyun.
+The installer copies the standalone MCP runtime, runs its built-in self-test, copies the Skill, and creates `cherry-studio-mcp.json` with an absolute executable path.
 
 ### macOS
 
-Double-click `Install.command` or run:
+Double-click:
+
+```text
+Install.command
+```
+
+If macOS blocks the script itself, right-click `Install.command` and choose **Open**, or run:
 
 ```bash
 bash ./install.sh
 ```
 
-Choose a PyPI source explicitly if required:
-
-```bash
-AI_ANALYZER_PYPI=official bash ./install.sh
-AI_ANALYZER_PYPI=tsinghua bash ./install.sh
-AI_ANALYZER_PYPI=aliyun bash ./install.sh
-```
-
-The default `auto` mode uses the same fallback order as Windows.
-
-## What the automatic installer does
-
-The installer performs these operations without editing your FL Studio project:
-
-- installs the VST3;
-- copies `mcp/` and `skill/` into a stable per-user application-data directory;
-- finds Python 3.10+ and prefers Python 3.12;
-- creates a dedicated Python virtual environment;
-- installs `mcp>=2,<3` and `python-osc` from `requirements.txt`;
-- validates the MCP Python imports and compiles `server.py`;
-- writes an absolute-path Cherry Studio configuration snippet named `cherry-studio-mcp.json`;
-- prints the Skill folder that should be imported into Cherry Studio.
-
-It does **not** automatically modify Cherry Studio's own settings files because those paths and formats can change between versions. Instead, it generates a ready-to-copy configuration file.
-
-## Python installation
-
-The Analyzer MCP requires Python **3.10 or newer**. Python 3.12 is the recommended compatibility target for the lazy installer.
-
-### Windows
-
-The installer first checks these sources:
+The VST3 is installed to:
 
 ```text
-py -3.12
-py -3
-python
-python3
+~/Library/Audio/Plug-Ins/VST3/
 ```
 
-If no compatible Python is found and `winget` is available, it runs:
+MCP and Skill files are installed to:
+
+```text
+~/Library/Application Support/AI Audio Analyzer/
+```
+
+The installer selects `arm64` or `x86_64`, removes quarantine metadata, runs the MCP self-test, and generates the Cherry Studio configuration.
+
+## Why normal users do not need Python
+
+The Release MCP uses PyInstaller `onedir` packaging. The Python interpreter and dependencies such as MCP SDK 2.x and `python-osc` are bundled inside `mcp/runtime/`.
+
+Normal runtime path:
+
+```text
+Cherry Studio
+    ↓ stdio
+ai-audio-analyzer-mcp(.exe)
+    ↓ OSC UDP 9855
+AI Audio Analyzer.vst3
+```
+
+This avoids Python-version mismatches, wrong virtual environments, PyPI connectivity problems, and stale MCP v1 installations.
+
+## Cherry Studio configuration
+
+Automatic installation writes:
+
+Windows:
+
+```text
+%LOCALAPPDATA%\AI Audio Analyzer\cherry-studio-mcp.json
+```
+
+macOS:
+
+```text
+~/Library/Application Support/AI Audio Analyzer/cherry-studio-mcp.json
+```
+
+The important shape is:
+
+```json
+{
+  "mcpServers": {
+    "ai-audio-analyzer": {
+      "command": "/absolute/path/to/ai-audio-analyzer-mcp",
+      "args": [],
+      "env": {
+        "AI_ANALYZER_OSC_HOST": "127.0.0.1",
+        "AI_ANALYZER_OSC_PORT": "9855"
+      }
+    }
+  }
+}
+```
+
+Do not keep another Analyzer MCP process running manually while Cherry Studio starts its own copy, because only one process should bind UDP port `9855`.
+
+## Manual installation — Windows, no Python
+
+1. Copy `AI Audio Analyzer.vst3` to:
+
+```text
+C:\Program Files\Common Files\VST3\
+```
+
+2. Keep `mcp/` and `skill/` in a stable directory such as:
+
+```text
+%LOCALAPPDATA%\AI Audio Analyzer\
+```
+
+3. Test the packaged MCP:
 
 ```powershell
-winget install -e --id Python.Python.3.12 --scope user
+$env:AI_ANALYZER_SELF_TEST='1'
+& "$env:LOCALAPPDATA\AI Audio Analyzer\mcp\runtime\ai-audio-analyzer-mcp\ai-audio-analyzer-mcp.exe"
+Remove-Item Env:AI_ANALYZER_SELF_TEST
 ```
 
-Manual alternatives:
+4. Point Cherry Studio `command` at that `.exe`; leave `args` empty.
 
-- Python official downloads: https://www.python.org/downloads/windows/
-- Windows package manager: `winget install -e --id Python.Python.3.12 --scope user`
+5. Import the `skill/` directory.
 
-When installing Python manually, enabling the Python Launcher (`py`) is recommended.
+## Manual installation — macOS, no Python
 
-### macOS
-
-The installer checks `python3.12`, `python3`, and `python`. If none are suitable and Homebrew is already installed, it uses:
+1. Copy the VST3:
 
 ```bash
-brew install python@3.12
+mkdir -p "$HOME/Library/Audio/Plug-Ins/VST3"
+ditto "./AI Audio Analyzer.vst3" \
+  "$HOME/Library/Audio/Plug-Ins/VST3/AI Audio Analyzer.vst3"
 ```
 
-If neither Python nor Homebrew is installed, the interactive installer can offer to install Homebrew first. You can decline and install Python manually instead.
+2. Current GitHub builds are ad-hoc signed and are **not Apple Developer ID notarized**. Remove quarantine from the installed plugin:
 
-Manual alternatives:
+```bash
+xattr -dr com.apple.quarantine \
+  "$HOME/Library/Audio/Plug-Ins/VST3/AI Audio Analyzer.vst3"
+```
 
-- Python official downloads: https://www.python.org/downloads/macos/
-- Homebrew: https://brew.sh/
+Verify:
 
-## PyPI and mirror problems
+```bash
+codesign --verify --deep --strict --verbose=4 \
+  "$HOME/Library/Audio/Plug-Ins/VST3/AI Audio Analyzer.vst3"
+```
 
-The Python interpreter and PyPI are separate things:
+If needed, repair the local ad-hoc signature:
 
-- **Python** is the runtime itself.
-- **PyPI** is the package index used by pip to download `mcp`, `python-osc`, and their dependencies.
+```bash
+codesign --force --deep --sign - --timestamp=none \
+  "$HOME/Library/Audio/Plug-Ins/VST3/AI Audio Analyzer.vst3"
+```
 
-The lazy installer supports these package indexes:
+3. Select the native MCP runtime using `uname -m`:
+
+```text
+mcp/runtime/arm64/...       Apple Silicon
+mcp/runtime/x86_64/...      Intel
+```
+
+4. Remove MCP quarantine and self-test:
+
+```bash
+xattr -dr com.apple.quarantine ./mcp
+chmod +x ./mcp/runtime/$(uname -m)/ai-audio-analyzer-mcp/ai-audio-analyzer-mcp
+AI_ANALYZER_SELF_TEST=1 \
+  ./mcp/runtime/$(uname -m)/ai-audio-analyzer-mcp/ai-audio-analyzer-mcp
+```
+
+5. Point Cherry Studio `command` at that executable and leave `args` empty.
+
+## Advanced/developer fallback: run MCP from Python source
+
+Use `mcp/source/` only when developing the Bridge, debugging PyInstaller, modifying the server, or when the standalone runtime fails in an unusual environment.
+
+Python **3.10+** is required; Python 3.12 is recommended.
+
+Windows:
+
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -r .\mcp\source\requirements.txt
+$env:AI_ANALYZER_SELF_TEST='1'
+python .\mcp\source\server_v05.py
+```
+
+macOS:
+
+```bash
+python3.12 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r ./mcp/source/requirements.txt
+AI_ANALYZER_SELF_TEST=1 python ./mcp/source/server_v05.py
+```
+
+For source mode, Cherry Studio `command` is the virtual-environment Python and `args` contains the absolute path to `server_v05.py`.
+
+### PyPI mirrors for source mode
 
 ```text
 official   https://pypi.org/simple
@@ -141,242 +255,45 @@ tsinghua   https://pypi.tuna.tsinghua.edu.cn/simple
 aliyun     https://mirrors.aliyun.com/pypi/simple/
 ```
 
-You can test dependency installation manually:
+Examples:
 
 ```bash
 python -m pip install -r requirements.txt -i https://pypi.org/simple
-```
-
-or:
-
-```bash
 python -m pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
+python -m pip install -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple/
 ```
 
-Do not permanently change your global pip mirror unless you want that setting to affect all Python projects.
-
-If pip fails with SSL/certificate errors on a company or school network, the problem can be an HTTPS inspection proxy rather than PyPI itself. In that case, use your organization's approved CA/proxy configuration instead of disabling TLS verification.
-
-## Manual installation — Windows
-
-### 1. Install the VST3
-
-Copy:
-
-```text
-AI Audio Analyzer.vst3
-```
-
-to:
-
-```text
-C:\Program Files\Common Files\VST3\
-```
-
-Then fully restart FL Studio and run a plugin rescan.
-
-### 2. Install Python
-
-Verify:
-
-```powershell
-py -3.12 --version
-```
-
-or:
-
-```powershell
-python --version
-```
-
-A version of 3.10+ is required.
-
-### 3. Create the MCP environment
-
-From the package directory:
-
-```powershell
-py -3.12 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
-python -m pip install -r .\mcp\requirements.txt
-```
-
-If official PyPI is slow:
-
-```powershell
-python -m pip install -r .\mcp\requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
-```
-
-### 4. Configure Cherry Studio
-
-Use the virtual-environment Python as `command` and the absolute path to `mcp/server.py` as the first argument.
-
-Example:
-
-```json
-{
-  "mcpServers": {
-    "ai-audio-analyzer": {
-      "command": "C:\\absolute\\path\\.venv\\Scripts\\python.exe",
-      "args": ["C:\\absolute\\path\\mcp\\server.py"],
-      "env": {
-        "AI_ANALYZER_OSC_HOST": "127.0.0.1",
-        "AI_ANALYZER_OSC_PORT": "9855"
-      }
-    }
-  }
-}
-```
-
-### 5. Import the Skill
-
-Import the packaged `skill/` folder into Cherry Studio.
-
-## Manual installation — macOS
-
-### 1. Install the VST3
-
-Copy the plugin to:
-
-```text
-~/Library/Audio/Plug-Ins/VST3/
-```
-
-Create the directory if required:
-
-```bash
-mkdir -p "$HOME/Library/Audio/Plug-Ins/VST3"
-```
-
-### 2. Gatekeeper / quarantine
-
-Current GitHub builds are ad-hoc signed and are **not Apple-notarized**. GitHub/browser downloads can receive the `com.apple.quarantine` attribute.
-
-Remove it from the installed plugin:
-
-```bash
-xattr -dr com.apple.quarantine \
-  "$HOME/Library/Audio/Plug-Ins/VST3/AI Audio Analyzer.vst3"
-```
-
-Verify the signature:
-
-```bash
-codesign --verify --deep --strict --verbose=4 \
-  "$HOME/Library/Audio/Plug-Ins/VST3/AI Audio Analyzer.vst3"
-```
-
-If the ad-hoc signature became invalid after local file manipulation, repair it:
-
-```bash
-codesign --force --deep --sign - --timestamp=none \
-  "$HOME/Library/Audio/Plug-Ins/VST3/AI Audio Analyzer.vst3"
-```
-
-Then remove quarantine again and fully restart FL Studio before rescanning.
-
-### 3. Install Python and MCP dependencies
-
-With Homebrew:
-
-```bash
-brew install python@3.12
-python3.12 -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -r ./mcp/requirements.txt
-```
-
-Tsinghua mirror example:
-
-```bash
-python -m pip install -r ./mcp/requirements.txt \
-  -i https://pypi.tuna.tsinghua.edu.cn/simple
-```
-
-### 4. Configure Cherry Studio
-
-Example:
-
-```json
-{
-  "mcpServers": {
-    "ai-audio-analyzer": {
-      "command": "/absolute/path/.venv/bin/python",
-      "args": ["/absolute/path/mcp/server.py"],
-      "env": {
-        "AI_ANALYZER_OSC_HOST": "127.0.0.1",
-        "AI_ANALYZER_OSC_PORT": "9855"
-      }
-    }
-  }
-}
-```
-
-### 5. Import the Skill
-
-Import `skill/` into Cherry Studio.
+Do not disable TLS verification to work around corporate/school proxy certificate problems.
 
 ## Troubleshooting
 
-### FL Studio does not show the VST3
+### FL Studio cannot find the plugin
 
-Check that the bundle itself is located directly under a scanned VST3 directory and that you did not accidentally install an extra nested archive directory.
-
-Expected macOS form:
+Expected locations:
 
 ```text
-~/Library/Audio/Plug-Ins/VST3/AI Audio Analyzer.vst3/Contents/...
+Windows: C:\Program Files\Common Files\VST3\AI Audio Analyzer.vst3\Contents\...
+macOS:   ~/Library/Audio/Plug-Ins/VST3/AI Audio Analyzer.vst3/Contents/...
 ```
 
-Expected Windows form:
+Fully quit FL Studio, reopen it, and force a plugin rescan.
 
-```text
-C:\Program Files\Common Files\VST3\AI Audio Analyzer.vst3\Contents\...
-```
+### macOS blocks the plugin
 
-Then fully restart FL Studio and force a plugin rescan.
+Use the bundled installer first. For manual installation, remove `com.apple.quarantine` as shown above. The current Release is not notarized.
 
-### Cherry Studio says `Connection closed`
+### Cherry Studio reports `Connection closed`
 
-Run the generated MCP command in a terminal and read the traceback. Common causes are:
+Run the packaged executable with `AI_ANALYZER_SELF_TEST=1`. If self-test passes, verify that Cherry Studio points to the same executable and that no second bridge process owns UDP `9855`.
 
-- wrong Python executable;
-- dependencies were installed into a different Python environment;
-- another Analyzer bridge already owns UDP port `9855`;
-- an old `server.py` from MCP SDK v1 is being used.
-
-The current bridge requires MCP Python SDK 2.x. Repair the environment with:
-
-```bash
-python -m pip install -U "mcp>=2,<3" python-osc
-```
-
-Do not leave `server.py` running manually while Cherry Studio also launches it.
+Python/PyPI are not involved in the normal Release runtime. Only debug those if you intentionally selected source mode.
 
 ### `No module named mcp.server.fastmcp`
 
-That is an old MCP v1 bridge/import. Use the `mcp/` folder from the current release and reinstall:
+This indicates an old source environment. The packaged Release runtime already contains MCP SDK 2.x and does not require pip repair.
 
-```bash
-python -m pip install -U "mcp>=2,<3" python-osc
-```
+### MCP works but no Analyzer instances appear
 
-### MCP works but `audio_list_tracks()` is empty
+Verify that `AI Audio Analyzer` is inserted in FL Studio, the plugin and MCP both use `127.0.0.1:9855`, and FL Studio is processing audio when measurements are expected.
 
-Check all of the following:
-
-- `AI Audio Analyzer` is inserted on the intended Mixer Track;
-- FL Studio is actually processing audio when measurements are expected;
-- OSC host is `127.0.0.1` unless intentionally changed;
-- OSC port is `9855` on both sides;
-- no second bridge process is competing for the port.
-
-### Multiple Analyzer instances
-
-All plugin instances intentionally send to the same UDP port. Use the v0.4 `Identify` workflow with the companion FL Studio MCP to bind runtime UUIDs to Mixer Track/Slot positions.
-
-Companion project:
-
-https://github.com/rosasynthesiz/flstudio-mcp
+Multiple Analyzer instances intentionally share one UDP port. Use the v0.4 Identify mapping and v0.5 project tools for deterministic Mixer Track/Slot analysis.
