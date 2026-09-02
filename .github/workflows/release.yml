@@ -1,0 +1,293 @@
+name: release-lazy-package
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag. Leave empty to use v<CMake project version>.'
+        required: false
+        type: string
+      prerelease:
+        description: 'Publish as prerelease'
+        required: true
+        default: false
+        type: boolean
+      draft:
+        description: 'Create/update as draft release'
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ai-audio-analyzer-release
+  cancel-in-progress: false
+
+jobs:
+  validate-installers:
+    name: Validate installer sources
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate macOS shell scripts
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n release/macos/install.sh
+          bash -n release/macos/Install.command
+
+      - name: Validate release documentation
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s release/common/START-HERE.md
+          test -s release/common/INSTALL.en.md
+          test -s release/common/INSTALL.zh-CN.md
+          test -s release/windows/Install.ps1
+          test -s release/windows/Install.cmd
+
+  build:
+    name: Build lazy package (${{ matrix.label }})
+    needs: validate-installers
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            label: macOS
+          - os: windows-latest
+            label: Windows
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure macOS universal
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 \
+            "-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64"
+
+      - name: Configure Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build VST3
+        run: cmake --build build --config Release --parallel 2
+
+      - name: Package macOS lazy bundle
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          VERSION="$(sed -nE 's/.*project\(AIAnalyzer VERSION ([0-9.]+).*/\1/p' CMakeLists.txt | head -1)"
+          test -n "$VERSION"
+
+          VST3_PATH="$(find build/AIAnalyzer_artefacts -type d -name 'AI Audio Analyzer.vst3' -print -quit)"
+          if [ -z "$VST3_PATH" ]; then
+            echo 'AI Audio Analyzer.vst3 bundle not found' >&2
+            exit 1
+          fi
+
+          BINARY="$VST3_PATH/Contents/MacOS/AI Audio Analyzer"
+          echo "Architectures: $(lipo -archs "$BINARY")"
+
+          xattr -cr "$VST3_PATH" || true
+          codesign --force --deep --sign - --timestamp=none "$VST3_PATH"
+          codesign --verify --deep --strict --verbose=4 "$VST3_PATH"
+
+          rm -rf dist
+          mkdir -p dist
+          PACKAGE_ROOT="dist/AI-Audio-Analyzer-v${VERSION}-macOS"
+          mkdir -p "$PACKAGE_ROOT"
+
+          ditto "$VST3_PATH" "$PACKAGE_ROOT/AI Audio Analyzer.vst3"
+          ditto bridge "$PACKAGE_ROOT/mcp"
+          ditto skills/ai-analyzer-flstudio "$PACKAGE_ROOT/skill"
+
+          cp release/common/START-HERE.md "$PACKAGE_ROOT/START-HERE.md"
+          cp release/common/INSTALL.en.md "$PACKAGE_ROOT/INSTALL.en.md"
+          cp release/common/INSTALL.zh-CN.md "$PACKAGE_ROOT/INSTALL.zh-CN.md"
+          cp release/macos/install.sh "$PACKAGE_ROOT/install.sh"
+          cp release/macos/Install.command "$PACKAGE_ROOT/Install.command"
+          chmod +x "$PACKAGE_ROOT/install.sh" "$PACKAGE_ROOT/Install.command"
+
+          cat > "$PACKAGE_ROOT/VERSION.txt" <<EOF
+          AI Audio Analyzer ${VERSION}
+          Platform: macOS universal arm64+x86_64
+          Minimum macOS target: 11.0
+          Release commit: ${GITHUB_SHA}
+          EOF
+
+          echo 'Package layout:'
+          find "$PACKAGE_ROOT" -maxdepth 2 -print
+
+          ZIP="dist/AI-Audio-Analyzer-v${VERSION}-macOS.zip"
+          ditto -c -k --sequesterRsrc --keepParent "$PACKAGE_ROOT" "$ZIP"
+          shasum -a 256 "$ZIP"
+
+      - name: Package Windows lazy bundle
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $cmake = Get-Content CMakeLists.txt -Raw
+          $match = [regex]::Match($cmake, 'project\(AIAnalyzer VERSION ([0-9.]+)')
+          if (-not $match.Success) { throw 'Could not parse project version from CMakeLists.txt' }
+          $version = $match.Groups[1].Value
+
+          $vst3 = Get-ChildItem -Path build/AIAnalyzer_artefacts -Recurse -Directory -Filter 'AI Audio Analyzer.vst3' | Select-Object -First 1
+          if (-not $vst3) { throw 'AI Audio Analyzer.vst3 bundle not found' }
+
+          if (Test-Path dist) { Remove-Item dist -Recurse -Force }
+          New-Item -ItemType Directory -Path dist | Out-Null
+          $packageRoot = Join-Path dist "AI-Audio-Analyzer-v$version-Windows"
+          New-Item -ItemType Directory -Path $packageRoot | Out-Null
+
+          Copy-Item $vst3.FullName (Join-Path $packageRoot 'AI Audio Analyzer.vst3') -Recurse -Force
+          Copy-Item bridge (Join-Path $packageRoot 'mcp') -Recurse -Force
+          Copy-Item skills/ai-analyzer-flstudio (Join-Path $packageRoot 'skill') -Recurse -Force
+
+          Copy-Item release/common/START-HERE.md (Join-Path $packageRoot 'START-HERE.md')
+          Copy-Item release/common/INSTALL.en.md (Join-Path $packageRoot 'INSTALL.en.md')
+          Copy-Item release/common/INSTALL.zh-CN.md (Join-Path $packageRoot 'INSTALL.zh-CN.md')
+          Copy-Item release/windows/Install.ps1 (Join-Path $packageRoot 'Install.ps1')
+          Copy-Item release/windows/Install.cmd (Join-Path $packageRoot 'Install.cmd')
+
+          @"
+          AI Audio Analyzer $version
+          Platform: Windows x64
+          Release commit: $env:GITHUB_SHA
+          "@ | Set-Content -Path (Join-Path $packageRoot 'VERSION.txt') -Encoding UTF8
+
+          # Parse the PowerShell installer without running it.
+          $null = [scriptblock]::Create((Get-Content (Join-Path $packageRoot 'Install.ps1') -Raw))
+
+          Write-Host 'Package layout:'
+          Get-ChildItem $packageRoot -Recurse | Select-Object FullName
+
+          $zip = Join-Path dist "AI-Audio-Analyzer-v$version-Windows.zip"
+          Compress-Archive -Path $packageRoot -DestinationPath $zip -CompressionLevel Optimal
+          Get-FileHash -Algorithm SHA256 $zip | Format-List
+
+      - name: Upload release package
+        uses: actions/upload-artifact@v4
+        with:
+          name: AI-Audio-Analyzer-Release-${{ matrix.label }}
+          path: dist/*.zip
+          if-no-files-found: error
+          retention-days: 30
+
+  publish:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download platform packages
+        uses: actions/download-artifact@v4
+        with:
+          pattern: AI-Audio-Analyzer-Release-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Resolve release tag and checksums
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="$(sed -nE 's/.*project\(AIAnalyzer VERSION ([0-9.]+).*/\1/p' CMakeLists.txt | head -1)"
+          test -n "$VERSION"
+
+          TAG='${{ inputs.tag }}'
+          if [ -z "$TAG" ]; then
+            TAG="v${VERSION}"
+          fi
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+          cd release-assets
+          sha256sum *.zip > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Build release notes
+        shell: bash
+        env:
+          TAG: ${{ steps.meta.outputs.tag }}
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          cat > release-assets/RELEASE-NOTES.md <<EOF
+          # AI Audio Analyzer ${TAG}
+
+          User-facing lazy packages are provided separately for Windows and macOS.
+
+          ## Downloads
+
+          - **Windows** — VST3 + Analyzer MCP + Cherry Studio Skill + `Install.cmd` / `Install.ps1`
+          - **macOS** — universal arm64+x86_64 VST3 + Analyzer MCP + Cherry Studio Skill + `Install.command` / `install.sh`
+
+          Both packages include English and Simplified Chinese installation manuals, manual-install instructions, Python setup guidance, PyPI mirror troubleshooting, Cherry Studio MCP setup, and plugin-install troubleshooting.
+
+          ### macOS Gatekeeper
+
+          The current macOS build is ad-hoc signed and not Apple-notarized. The included installer removes quarantine metadata from the installed VST3 and verifies/repairs the local ad-hoc signature. See the bundled manual for details.
+
+          ### Companion FL Studio control MCP
+
+          https://github.com/rosasynthesiz/flstudio-mcp
+
+          Verify downloads using `SHA256SUMS.txt`.
+          EOF
+
+      - name: Create or update GitHub Release
+        shell: bash
+        env:
+          TAG: ${{ steps.meta.outputs.tag }}
+          PRERELEASE: ${{ inputs.prerelease }}
+          DRAFT: ${{ inputs.draft }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          files=(release-assets/*.zip release-assets/SHA256SUMS.txt)
+          if [ "${#files[@]}" -lt 3 ]; then
+            echo 'Expected Windows zip, macOS zip, and SHA256SUMS.txt' >&2
+            exit 1
+          fi
+
+          flags=()
+          if [ "$PRERELEASE" = 'true' ]; then flags+=(--prerelease); fi
+          if [ "$DRAFT" = 'true' ]; then flags+=(--draft); fi
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Updating existing release $TAG"
+            gh release upload "$TAG" "${files[@]}" --clobber
+            gh release edit "$TAG" \
+              --title "AI Audio Analyzer $TAG" \
+              --notes-file release-assets/RELEASE-NOTES.md
+          else
+            echo "Creating release $TAG"
+            gh release create "$TAG" "${files[@]}" \
+              --target "$GITHUB_SHA" \
+              --title "AI Audio Analyzer $TAG" \
+              --notes-file release-assets/RELEASE-NOTES.md \
+              "${flags[@]}"
+          fi
+
+      - name: Show release URL
+        shell: bash
+        env:
+          TAG: ${{ steps.meta.outputs.tag }}
+        run: gh release view "$TAG" --json url --jq .url
