@@ -3,11 +3,12 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 
 namespace aianalyzer
 {
 inline constexpr int kMaxWorkerIdleWaitMs = 20;
-inline constexpr double kLoudnessMetricsIntervalMs = 100.0;
+inline constexpr double kLoudnessMetricsIntervalSeconds = 0.1;
 
 // The audio callback deliberately does not notify the worker. Estimate when the
 // missing samples for one analysis hop should have arrived, but cap the sleep so
@@ -28,9 +29,18 @@ inline int workerIdleWaitMilliseconds(std::size_t availableSamples,
     return std::clamp(estimatedMs, 1, kMaxWorkerIdleWaitMs);
 }
 
-inline bool loudnessMetricsDue(double lastMetricsMs, double nowMs) noexcept
+inline std::uint64_t loudnessMetricsIntervalSamples(double sampleRate) noexcept
 {
-    return lastMetricsMs <= 0.0
-        || nowMs - lastMetricsMs >= kLoudnessMetricsIntervalMs;
+    const auto safeRate = sampleRate > 1.0 ? sampleRate : 1.0;
+    return std::max<std::uint64_t>(
+        1,
+        static_cast<std::uint64_t>(std::ceil(
+            safeRate * kLoudnessMetricsIntervalSeconds)));
+}
+
+inline bool loudnessMetricsDue(std::uint64_t samplesSinceMetrics,
+                               double sampleRate) noexcept
+{
+    return samplesSinceMetrics >= loudnessMetricsIntervalSamples(sampleRate);
 }
 } // namespace aianalyzer
