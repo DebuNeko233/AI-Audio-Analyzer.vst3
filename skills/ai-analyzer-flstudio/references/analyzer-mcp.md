@@ -1,8 +1,8 @@
-# AI Audio Analyzer MCP 调用参考
+# AI Audio Analyzer MCP Reference
 
-本文件只描述工具选择、调用顺序、实例定位和结果有效性，不提供具体混音风格或处理方案。
+本文件只描述 MCP 工具、selector、调用顺序和数据有效性。参数的技术语义见 `parameters.md`。
 
-## 当前工具
+当前 MCP 0.6 共 18 个工具：
 
 ```text
 audio_bridge_status()
@@ -21,60 +21,40 @@ audio_mix_overview(seconds=10, max_tracks=32)
 audio_capture_snapshot(name, seconds=5)
 audio_list_snapshots()
 audio_compare_snapshots(before, after)
+audio_temporal_profile(track, seconds=5)
+audio_temporal_compare(track_a, track_b, seconds=5, low_hz=40, high_hz=160, alignment_tolerance_ms=80)
 ```
 
-共 16 个工具。
+## 推荐调用层级
 
-## 调用层级
-
-优先从高层工具开始，信息不够时再下钻。
-
-### 工程准备度
+不要无条件把 18 个工具全部调用一遍。优先使用最高层、信息足够的工具，再按问题下钻。
 
 ```text
-audio_project_status()
+工程准备度
+→ audio_project_status()
+
+工程最近窗口
+→ audio_mix_overview()
+
+单轨稳定窗口
+→ audio_average()
+
+单轨时间变化
+→ audio_temporal_profile()
+
+两轨频谱关系
+→ audio_compare_tracks()
+
+两轨时间关系
+→ audio_temporal_compare()
+
+修改前后测量
+→ audio_capture_snapshot() / audio_compare_snapshots()
 ```
 
-优先用于判断：
+## V0.4 FL Studio ↔ Analyzer Identify
 
-- 是否存在 live Analyzer；
-- 是否全部绑定；
-- 是否有 stale stream；
-- 当前是否有有效音频输入；
-- 是否存在重复名称；
-- Master 是否能确定。
-
-不要为了得到同样的信息无条件先调用多个底层工具。
-
-### 工程窗口概览
-
-```text
-audio_mix_overview(10)
-```
-
-一次获取多个实例最近窗口的核心测量值和潜在 spectral overlap candidates。
-
-`potential_spectral_conflicts` 是 heuristic candidate list，不代表听觉问题已经被证明。
-
-### 单实例稳定窗口
-
-```text
-audio_average(track, 5)
-```
-
-适合查询最近一个时间窗口的稳定统计。
-
-### 单实例瞬时状态
-
-```text
-audio_snapshot(track)
-```
-
-只表示最新安全快照，不应自动扩展成长期趋势。
-
-## V0.4 Identify：FL Mixer ↔ Analyzer 确定绑定
-
-插件向宿主公开：
+AI Audio Analyzer 向宿主公开：
 
 ```text
 Parameter ID: identify
@@ -82,270 +62,219 @@ Display name: Identify
 Type: Boolean
 ```
 
-每次布尔值翻转都会发送一个 `/aianalyzer/identify` 事件，包含目标 live VST3 实例的 runtime UUID。
+每次布尔值发生翻转都会发送一次 `/aianalyzer/identify`。推荐流程：
 
-对每个 AI Audio Analyzer 实例：
+1. 用 FL Studio MCP 找到目标 Mixer Track / Plugin Slot；
+2. 扫描插件真实公开参数，找到 `Identify`；
+3. 读取该实例当前值；
+4. 设置为相反值；
+5. 立即调用 `audio_last_identify()`；
+6. 确认事件 fresh 且未 consumed；
+7. 立即调用 `audio_bind_last_identified(fl_track_index, fl_track_name, slot)`；
+8. 对下一实例重复；
+9. 最后调用 `audio_instance_map()` 检查 `discovery_complete`。
 
-1. 用 FL Studio MCP 找到真实 Mixer Track / Slot；
-2. 扫描该插件真实公开参数；
-3. 找到 `Identify`；
-4. 读取当前值；
-5. 将值设为相反值；
-6. 立即调用 `audio_last_identify()`；
-7. 确认事件新鲜且 `consumed=false`；
-8. 立即调用 `audio_bind_last_identified(fl_track_index, fl_track_name, slot)`；
-9. 最后调用 `audio_instance_map()` 验证所有绑定。
+不要假设 FL Studio MCP 的工具名称；使用它实际暴露的工具和参数。
 
-不要假设 FL Studio MCP 的参数读取/设置工具名称；使用当前实际暴露的工具。
-
-### Identify 事件只能消费一次
-
-绑定成功后该事件会被标记 consumed。如果再次绑定同一个事件，Bridge 应拒绝。
-
-如果最新事件已 consumed：
-
-```text
-重新翻转目标实例 Identify
-→ 读取新的 audio_last_identify()
-→ 再绑定
-```
-
-### 为什么不能只靠名称
-
-插件显示名可能重复，例如多个实例都叫：
-
-```text
-Track
-```
-
-runtime UUID 才是 live 实例身份，而 FL Mixer Track/Slot 是宿主位置身份。Identify 用于把二者确定关联。
+每个 Identify 事件只能消费一次。绑定和 runtime UUID 都是 session-scoped。
 
 ## Selector
-
-绑定后支持的常用 selector：
-
-```text
-mixer:<track_index>/slot:<slot>
-mixer:<track_index>
-fl:<track_index>/slot:<slot>
-fl:<track_index>
-唯一 FL Mixer Track 名称
-runtime UUID
-唯一 runtime UUID 前缀
-唯一 Analyzer 显示名
-```
 
 推荐优先级：
 
 ```text
-mixer:index/slot:slot
-→ 唯一 FL Mixer Track 名称
+mixer:<track_index>/slot:<slot>
+→ 唯一 FL Mixer track name
 → runtime UUID
-→ 唯一 Analyzer 显示名
+→ 唯一 Analyzer 人类名称
 ```
 
-同一 Mixer Track 上存在多个 Analyzer 时必须包含 `slot`。
-
-## `audio_instance_map()`
-
-用于查看当前 Analyzer 与 FL Mixer 的绑定拓扑。
-
-关注：
+支持：
 
 ```text
+mixer:7
+mixer:7/slot:9
+fl:7
+fl:7/slot:9
+```
+
+同一 Mixer Track 上存在多个 Analyzer 时必须带 `slot`。
+
+## Signal / validity
+
+V0.3 Signal Gate：
+
+```text
+close threshold   ≈ -50 dBFS
+reopen threshold  ≈ -48 dBFS
+hold              ≈ 0.4 s
+```
+
+必须遵守：
+
+- `signal_present=false` 时不要使用频谱/立体声内容做推断；
+- `null` 表示 unavailable，不是 0；
+- `audio_average()` 要结合 `active_frames`、`active_ratio` 和 `analysis_valid`；
+- stale stream 不应被描述成当前实时状态。
+
+## `audio_project_status()`
+
+优先用于工程级准备度检查。重点字段：
+
+```text
+project_ready
+audio_ready
+live_count
 bound_count
 unbound_count
-discovery_complete
-instances[].runtime_id
-instances[].binding
-instances[].selector
+active_count
+stale_count
+instances
+warnings
 ```
 
-`discovery_complete=false` 时，如果任务依赖确定轨道身份，应优先完成 Identify，而不是靠名称或音频内容猜测。
+如果存在未绑定实例，先做 Identify，而不是靠名称或音频内容猜映射。
 
-runtime UUID / binding 都是 session-scoped。
+## `audio_mix_overview()`
 
-## Signal State 与有效性
-
-Signal detector 当前约为：
+用于一次读取多个 Analyzer 最近窗口状态。它会返回：
 
 ```text
-close threshold   -50 dBFS
-reopen threshold  -48 dBFS
-hold              0.4 s
+tracks
+master / master_candidates
+potential_spectral_conflicts
 ```
 
-内容相关字段读取前检查：
+`potential_spectral_conflicts` 只是 heuristic relative spectral overlap，用来决定是否值得进一步查询。
+
+如果要知道两个轨道是否**在时间上**共同占用某频段，不要只看 overview overlap，继续使用 `audio_temporal_compare()`。
+
+## `audio_snapshot()` 与 `audio_average()`
 
 ```text
-signal_present
-analysis_valid
-active_ratio
+audio_snapshot(track)
 ```
 
-当无有效信号时，Bridge 会将不适合解释的频谱和立体声字段返回为 `null` / unavailable。
-
-统一规则：
+读取最新一帧，适合连接/当前状态排查。
 
 ```text
-null = 当前无有效测量
-null ≠ 0
+audio_average(track, seconds)
 ```
 
-详细字段语义见 `parameters.md`。
+读取稳定窗口，适合需要几秒统计的任务。频谱、立体声和内容相关统计只对 active frames 计算。
 
-## `audio_average()`
+## `audio_compare_tracks()` / `audio_detect_masking()`
 
-常见返回：
+`audio_compare_tracks()` 比较两个实例的相对频谱形状。
+
+`audio_detect_masking()` 目前仍是频谱重叠候选工具，不是 Bark/ERB 完整心理声学模型。不要把其返回值写成“已经证明可听遮蔽”。
+
+## V0.6 `audio_temporal_profile()`
+
+用于读取一个 Analyzer 在最近窗口内的时间变化描述：
 
 ```text
-window_seconds
-frames
-active_frames
-active_seconds
-active_ratio
-signal_present
-analysis_valid
-binding
+spectral_flux_mean
+spectral_flux_peak
+rms_rise_peak_db
+low_band_40_160_energy_db
+low_band_40_160_min_db
+low_band_40_160_max_db
+onset_candidate_frames
+onset_candidate_density_hz
 ```
 
-内容相关的频谱、立体声、Crest、LUFS-S 等统计只使用 active frames。
+调用前提：VST3 必须是 0.6+，并且窗口内有 `temporal_valid` frame。
 
-例如：
+`onset_candidate_*` 是阈值化 change candidate，不是 ground-truth onset label。实际阈值会在返回值的 `onset_candidate_thresholds` 中明确给出。
 
-```json
-{
-  "window_seconds": 5,
-  "frames": 50,
-  "active_frames": 10,
-  "active_ratio": 0.2,
-  "analysis_valid": true
-}
-```
+## V0.6 `audio_temporal_compare()`
 
-这只表示该窗口约 20% 的帧有有效输入。
-
-## `audio_compare_tracks()`
-
-用于比较两个实例的相对频谱特征。调用前确保两个实例都能被唯一解析并有有效 `bands_db`。
-
-如果任一实例没有有效频谱，工具可能返回 unavailable，而不是伪造比较结果。
-
-## `audio_detect_masking()`
-
-这是当前项目对频谱重叠的启发式工具。不要因为函数名包含 `masking` 就把结果写成心理声学遮蔽的确定事实。
-
-适合用途：
+用于比较两个 Analyzer 的时间对齐包络：
 
 ```text
-定位值得继续查看的频谱重叠候选
+audio_temporal_compare(
+  track_a,
+  track_b,
+  seconds=5,
+  low_hz=40,
+  high_hz=160,
+  alignment_tolerance_ms=80
+)
 ```
 
-不适合直接推导：
+重点字段：
 
 ```text
-必须采取某种处理动作
+aligned_pairs
+usable_band_pairs
+mean_abs_alignment_offset_ms
+coactive_ratio
+band_envelope_correlation
+normalized_band_temporal_overlap
+temporal_descriptor_pairs
+onset_candidate_frames_a
+onset_candidate_frames_b
+coincident_onset_candidate_frames
+candidate_coincidence_ratio
 ```
 
-## `audio_stereo_bands()`
-
-返回 8 段 Stereo Correlation。
-
-如果当前无有效信号或立体声数据不可用，应接受 unavailable/null，不要用默认 0 替代。
-
-## `audio_master_status()`
-
-提供指定 Master/目标实例的常用技术字段汇总。它只是数据入口，不编码任何固定 mastering target。
-
-## V0.5 Snapshot A/B
-
-### Capture
+用途区别：
 
 ```text
-audio_capture_snapshot("before", 5)
+band_envelope_correlation
+→ 两条所选频段包络是否同向变化
+
+normalized_band_temporal_overlap
+→ 两条轨道是否经常同时处在各自较强的该频段状态
+
+candidate_coincidence_ratio
+→ V0.6 change/onset candidate 是否在对齐的 OSC frame 中同时出现
 ```
 
-Snapshot 保存当前 Bridge session 内的项目级窗口测量。
+它们都是时间关系证据，不是处理指令，也不是完整 masking 概率。
 
-### List
+如果 `mean_abs_alignment_offset_ms` 接近或超过允许容差，降低对相关性结果的解释强度。
 
-```text
-audio_list_snapshots()
-```
-
-用于确认当前保存了哪些 Snapshot。
-
-### Compare
+## Snapshot / A-B
 
 ```text
+audio_capture_snapshot("before", seconds=5)
+audio_capture_snapshot("after", seconds=5)
 audio_compare_snapshots("before", "after")
 ```
 
-Delta 定义：
+Snapshot 存在于当前 Bridge session 内。
 
-```text
-After - Before
-```
+为了可比：
 
-A/B 时尽量保持：
-
-- 相同音乐片段；
-- 相近窗口长度；
-- 可比的 `active_ratio`；
-- 实例 binding 没有发生变化。
-
-LUFS-I 是 session 累积量，因此短窗口 A/B 时不要误认为它是两个独立 Integrated 测量。
-
-## V0.5 Project Overview
-
-`audio_mix_overview()` 返回的 `spectral_regions` 是频率范围聚合字段，`potential_spectral_conflicts` 是 heuristic overlap 排序。
-
-这些结果适合作为下一步工具调用的导航信息。例如先 Overview，再选择某两个 selector 做 `audio_compare_tracks()`。
-
-不要把 Overview 的候选列表自动转换成具体音乐处理建议。
+- before / after 尽量使用同一音乐片段；
+- 窗口长度尽量相同；
+- 检查 `active_ratio`；
+- delta 定义为 `After - Before`；
+- LUFS-I 是 session 累积值，短时 A/B 时不要当成两个独立重置窗口。
 
 ## 多实例与 OSC
 
-多个 VST3 实例都可以发送到：
+所有 VST3 实例默认都向：
 
 ```text
 127.0.0.1:9855
 ```
 
-VST3 是 sender，Python MCP Bridge 是 UDP listener，因此不需要为每个 Analyzer 分配不同端口。
+发送 OSC。只有 Bridge 绑定 UDP 9855；VST3 都是 sender，因此不需要每个实例一个端口。
 
-如果 Cherry Studio 启动了 Bridge，不要同时在终端再启动第二个 Bridge 占用同一个 UDP 端口。
+## V0.6 OSC append-only tail
 
-## 推荐技术调用模式
-
-工程未知：
+`/aianalyzer/frame` 保留 0..58 的旧字段不变，在 runtime UUID 之后新增：
 
 ```text
-audio_project_status()
-→ 必要时 Identify mapping
-→ audio_mix_overview()
-→ 按问题下钻
+59  temporal_window_seconds
+60  spectral_flux_mean
+61  spectral_flux_peak
+62  rms_rise_peak_db
+63  low_band_energy_db      # FFT-derived 40-160 Hz
+64  frame_schema_version    # "0.6"
 ```
 
-单实例：
-
-```text
-audio_average(selector, seconds)
-```
-
-瞬时排查：
-
-```text
-audio_snapshot(selector)
-```
-
-A/B 测量：
-
-```text
-audio_capture_snapshot("before")
-→ 外部状态发生变化
-→ audio_capture_snapshot("after")
-→ audio_compare_snapshots("before", "after")
-```
-
-整个过程中，工具返回的数据只作为测量事实。具体音乐风格判断不由本 Reference 规定。
+旧 Bridge 可以忽略这些尾字段；0.6 Bridge 先调用稳定旧 parser，再附加解析这些字段。
