@@ -42,6 +42,12 @@ Double-click:
 Install.command
 ```
 
+If macOS blocks the downloaded `Install.command` itself, right-click it and choose **Open**, or open Terminal in the package folder and run:
+
+```bash
+bash ./install.sh
+```
+
 The installer will:
 
 1. install the VST3 to `~/Library/Audio/Plug-Ins/VST3/`;
@@ -61,6 +67,12 @@ The installer will:
 ## 中文快速说明
 
 Windows 用户直接双击 `Install.cmd`。macOS 用户直接双击 `Install.command`。
+
+如果 macOS 连 `Install.command` 本身都阻止打开，可以**右键 → 打开**，或者在该目录打开终端执行：
+
+```bash
+bash ./install.sh
+```
 
 自动安装脚本会处理 VST3 安装、Python 检测、MCP 虚拟环境、依赖安装、PyPI 镜像回退，以及 Cherry Studio MCP 配置文件生成。
 
