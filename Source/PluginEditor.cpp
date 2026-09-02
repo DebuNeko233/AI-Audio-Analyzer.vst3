@@ -17,10 +17,15 @@ juce::String formatDbtp(float value)
     return juce::String(value, 1) + " dBTP";
 }
 
-bool frameHasFeature(const aianalyzer::AnalysisFrame& frame,
-                     aianalyzer::AnalysisFeature feature) noexcept
+bool frameHasFeatureForProfile(const aianalyzer::AnalysisFrame& frame,
+                               int hostProfileIndex,
+                               aianalyzer::AnalysisFeature feature) noexcept
 {
-    return (frame.analysisFeatureMask & static_cast<std::uint32_t>(feature)) != 0u;
+    const auto profile = static_cast<aianalyzer::AnalysisProfile>(
+        juce::jlimit(0, 3, hostProfileIndex));
+    const auto requestedMask = aianalyzer::analysisFeatureMaskForProfile(profile);
+    const auto featureBit = static_cast<std::uint32_t>(feature);
+    return (frame.analysisFeatureMask & requestedMask & featureBit) != 0u;
 }
 
 juce::String profileName(int profile)
@@ -141,10 +146,14 @@ void AIAnalyzerAudioProcessorEditor::paint(juce::Graphics& g)
     g.setFont(juce::FontOptions(12.5f));
     g.setColour(juce::Colours::white);
 
+    const auto hostProfileIndex = ownerProcessor.getAnalysisProfileIndex();
+
     if (hasFrame)
     {
-        const bool loudnessAvailable = frameHasFeature(latestFrame, aianalyzer::FeatureLoudness);
-        const bool stereoAvailable = frameHasFeature(latestFrame, aianalyzer::FeatureStereo);
+        const bool loudnessAvailable = frameHasFeatureForProfile(
+            latestFrame, hostProfileIndex, aianalyzer::FeatureLoudness);
+        const bool stereoAvailable = frameHasFeatureForProfile(
+            latestFrame, hostProfileIndex, aianalyzer::FeatureStereo);
         const auto columnWidth = metrics.getWidth() / 4.0f;
 
         const auto truePeakText = loudnessAvailable
@@ -195,10 +204,17 @@ void AIAnalyzerAudioProcessorEditor::paint(juce::Graphics& g)
         g.setFont(juce::FontOptions(11.0f));
         g.setColour(latestFrame.signalPresent ? juce::Colours::lightgrey : juce::Colours::orange);
 
-        const bool spectrumAvailable = frameHasFeature(latestFrame, aianalyzer::FeatureSpectrum);
-        const bool loudnessAvailable = frameHasFeature(latestFrame, aianalyzer::FeatureLoudness);
+        const bool spectrumAvailable = frameHasFeatureForProfile(
+            latestFrame, hostProfileIndex, aianalyzer::FeatureSpectrum);
+        const bool loudnessAvailable = frameHasFeatureForProfile(
+            latestFrame, hostProfileIndex, aianalyzer::FeatureLoudness);
+        const bool profilePending = latestFrame.analysisProfile != hostProfileIndex;
 
-        juce::String detailText = "PROFILE " + profileName(latestFrame.analysisProfile) + "   ·   ";
+        juce::String detailText = "PROFILE " + profileName(hostProfileIndex);
+        if (profilePending)
+            detailText += " (pending)";
+        detailText += "   ·   ";
+
         if (latestFrame.signalPresent)
         {
             detailText += "SIGNAL   ·   Detector " + formatDb(latestFrame.detectorPeakDb);
@@ -209,7 +225,7 @@ void AIAnalyzerAudioProcessorEditor::paint(juce::Graphics& g)
             }
             else
             {
-                detailText += "   ·   Spectrum disabled";
+                detailText += "   ·   Spectrum unavailable";
             }
         }
         else
@@ -245,11 +261,16 @@ void AIAnalyzerAudioProcessorEditor::drawSpectrum(juce::Graphics& g,
     if (!hasFrame)
         return;
 
-    if (!frameHasFeature(latestFrame, aianalyzer::FeatureSpectrum))
+    const auto hostProfileIndex = ownerProcessor.getAnalysisProfileIndex();
+    if (!frameHasFeatureForProfile(latestFrame,
+                                   hostProfileIndex,
+                                   aianalyzer::FeatureSpectrum))
     {
         g.setColour(juce::Colours::grey);
         g.setFont(juce::FontOptions(13.0f));
-        g.drawText("Spectrum disabled by Analysis Profile",
+        const auto pending = latestFrame.analysisProfile != hostProfileIndex;
+        g.drawText(pending ? "Spectrum waiting for active Analysis Profile"
+                           : "Spectrum disabled by Analysis Profile",
                    bounds.toNearestInt(),
                    juce::Justification::centred);
         return;
