@@ -582,6 +582,12 @@ void AnalysisWorker::processWindow()
     const auto semanticMaxHz = std::min(
         static_cast<double>(kChromaMaxFrequencyHz),
         currentSampleRate * 0.5);
+    const int semanticFirstBin = std::max(
+        firstBin,
+        static_cast<int>(std::ceil(kChromaMinFrequencyHz * kFftSize / currentSampleRate)));
+    const int semanticLastBin = std::min(
+        lastBin,
+        static_cast<int>(std::floor(semanticMaxHz * kFftSize / currentSampleRate)));
     const int firstF0Bin = std::max(
         1,
         static_cast<int>(std::ceil(kHarmonicFundamentalMinHz * kFftSize / currentSampleRate)));
@@ -605,13 +611,15 @@ void AnalysisWorker::processWindow()
             const auto targetHz = f0Hz * harmonic;
             if (targetHz > semanticMaxHz)
                 break;
+            if (targetHz < kChromaMinFrequencyHz)
+                continue;
 
             const auto targetBin = static_cast<int>(std::lround(targetHz * kFftSize / currentSampleRate));
             double localPeakPower = 0.0;
             for (int delta = -kHarmonicToleranceBins; delta <= kHarmonicToleranceBins; ++delta)
             {
                 const auto bin = targetBin + delta;
-                if (bin < firstBin || bin > lastBin)
+                if (bin < semanticFirstBin || bin > semanticLastBin)
                     continue;
                 const auto value = static_cast<double>(midMagnitudes[static_cast<std::size_t>(bin)]);
                 localPeakPower = std::max(localPeakPower, value * value);
@@ -644,12 +652,14 @@ void AnalysisWorker::processWindow()
             const auto targetHz = f0Hz * harmonic;
             if (targetHz > semanticMaxHz)
                 break;
+            if (targetHz < kChromaMinFrequencyHz)
+                continue;
 
             const auto targetBin = static_cast<int>(std::lround(targetHz * kFftSize / currentSampleRate));
             for (int delta = -kHarmonicToleranceBins; delta <= kHarmonicToleranceBins; ++delta)
             {
                 const auto bin = targetBin + delta;
-                if (bin < firstBin || bin > lastBin)
+                if (bin < semanticFirstBin || bin > semanticLastBin)
                     continue;
                 const auto value = static_cast<double>(midMagnitudes[static_cast<std::size_t>(bin)]);
                 matchedHarmonicPower += value * value;
