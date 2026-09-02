@@ -9,6 +9,7 @@ constexpr int kFftSize = 1 << kFftOrder;
 constexpr int kHopSize = 1024;
 constexpr int kNumBands = 32;
 constexpr int kNumStereoCorrelationBands = 8;
+constexpr int kNumChromaBins = 12;
 
 inline constexpr std::array<float, kNumStereoCorrelationBands + 1> kStereoCorrelationBandEdgesHz {
     20.0f, 60.0f, 120.0f, 250.0f, 500.0f, 1000.0f, 2000.0f, 5000.0f, 20000.0f
@@ -61,6 +62,15 @@ struct AnalysisFrame
     float negativeCrossEnergyRatio = 0.0f;
     float lowBandCorrelation = 1.0f;      // 20-120 Hz aggregate correlation.
     float lowBandSideToMidDb = -120.0f;  // 20-120 Hz Side/Mid power ratio in dB.
+
+    // V0.9 music-semantic evidence. Chroma is a normalized 12-TET pitch-class
+    // power distribution accumulated from the Mid spectrum over 80 Hz-5 kHz.
+    // The harmonic ratio is deliberately a single-F0 alignment heuristic, not
+    // a pitch-tracker confidence, source-separation result, or musical label.
+    std::array<float, kNumChromaBins> chroma {};
+    float chromaEnergyRatio = 0.0f;
+    float singleF0HarmonicEnergyRatio = 0.0f;
+    float harmonicF0CandidateHz = 0.0f;
 
     // Historical bandsDb is the Mid-spectrum feature used since V0.1.
     std::array<float, kNumBands> bandsDb {};
