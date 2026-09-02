@@ -1,6 +1,6 @@
-# AI Analyzer.vst3
+# AI Audio Analyzer
 
-AI Analyzer is a JUCE VST3 for **machine-readable audio analysis** in AI/LLM-assisted music-production workflows.
+AI Audio Analyzer is a JUCE VST3 for **machine-readable audio analysis** in AI/LLM-assisted music-production workflows.
 
 Instead of asking an LLM to inspect a spectrum-analyzer GUI, the plugin extracts compact audio features inside the DAW and sends them over OSC to a Python MCP bridge. Cherry Studio (or another MCP client) can then query spectrum, loudness, true peak, stereo behavior, and track-to-track overlap as structured data.
 
@@ -9,10 +9,10 @@ Instead of asking an LLM to inspect a spectrum-analyzer GUI, the plugin extracts
 ```text
 FL Studio / DAW
     │
-    ├─ AI Analyzer.vst3  [Kick]
-    ├─ AI Analyzer.vst3  [Bass]
-    ├─ AI Analyzer.vst3  [Vocal]
-    └─ AI Analyzer.vst3  [Master]
+    ├─ AI Audio Analyzer.vst3  [Kick]
+    ├─ AI Audio Analyzer.vst3  [Bass]
+    ├─ AI Audio Analyzer.vst3  [Vocal]
+    └─ AI Audio Analyzer.vst3  [Master]
              │
              │ OSC UDP (default 127.0.0.1:9855)
              ▼
@@ -64,7 +64,7 @@ The DAW realtime audio callback only copies samples into a preallocated SPSC FIF
 
 ## Loudness / True Peak implementation
 
-`libebur128` implements EBU R128 / ITU-R BS.1770-style loudness measurement and true-peak scanning. AI Analyzer feeds each non-overlapped 1024-sample audio hop into a persistent stereo `ebur128_state`.
+`libebur128` implements EBU R128 / ITU-R BS.1770-style loudness measurement and true-peak scanning. AI Audio Analyzer feeds each non-overlapped 1024-sample audio hop into a persistent stereo `ebur128_state`.
 
 The plugin requests:
 
@@ -123,7 +123,7 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release "-DCMAKE_OSX_ARCHITECTURES=arm64;
 cmake --build build --config Release --parallel
 ```
 
-The VST3 will be under the generated `AIAnalyzer_artefacts` directory. Copy `AI Analyzer.vst3` to:
+The VST3 will be under the generated `AIAnalyzer_artefacts` directory. Copy `AI Audio Analyzer.vst3` to:
 
 ```text
 ~/Library/Audio/Plug-Ins/VST3/
@@ -138,7 +138,7 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --config Release --parallel
 ```
 
-Copy the resulting `AI Analyzer.vst3` bundle to the normal VST3 directory, commonly:
+Copy the resulting `AI Audio Analyzer.vst3` bundle to the normal VST3 directory, commonly:
 
 ```text
 C:\Program Files\Common Files\VST3
@@ -175,10 +175,10 @@ Use absolute paths:
 ```json
 {
   "mcpServers": {
-    "ai-analyzer": {
-      "command": "/absolute/path/to/AI-Analyzer.vst3/.venv/bin/python",
+    "ai-audio-analyzer": {
+      "command": "/absolute/path/to/AI-Audio-Analyzer/.venv/bin/python",
       "args": [
-        "/absolute/path/to/AI-Analyzer.vst3/bridge/server.py"
+        "/absolute/path/to/AI-Audio-Analyzer/bridge/server.py"
       ],
       "env": {
         "AI_ANALYZER_OSC_HOST": "127.0.0.1",
@@ -193,11 +193,11 @@ A copy is provided at `bridge/cherry-studio.example.json`.
 
 ## FL Studio workflow
 
-1. Put `AI Analyzer` on each mixer track the LLM should observe.
+1. Put `AI Audio Analyzer` on each mixer track the LLM should observe.
 2. Give every instance a unique name, e.g. `Kick`, `Bass`, `Vocal`, `Master`.
 3. Keep OSC host `127.0.0.1` and port `9855` unless you changed the bridge.
 4. Click **Apply** and start playback.
-5. Enable the `ai-analyzer` MCP in Cherry Studio.
+5. Enable the analyzer MCP in Cherry Studio.
 
 Example prompts:
 
