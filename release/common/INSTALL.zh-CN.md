@@ -8,6 +8,12 @@ Release 懒人包包含 VST3、**已经用 PyInstaller 打包好的 Analyzer MCP
 
 https://github.com/rosasynthesiz/flstudio-mcp
 
+## 平台支持
+
+- Windows：x64
+- macOS：**Apple Silicon / arm64 only**
+- Intel / x86_64 macOS：当前 Release 不再提供构建包
+
 ## 包内结构
 
 Windows：
@@ -33,14 +39,13 @@ INSTALL.zh-CN.md
 INSTALL.en.md
 ```
 
-macOS：
+macOS Apple Silicon：
 
 ```text
 AI Audio Analyzer.vst3
 mcp/
 ├─ runtime/
-│  ├─ arm64/ai-audio-analyzer-mcp/...
-│  └─ x86_64/ai-audio-analyzer-mcp/...
+│  └─ ai-audio-analyzer-mcp/...
 └─ source/...
 skill/
 Install.command
@@ -49,8 +54,6 @@ START-HERE.md
 INSTALL.zh-CN.md
 INSTALL.en.md
 ```
-
-macOS 包同时包含 Apple Silicon 与 Intel 两套原生 MCP Runtime，安装器会根据 `uname -m` 自动选择，不要求 Rosetta。
 
 # 推荐：自动安装
 
@@ -71,6 +74,8 @@ Install.cmd
 安装器会：复制 VST3、复制 standalone MCP、运行 MCP 内建 self-test、复制 Skill，并生成可直接用于 Cherry Studio 的 `cherry-studio-mcp.json`。
 
 ## macOS
+
+当前 macOS 包只支持 Apple Silicon。安装脚本检测到非 `arm64` 会直接停止并提示不支持。
 
 双击：
 
@@ -96,7 +101,7 @@ MCP 和 Skill 放到：
 ~/Library/Application Support/AI Audio Analyzer/
 ```
 
-并自动选择 `arm64` 或 `x86_64` MCP Runtime、移除下载 Quarantine、执行 MCP self-test、生成 Cherry Studio 配置。
+并安装 arm64 standalone MCP Runtime、移除下载 Quarantine、执行 MCP self-test、生成 Cherry Studio 配置。
 
 # 普通用户为什么不需要 Python
 
@@ -153,7 +158,7 @@ macOS：
 }
 ```
 
-Windows 的 `command` 指向 `.exe`。macOS 指向当前 CPU 架构对应的可执行文件。
+Windows 的 `command` 指向 `.exe`；macOS 指向 arm64 packaged executable。
 
 不要在终端中另外常驻一个 Analyzer MCP，同时又让 Cherry Studio 启动第二个，因为默认只有一个进程可以绑定 UDP `9855`。
 
@@ -204,9 +209,21 @@ Remove-Item Env:AI_ANALYZER_SELF_TEST
 
 5. 导入 `skill/`。
 
-# macOS 手动安装（不安装 Python）
+# macOS 手动安装（Apple Silicon，不安装 Python）
 
-1. 复制 VST3：
+1. 先确认：
+
+```bash
+uname -m
+```
+
+应返回：
+
+```text
+arm64
+```
+
+2. 复制 VST3：
 
 ```bash
 mkdir -p "$HOME/Library/Audio/Plug-Ins/VST3"
@@ -214,7 +231,7 @@ ditto "./AI Audio Analyzer.vst3" \
   "$HOME/Library/Audio/Plug-Ins/VST3/AI Audio Analyzer.vst3"
 ```
 
-2. 当前 GitHub Release 仍是 ad-hoc 签名，不是 Apple Developer ID Notarization 正式公证包。下载后建议移除 Quarantine：
+3. 当前 GitHub Release 仍是 ad-hoc 签名，不是 Apple Developer ID Notarization 正式公证包。下载后建议移除 Quarantine：
 
 ```bash
 xattr -dr com.apple.quarantine \
@@ -235,31 +252,19 @@ codesign --force --deep --sign - --timestamp=none \
   "$HOME/Library/Audio/Plug-Ins/VST3/AI Audio Analyzer.vst3"
 ```
 
-3. 保存 `mcp/` 和 `skill/`，然后按机器架构选择 MCP：
-
-```bash
-uname -m
-```
-
-Apple Silicon 使用：
+4. MCP Runtime 位于：
 
 ```text
-mcp/runtime/arm64/ai-audio-analyzer-mcp/ai-audio-analyzer-mcp
+mcp/runtime/ai-audio-analyzer-mcp/ai-audio-analyzer-mcp
 ```
 
-Intel 使用：
-
-```text
-mcp/runtime/x86_64/ai-audio-analyzer-mcp/ai-audio-analyzer-mcp
-```
-
-4. 移除 MCP Quarantine 并自检：
+移除 MCP Quarantine 并自检：
 
 ```bash
 xattr -dr com.apple.quarantine ./mcp
-chmod +x ./mcp/runtime/$(uname -m)/ai-audio-analyzer-mcp/ai-audio-analyzer-mcp
+chmod +x ./mcp/runtime/ai-audio-analyzer-mcp/ai-audio-analyzer-mcp
 AI_ANALYZER_SELF_TEST=1 \
-  ./mcp/runtime/$(uname -m)/ai-audio-analyzer-mcp/ai-audio-analyzer-mcp
+  ./mcp/runtime/ai-audio-analyzer-mcp/ai-audio-analyzer-mcp
 ```
 
 5. Cherry Studio 的 `command` 指向该可执行文件，`args` 留空。
@@ -338,6 +343,10 @@ macOS：
 ## macOS 提示无法验证 / 已阻止
 
 先使用包内 `Install.command`。手动安装则执行上面的 `xattr -dr com.apple.quarantine`。当前 Release 未做 Apple Notarization，这是已知分发限制。
+
+## Intel Mac 能否使用？
+
+当前 Release 不再构建 Intel/x86_64 macOS 包，安装脚本也会拒绝非 arm64 系统。
 
 ## Cherry Studio 显示 `Connection closed`
 
