@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'Source/**'
+      - 'tests/**'
       - 'CMakeLists.txt'
       - 'cmake/**'
       - 'Resources/**'
@@ -25,6 +26,7 @@ on:
     types: [opened, synchronize, reopened]
     paths:
       - 'Source/**'
+      - 'tests/**'
       - 'CMakeLists.txt'
       - 'cmake/**'
       - 'Resources/**'
@@ -98,7 +100,7 @@ jobs:
           while IFS= read -r file; do
             [ -z "$file" ] && continue
             case "$file" in
-              Source/*|CMakeLists.txt|cmake/*|Resources/*|assets/*) plugin=true ;;
+              Source/*|tests/*|CMakeLists.txt|cmake/*|Resources/*|assets/*) plugin=true ;;
               bridge/*) bridge=true ;;
               skills/ai-analyzer-flstudio/*) skill=true ;;
               release/common/START-HERE.md|release/common/INSTALL.en.md|release/common/INSTALL.zh-CN.md|release/windows/Install.ps1|release/windows/Install.cmd|release/macos/install.sh|release/macos/Install.command|.github/workflows/release.yml) release=true ;;
@@ -228,12 +230,14 @@ jobs:
 
       - name: Configure macOS arm64
         if: runner.os == 'macOS'
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 -DCMAKE_OSX_ARCHITECTURES=arm64
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 -DCMAKE_OSX_ARCHITECTURES=arm64 -DAI_ANALYZER_BUILD_TESTS=ON
       - name: Configure Windows x64
         if: runner.os == 'Windows'
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-      - name: Build VST3
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DAI_ANALYZER_BUILD_TESTS=ON
+      - name: Build VST3 and regressions
         run: cmake --build build --config Release --parallel 2
+      - name: Run worker scheduling regressions
+        run: ctest --test-dir build --build-config Release --output-on-failure
 
       - name: Package macOS development artifact
         if: runner.os == 'macOS'
