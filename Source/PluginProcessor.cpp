@@ -12,7 +12,7 @@ AIAnalyzerAudioProcessor::AIAnalyzerAudioProcessor()
         false);
     addParameter(identify);
     identifyParameter = identify;
-    lastIdentifyState.store(identify->getValue() >= 0.5f, std::memory_order_release);
+    lastIdentifyState.store(identify->get(), std::memory_order_release);
 
     analysisWorker.setOscConfig(instanceId, oscHost, oscPort);
 }
@@ -57,7 +57,7 @@ void AIAnalyzerAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer,
 
     if (identifyParameter != nullptr)
     {
-        const auto currentIdentifyState = identifyParameter->getValue() >= 0.5f;
+        const auto currentIdentifyState = identifyParameter->get();
         const auto previousIdentifyState = lastIdentifyState.exchange(
             currentIdentifyState, std::memory_order_acq_rel);
 
