@@ -3,7 +3,35 @@ name: build
 on:
   push:
     branches: [main]
+    paths:
+      - 'Source/**'
+      - 'CMakeLists.txt'
+      - 'cmake/**'
+      - 'Resources/**'
+      - 'assets/**'
+      - 'bridge/**'
+      - 'skills/ai-analyzer-flstudio/**'
+      - 'release/**'
+      - '.github/workflows/build.yml'
+      - '.github/workflows/release.yml'
   pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'Source/**'
+      - 'CMakeLists.txt'
+      - 'cmake/**'
+      - 'Resources/**'
+      - 'assets/**'
+      - 'bridge/**'
+      - 'skills/ai-analyzer-flstudio/**'
+      - 'release/**'
+      - '.github/workflows/build.yml'
+      - '.github/workflows/release.yml'
+
+concurrency:
+  group: build-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   changes:
@@ -25,11 +53,20 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
+          # For a PR synchronize event, compare only the previous PR head with
+          # the new head. This prevents an old plugin change elsewhere in the PR
+          # from forcing Windows/macOS VST3 rebuilds after a docs/MCP-only commit.
           if [ "${{ github.event_name }}" = "pull_request" ]; then
-            BASE="${{ github.event.pull_request.base.sha }}"
+            if [ "${{ github.event.action }}" = "synchronize" ] && [ -n "${{ github.event.before }}" ]; then
+              BASE="${{ github.event.before }}"
+            else
+              BASE="${{ github.event.pull_request.base.sha }}"
+            fi
           else
             BASE="${{ github.event.before }}"
           fi
+
           if [ -z "$BASE" ] || [ "$BASE" = "0000000000000000000000000000000000000000" ] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
             BASE="$(git rev-parse HEAD^ 2>/dev/null || true)"
           fi
@@ -157,7 +194,7 @@ jobs:
   plugin:
     name: Build VST3 (${{ matrix.os }})
     needs: changes
-    if: needs.changes.outputs.plugin == 'true'
+    if: needs.changes.outputs.plugin == 'true' || needs.changes.outputs.workflow == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -165,6 +202,14 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Restore CMake / JUCE incremental build cache
+        uses: actions/cache@v4
+        with:
+          path: build
+          key: ${{ runner.os }}-${{ runner.arch }}-juce-cmake-${{ hashFiles('CMakeLists.txt', '.github/workflows/build.yml') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-juce-cmake-
 
       - name: Configure macOS arm64
         if: runner.os == 'macOS'
