@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(AIAnalyzer VERSION 0.1.0 LANGUAGES CXX)
+project(AIAnalyzer VERSION 0.1.0 LANGUAGES C CXX)
 
 include(FetchContent)
 FetchContent_Declare(
