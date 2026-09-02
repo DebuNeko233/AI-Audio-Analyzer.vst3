@@ -122,6 +122,7 @@ source MCP syntax/self-test
 MCP 0.8 / 22-tool registry
 PyInstaller one-file build
 packaged MCP self-test on its native OS
+no PyInstaller _internal tree in the staged/final user package
 Windows x64 VST3 build
 macOS arm64 VST3 build
 Windows installer parse
@@ -131,6 +132,8 @@ no MCP source/developer files in user package
 no nested ZIP in user package
 final checksums
 ```
+
+`-F / --onefile` is a release invariant: if an `_internal/` directory appears in the staged or final user package, treat the package as invalid rather than silently accepting an `onedir`-style runtime.
 
 A successful source self-test does not prove PyInstaller, VST3, final package assembly, or publication succeeded.
 
