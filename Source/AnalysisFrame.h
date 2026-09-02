@@ -30,7 +30,7 @@ enum AnalysisFeature : std::uint32_t
     FeatureSemantic = 1u << 5,
 };
 
-constexpr std::uint32_t analysisFeatureMask(AnalysisProfile profile) noexcept
+constexpr std::uint32_t analysisFeatureMaskForProfile(AnalysisProfile profile) noexcept
 {
     switch (profile)
     {
@@ -118,7 +118,7 @@ struct AnalysisFrame
     // never repurpose older indexes. They describe what this instance is
     // actually computing and whether its background worker is keeping up.
     int analysisProfile = static_cast<int>(AnalysisProfile::Full);
-    std::uint32_t analysisFeatureMask = analysisFeatureMask(AnalysisProfile::Full);
+    std::uint32_t analysisFeatureMask = analysisFeatureMaskForProfile(AnalysisProfile::Full);
     float workerLoadRatio = 0.0f;
     float fifoFillRatio = 0.0f;
     float fftRunsPerSecond = 0.0f;
