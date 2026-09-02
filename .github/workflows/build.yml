@@ -228,6 +228,8 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-${{ runner.arch }}-juce-cmake-
 
+      # Internal C++ regressions are development-CI only. The Release workflow
+      # keeps AI_ANALYZER_BUILD_TESTS at its default OFF and never ships them.
       - name: Configure macOS arm64
         if: runner.os == 'macOS'
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 -DCMAKE_OSX_ARCHITECTURES=arm64 -DAI_ANALYZER_BUILD_TESTS=ON
