@@ -31,6 +31,8 @@ The installer will request Administrator permission only for the VST3 copy, inst
 
 ### macOS
 
+Current macOS Release packages support **Apple Silicon (arm64) only**. Intel/x86_64 Macs are not included.
+
 Double-click:
 
 ```text
@@ -43,14 +45,7 @@ If macOS blocks the downloaded script itself, right-click it and choose **Open**
 bash ./install.sh
 ```
 
-The macOS package contains both native MCP architectures:
-
-```text
-arm64   Apple Silicon
-x86_64  Intel
-```
-
-The installer selects the correct one automatically. It also installs the universal VST3, removes quarantine metadata, validates the packaged MCP runtime, and generates `cherry-studio-mcp.json`.
+The installer installs the arm64 VST3 and arm64 standalone MCP runtime, removes quarantine metadata, validates the packaged MCP runtime, and generates `cherry-studio-mcp.json`.
 
 > Current macOS builds are ad-hoc signed and are not Apple Developer ID notarized. The installer handles the current quarantine/Gatekeeper development-distribution issue; see the full manual for details.
 
@@ -58,11 +53,9 @@ The installer selects the correct one automatically. It also installs the univer
 
 ## 中文快速说明
 
-Windows 用户直接双击 `Install.cmd`，macOS 用户直接双击 `Install.command`。
+Windows 用户直接双击 `Install.cmd`。macOS Release **仅支持 Apple Silicon（arm64）**，Intel/x86_64 Mac 不再提供构建包；Apple Silicon 用户直接双击 `Install.command`。
 
 **普通用户不再需要自己安装 Python、pip、MCP SDK，也不依赖 PyPI / 清华 / 阿里云镜像。** Release 已经把 Python Runtime 和 MCP 依赖打包进 `mcp/runtime/`。
-
-macOS 同一个懒人包同时包含 Apple Silicon 和 Intel 两套原生 MCP Runtime，脚本自动选择。
 
 如果 macOS 连 `Install.command` 本身都阻止打开，可以**右键 → 打开**，或者执行：
 
