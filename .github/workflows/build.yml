@@ -28,13 +28,40 @@ jobs:
       - name: Build
         run: cmake --build build --config Release --parallel 2
 
-      - name: Check Python bridge dependencies and import
+      - name: Validate Python MCP v2 bridge
         shell: bash
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r bridge/requirements.txt
           python -m py_compile bridge/server.py
-          python -c "import sys; sys.path.insert(0, 'bridge'); import server; print('AI Analyzer bridge import OK')"
+          python - <<'PY'
+          import asyncio
+          import sys
+          from importlib.metadata import version
+
+          sys.path.insert(0, "bridge")
+          import server
+          from mcp.server import MCPServer
+
+          mcp_version = version("mcp")
+          assert mcp_version.split(".", 1)[0] == "2", mcp_version
+          assert isinstance(server.mcp, MCPServer)
+
+          tools = asyncio.run(server.mcp.list_tools())
+          names = {tool.name for tool in tools}
+          expected = {
+              "audio_list_tracks",
+              "audio_snapshot",
+              "audio_average",
+              "audio_stereo_bands",
+              "audio_compare_tracks",
+              "audio_detect_masking",
+              "audio_master_status",
+          }
+          missing = expected - names
+          assert not missing, f"Missing MCP tools: {sorted(missing)}"
+          print(f"AI Analyzer MCP v{mcp_version}: {len(names)} tools registered")
+          PY
 
       - name: Package macOS
         if: runner.os == 'macOS'
