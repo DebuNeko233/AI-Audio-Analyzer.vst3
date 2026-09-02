@@ -1,49 +1,48 @@
 ---
 name: ai-analyzer-flstudio
-description: 面向 Cherry Studio + AI Audio Analyzer.vst3 + FL Studio MCP 的音乐分析技能。用于确定性绑定多个 Analyzer 与 FL Mixer Track/Slot，并读取 signal state、频谱、LUFS-S、LUFS-I、True Peak、RMS、Crest Factor、Spectral Centroid、Rolloff、Flatness、Stereo Correlation、分频段 Stereo Correlation、active ratio 和轨道间频谱重叠；用于混音、母带、Kick/Bass、Vocal masking、立体声兼容性和修改后的 A/B 验证。
+description: 面向 Cherry Studio + AI Audio Analyzer MCP 的技术使用技能。用于正确发现和绑定多个 Analyzer 实例、选择合适的 MCP 工具、理解 signal state、时间窗口、频谱、响度、True Peak、RMS、Crest、Spectral Centroid、Rolloff、Flatness、Stereo Correlation、Stereo Width、分频段相关性、频谱重叠、工程 Overview 与 A/B Snapshot 等返回值。该 Skill 不预设音乐风格、LUFS 目标、EQ/压缩/Sidechain 策略或具体混音审美。
 ---
 
-# AI Audio Analyzer / FL Studio Analysis Skill
+# AI Audio Analyzer MCP Usage Skill
 
-你是一个面向 FL Studio 的音频分析与混音诊断助手。AI Audio Analyzer MCP 是“感知通道”，FL Studio MCP 是“工程拓扑与执行通道”。你的目标不是看到数字就套公式，而是先建立 Analyzer 与真实 Mixer Track/Slot 的确定对应，再读取真实工程数据，结合音乐上下文诊断，必要时修改工程，并用 Analyzer 做 Before / After 验证。
+这个 Skill 的职责只有两类：
 
-## 核心工作流
+1. 帮助模型**正确调用 AI Audio Analyzer MCP**；
+2. 帮助模型**正确理解 MCP 返回参数的技术含义和有效性**。
 
-始终遵循：
+本 Skill **不提供具体的风格化混音指导**。不要因为 Skill 中出现某个频率、响度、相关性或频谱重叠数值，就自动推出某种 EQ、压缩、限幅、Sidechain、声像或母带处理方案。具体音乐判断应由用户目标、音乐上下文、参考作品和模型自身知识决定，而不是由本 Skill 预设。
 
-`DISCOVER → OBSERVE → DIAGNOSE → PLAN → CHANGE → READBACK → A/B`
+## 1. 首先确认 MCP 和工程状态
 
-开始多轨分析时优先调用：
+工程级任务优先：
 
-`audio_bridge_status() → audio_list_tracks() → audio_instance_map()`
+```text
+audio_project_status()
+```
 
-如果 `audio_instance_map().unbound_count > 0`，并且 FL Studio MCP 能访问插件参数，先完成 V0.4 Identify discovery。不要仅根据 Analyzer 的 `track` 名称猜它属于哪条 FL Mixer Track。
+它用于快速检查：
 
-映射完成后确认 Bridge/OSC 正常、Analyzer 数据新鲜、目标实例明确、当前是否有有效输入，再读取具体指标。混音判断通常优先使用 `audio_average(track, 3~10)`，不要用单帧 `audio_snapshot()` 代替稳定窗口，除非用户明确要求瞬时状态。
+- Bridge/OSC 是否正常；
+- 当前有多少 Analyzer 实例；
+- 是否全部完成 FL Mixer Track/Slot 绑定；
+- 哪些实例有有效信号；
+- 是否有 stale stream；
+- 是否存在重复 Analyzer 名称；
+- 是否能识别 Master candidate。
 
-需要修改工程时，先读取 FL Studio 当前 mixer / slot / plugin 状态，扫描真实暴露参数，记录 before，小幅修改一个逻辑问题，再读回并用 Analyzer 比较。不要编造不存在的 MCP 工具、轨道、插件参数或自动化参数。
+需要查看底层实例时再调用：
 
-## 当前 Analyzer MCP 工具
+```text
+audio_bridge_status()
+audio_list_tracks()
+audio_instance_map()
+```
 
-- `audio_bridge_status()`：检查 MCP/OSC、实例、数据新鲜度、signal gate 与绑定状态。
-- `audio_list_tracks()`：列出所有 live Analyzer，包含 runtime `id`、signal state、duplicate name、binding。
-- `audio_last_identify()`：读取最新一次由宿主参数变化触发的 Identify 事件。
-- `audio_bind_last_identified(fl_track_index, fl_track_name, slot)`：把最新未消费 Identify 事件绑定到已知 FL Mixer Track/Slot。
-- `audio_instance_map()`：返回当前 Analyzer ↔ FL Mixer Track/Slot 拓扑以及 `discovery_complete`。
-- `audio_snapshot(track)`：获取一个实例的最新安全快照；无效频谱/立体声数据返回 `null`，不是伪造 0。
-- `audio_average(track, seconds)`：按窗口汇总；频谱、立体声、crest、LUFS-S 只使用 active frames，并返回 `active_ratio` / `analysis_valid`。
-- `audio_stereo_bands(track)`：8 段 stereo correlation；无有效输入时返回 unavailable。
-- `audio_compare_tracks(track_a, track_b)`：比较两个有效实例的相对频谱重叠。
-- `audio_detect_masking(track_a, track_b)`：给出潜在遮蔽候选区域；这是启发式频谱重叠，不是完整心理声学 masking 模型。
-- `audio_master_status(track="Master")`：汇总 Master 的响度、True Peak、动态、立体声、signal state 和 binding。
+不要为了获得一个简单工程状态而无条件连续调用所有工具。优先使用最高层、信息足够的工具，再按需要下钻。
 
-详细协议与选择器规则见 `references/analyzer-mcp.md`。
+## 2. 多实例：先建立确定映射，不靠名字猜
 
-# V0.4 Analyzer ↔ FL Mixer 确定绑定
-
-进行多轨分析前先读取 `audio_instance_map()`。如果存在未绑定 Analyzer，且 FL Studio MCP 可以访问插件参数，优先完成 Identify discovery，而不是依赖插件显示名、音频内容或字符串相似度猜测。
-
-AI Audio Analyzer v0.4 向宿主公开：
+AI Audio Analyzer v0.4+ 每个 live 实例都有 runtime UUID，并公开宿主参数：
 
 ```text
 Parameter ID: identify
@@ -51,133 +50,262 @@ Display name: Identify
 Type: Boolean
 ```
 
-每次这个布尔参数发生变化，插件都会立即发送一次 `/aianalyzer/identify`，其中包含当前 live VST3 实例的 runtime UUID。该触发不依赖音频播放，因此即使 transport 停止也应能执行 discovery。
+当 `audio_instance_map()` 显示存在未绑定实例，并且 FL Studio MCP 能访问插件参数时，对每个 AI Audio Analyzer：
 
-对每个包含 AI Audio Analyzer 的 FL Mixer Track / Slot，执行：
-
-1. 用 FL Studio MCP 枚举 Mixer Track、插件槽和插件真实公开参数；
-2. 找到 `AI Audio Analyzer` 插件中的 `Identify` 参数；
-3. 读取该实例自己的 Identify 当前布尔值；
-4. 将其设置为相反值；
-5. 立即调用 `audio_last_identify()`，确认事件 `fresh=true` 且 `consumed=false`；
+1. 用 FL Studio MCP 找到真实 Mixer Track / Slot；
+2. 读取该实例 `Identify` 当前值；
+3. 将值翻转；
+4. 立即调用 `audio_last_identify()`；
+5. 确认事件是新的且未消费；
 6. 立即调用 `audio_bind_last_identified(fl_track_index, fl_track_name, slot)`；
-7. 再处理下一个 Analyzer；
-8. 最后调用 `audio_instance_map()`，检查 `discovery_complete`，并报告仍未绑定的实例。
+7. 最后用 `audio_instance_map()` 验证结果。
 
-不要假设 FL Studio MCP 的参数扫描、读取和设置工具名称；必须使用当前 MCP 实际提供的工具和插件实际暴露的参数。
+每个 Identify 事件只能消费一次。不要重复使用旧 Identify 事件绑定另一个轨道。
 
-每个 Identify 事件只能消费一次。如果 `audio_bind_last_identified()` 提示最新 Identify 已经 consumed，必须重新翻转目标插件的 Identify 参数。禁止把旧事件再次绑定到另一条 Mixer Track。
+绑定完成后 selector 优先级：
 
-绑定后选择 Analyzer 的优先级：
+```text
+mixer:<index>/slot:<slot>
+→ 唯一 FL Mixer Track 名称
+→ runtime UUID
+→ 唯一 Analyzer 显示名
+```
 
-`mixer:<index>/slot:<slot>` → 唯一 FL Mixer Track 名称 → runtime UUID → 唯一 Analyzer 人类名称。
+同一个 Mixer Track 上有多个 Analyzer 时必须带 `slot`。
+
+runtime UUID 和 binding 是 session-scoped；插件重新实例化或工程重新打开后可能需要重新 discovery。
+
+## 3. 先判断数据是否有效，再解释参数
+
+任何内容相关分析都先检查：
+
+```text
+signal_present
+analysis_valid
+active_ratio
+```
+
+Signal detector 当前语义：
+
+```text
+关闭阈值   约 -50 dBFS
+重新打开   约 -48 dBFS
+hold       约 0.4 s
+```
+
+当 `signal_present=false` 时，Bridge 会把没有意义的频谱/立体声字段设为 `null` 或 unavailable。`null` 的含义是**当前没有有效测量**，不是数值 0。
 
 例如：
 
 ```text
-mixer:7/slot:9
-mixer:12/slot:8
+stereo_correlation = null
 ```
 
-如果同一 Mixer Track 中存在多个 AI Audio Analyzer，必须使用带 `slot` 的 selector。绑定与 runtime UUID 都是 session-scoped；重新打开工程、重新实例化插件或 UUID 变化后，应重新执行 discovery。
+不能解释成：
 
-# V0.3 Signal State：必须先判断有效性
+```text
+stereo_correlation = 0
+```
 
-AI Audio Analyzer 把低于约 -50 dBFS 的输入视为“没有有效输入”，并使用迟滞与短暂 hold 避免阈值附近抖动：
+窗口工具还要结合 `active_ratio`。例如：
 
-- gate close：输入低于约 `-50 dBFS` 持续约 `0.4 s`；
-- gate reopen：输入重新高于约 `-48 dBFS`；
-- `signal_present=false` 时，频谱、Centroid、Rolloff、Flatness、Stereo Correlation、Stereo Width、分频段相关性均不得用于诊断；Bridge 会把这些指标转换成 `null` / unavailable；
-- LUFS-I 和 session max True Peak 是累计 session 指标，静音时仍可保留；
-- LUFS-S 在连续无输入约 3 秒后视为无效；
-- Peak/RMS 可用于描述检测器当前电平，但不要把静音区的 RMS 当成可分析音乐内容。
+```json
+{
+  "window_seconds": 5,
+  "active_ratio": 0.2,
+  "analysis_valid": true
+}
+```
 
-任何分析前都检查 `signal_present`。窗口分析还必须检查 `analysis_valid` 与 `active_ratio`。例如 5 秒窗口中 `active_ratio=0.2` 表示只有约 20% 的采样帧存在有效输入；此时不要把结果描述成“整段持续存在”的问题。
+表示这个窗口只有约 20% 的采样帧存在有效输入。描述结果时必须保留这个时间覆盖范围，不要把局部有效数据写成整个窗口持续存在。
 
-如果 `bands_db`、`stereo_correlation`、`centroid_hz` 等为 `null`，这代表“无有效测量”，不是数值 0。禁止根据 `null` 推断“频谱没有能量”“correlation=0 所以很宽”等结论。
+## 4. 工具选择策略
 
-# 多实例规则
+### 工程状态
 
-一个工程可以放很多个 AI Audio Analyzer，它们共享同一个 Bridge 和 UDP 端口（默认 `127.0.0.1:9855`）。不需要为 Kick、Bass、Vocal、Master 分配不同端口。
+```text
+audio_project_status()
+```
 
-每个 live 插件实例有两种身份：
+用于准备度、绑定完整性、实例状态和信号状态。
 
-- `track`：用户可编辑的人类名称，例如 `Kick`、`Bass`、`Lead Vocal`、`Master`；
-- `id`：插件运行时自动生成的唯一 UUID，用于机器区分实例。
+### 工程级最近窗口概览
 
-`id` 只对当前 live 实例有效，不应被视为跨工程重启的永久身份。V0.4 discovery 完成后，优先使用 FL Mixer binding，而不是要求用户手工给每个 Analyzer 改名。
+```text
+audio_mix_overview(seconds=10, max_tracks=32)
+```
 
-当 `audio_list_tracks()` 返回 `duplicate_name=true` 时，不要在两个同名实例中偷偷选择“最后到达”的一个。如果它们已绑定，使用 FL selector；如果尚未绑定，先执行 Identify discovery，必要时才使用 runtime `id`。
+用于一次读取多个 Analyzer 的窗口平均值以及 heuristic spectral overlap candidates。`potential_spectral_conflicts` 只是相对频谱重叠候选，不等于可听遮蔽，也不表示必须处理。
 
-# 核心指标解释
+### 单实例稳定窗口
 
-## Peak / True Peak / RMS / Crest
+```text
+audio_average(track, seconds)
+```
 
-Sample Peak 用于数字峰值快速检查，但 Sample Peak ≠ True Peak。Master 和总线的 inter-sample clipping 风险优先看 True Peak dBTP。`> 0 dBTP` 有明显风险，`-1~0 dBTP` 需要留意编码/转码余量，但不要把 `-1 dBTP` 当所有音乐的强制目标。
+当问题关心“最近几秒的稳定状态”时优先使用它。通常比单帧 `audio_snapshot()` 更适合描述一个时间区间。
 
-RMS 描述平均能量，RMS ≠ LUFS。Crest Factor 近似 `Peak - RMS`：较大通常表示更明显的瞬态/动态，较小可能表示更密、更压缩或削波更多。不能脱离乐器、风格和总线角色套固定阈值。
+### 单实例当前帧
 
-## LUFS-S / LUFS-I
+```text
+audio_snapshot(track)
+```
 
-LUFS-S 是约 3 秒 Short-Term Loudness，适合段落和当前播放区域。LUFS-I 是从 Analyzer 最近一次 reset/prepare 后累计的 Integrated Loudness。如果只循环副歌，它不代表整首歌；评价整首 Master 前应完整播放目标节目或明确测量范围。不要给所有音乐套统一 LUFS 目标。
+只在需要最近一次状态、排查连接/实例或明确需要瞬时读数时使用。不要把单帧当作长期统计。
 
-## Spectrum / Centroid / Rolloff / Flatness
+### 两实例比较
 
-32 段 Spectrum 是机器读取用的紧凑 FFT 特征，不是校准 SPL。优先看形状、相邻频段趋势、多轨相对占用和音乐角色，不要根据单一 dB 点机械 EQ。
+```text
+audio_compare_tracks(track_a, track_b)
+```
 
-常用频域语义仅作启发：20–40 Hz 为超低频延伸；40–80 Hz 常见 sub/kick fundamental；80–160 Hz 常见 bass body/punch；160–320 Hz 常见 warmth/mud；320–640 Hz 常见 body/boxiness；1.25–2.5 kHz 常见 presence/articulation；2.5–5 kHz 常见 attack/intelligibility/harshness；5–10 kHz 常见 brightness/detail；10–20 kHz 常见 air/sheen。
+用于比较两个有效实例的相对频谱数据。
 
-Spectral Centroid 较高通常意味着频谱重心更亮；Rolloff 当前为约 85% spectral rolloff；Flatness 较低通常更 tonal/harmonic，较高更 noise-like。三者都不是音质好坏评分。
+```text
+audio_detect_masking(track_a, track_b)
+```
 
-# Stereo Correlation
+名称中包含 masking，但当前实现是**启发式频谱重叠检测**，不是 Bark/ERB 心理声学模型，也没有证明真正发生了可听遮蔽。
 
-Full-band correlation 大致可解释为：`+1` 高度相关/接近 mono；`0` 左右弱相关/较宽；`<0` 可能存在相位抵消风险。不要把“越宽越好”当规则。
+### 立体声分频数据
 
-当前 8 段相关性为：20–60、60–120、120–250、250–500、500 Hz–1 kHz、1–2 kHz、2–5 kHz、5–20 kHz。低频 20–120 Hz 明显负相关时优先关注 mono compatibility，但必须确认该频段存在有效能量和 `signal_present=true`。高频轻微低相关可能只是宽度设计，不应自动收窄。
+```text
+audio_stereo_bands(track)
+```
 
-# Kick / Bass 专项流程
+返回 8 个频段的左右相关性。必须同时确认该轨道有有效信号；低能量频段的相关性不应被过度解释。
 
-先确认 `audio_instance_map()` 中 Kick/Bass 的 FL binding，再分别读取 3–5 秒 `audio_average`，之后调用 `audio_compare_tracks`，必要时 `audio_detect_masking`。重点看 40–160 Hz，同时考虑 fundamental、transient、sustain、timing、tuning、octave/register、stereo 和 arrangement。
+### Master 汇总
 
-如果二者主能量长期占据同一低频核心，优先顺序通常是 sound choice / tuning / octave → level → EQ → 在确有时间重叠时再考虑 sidechain 或 dynamic EQ。不要默认“Kick 和 Bass 重叠 = 必须 sidechain”。
+```text
+audio_master_status(track="Master")
+```
 
-# Vocal / Instrument Masking
+是 Master 常用指标的技术汇总，不代表任何固定母带标准或目标值。
 
-确认 Vocal 与对方轨道的 FL binding 后读取有效窗口，比较 1–5 kHz，同时考虑声像、编曲、瞬态、reverb、level 和 automation。常见优先级是 level → arrangement/register → pan/stereo → 小幅 static EQ → dynamic EQ → sidechain dynamic processing。频谱重叠只是候选证据，不等于必然听觉遮蔽。
+## 5. V0.5 工程 Snapshot / A-B
 
-# Mastering 诊断流程
+需要记录两个时间点或两种状态的测量差异时：
 
-确认 Master Analyzer 已绑定到真实 Master Track 后，通常先 `audio_master_status("Master")`，再 `audio_average("Master", 10)`，必要时 `audio_stereo_bands("Master")`。先确认 `signal_present` 和 `active_ratio`，再检查 LUFS-S、LUFS-I、True Peak / Max True Peak、RMS、Crest、Spectrum、Centroid/Rolloff、full-band correlation 和分频段 correlation。
+```text
+audio_capture_snapshot("before", seconds=5)
+```
 
-报告明确区分“测量事实 / 推断 / 建议”。例如 `Max True Peak=-0.2 dBTP` 是事实；“codec headroom 较小”是推断；“检查 limiter ceiling 并做 0.5–1 dB A/B”是建议。不要把建议包装成测量事实。
+之后再：
 
-# 与 FL Studio MCP 协作
+```text
+audio_capture_snapshot("after", seconds=5)
+audio_compare_snapshots("before", "after")
+```
 
-正确闭环：
+可用：
 
-`FL Studio MCP + Identify → 建立拓扑 → AI Audio Analyzer → 读取结果 → 诊断 → FL Studio MCP → 修改 → AI Audio Analyzer → 验证`
+```text
+audio_list_snapshots()
+```
 
-需要改插件时先扫描实际公开参数，记录 before，一次只修改一个逻辑变量或变量组，修改后读回并做 Analyzer A/B。尽量响度匹配，不因为“更响”就判断“更好”。
+查看当前 Bridge session 保存的 Snapshot。
 
-# 用户自然语言映射
+Snapshot 仅存在于当前 Bridge session 内，不是工程持久化数据。
 
-“暖”可能对应较柔和高频、低中频厚度或谐波；“亮”可能对应高频、upper harmonics、transient；“空气感”可能对应高频延伸、空间和 stereo；“厚”可能对应 layers、low-mid、harmonics；“硬”可能对应 transient、upper-mid、clipping/saturation；“贴脸”可能对应 dry/presence/短空间；“远”可能对应更低直达声、更暗、更多 reverb；“宽”可能对应 side information/pan/doubling/modulation；“糊”可能来自 masking、low-mid build-up 或 reverb；“炸”可能来自高密度、compression、clipping 或 saturation。必须先验证 Analyzer 数据和工程上下文是否支持这些推断。
+A/B 调用技巧：
 
-# 默认输出
+- 尽量让 before / after 使用同一音乐片段；
+- 尽量使用接近的窗口长度；
+- 比较 `active_ratio`，避免一边大部分静音、一边持续有声；
+- delta 定义为 `After - Before`；
+- `LUFS-I` 是 session 累积量，短时 A/B 时不能把它当成独立重置后的两个窗口值。
 
-优先使用四部分：`诊断`、`数据依据`、`建议`、`验证`。如果用户要求直接修改工程，则改为 `已执行`、`Before / After`、`下一步`。
+## 6. 工程 Overview 的正确理解
 
-# 安全与质量约束
+`audio_mix_overview()` 中：
 
-- 多轨分析前优先确认 Analyzer ↔ FL Mixer binding，不靠名字猜实例。
-- 每个 Identify event 只消费一次，不能拿旧事件绑定下一条轨道。
-- 不因单一指标过度处理。
-- 不把启发式 masking 当心理声学真值。
-- 不把 RMS 当 LUFS，不把 Sample Peak 当 True Peak。
-- 不把局部循环的 LUFS-I 当整首结果。
-- 不在无有效输入或 `null` 数据上做频谱/立体声判断。
-- 不把低 correlation 自动视为错误。
-- 不追求固定 LUFS 目标。
-- 不为“数字好看”牺牲音乐意图。
-- 不编造工具、轨道或插件参数。
-- 修改工程时优先可逆、可读回、可 A/B。
+```text
+spectral_regions
+potential_spectral_conflicts
+spectral_overlap_score
+```
+
+是为了让模型更快定位值得继续查询的数据区域。
+
+其中 `spectral_overlap_score` 是相对频谱形状重叠的 heuristic score。它没有包含完整的听觉掩蔽、时间关系、编曲、声源角色或用户意图。因此：
+
+```text
+高 overlap ≠ 一定有问题
+低 overlap ≠ 一定没有问题
+```
+
+它应该用于决定“是否需要进一步读取/比较”，而不是直接生成具体处理动作。
+
+## 7. 参数解释规则
+
+详细参数语义见：
+
+```text
+references/parameters.md
+```
+
+工具和 selector 细节见：
+
+```text
+references/analyzer-mcp.md
+```
+
+解释任何指标时遵守：
+
+- 区分 sample peak 与 true peak；
+- 区分 RMS 与 LUFS；
+- 区分 LUFS-S 与 session 累积 LUFS-I；
+- Spectrum dB 是 Analyzer 的机器特征，不是校准 SPL；
+- Centroid、Rolloff、Flatness 是描述性统计，不是质量评分；
+- Stereo Correlation 描述左右相似/反相关程度，不是“好/坏”分数；
+- Stereo Width 是测量量，不应脱离信号有效性直接评价；
+- `null` 是 unavailable，不是 0；
+- 所有窗口统计都要结合 `window_seconds`、`active_frames`、`active_ratio`。
+
+## 8. 与 FL Studio MCP 协作时的边界
+
+AI Audio Analyzer MCP 负责：
+
+```text
+测量 / 读取 / 比较 / 验证
+```
+
+FL Studio MCP 负责：
+
+```text
+读取 DAW 拓扑 / 访问插件 / 修改宿主状态
+```
+
+本 Skill 可以指导模型用 FL Studio MCP 完成 Identify 映射，也可以要求修改后再次读取 Analyzer 数据进行测量对比，但**不规定模型应该修改什么参数、修改多少、采用哪种混音风格**。
+
+如果用户要求修改工程：
+
+- 先读取真实的轨道、Slot、插件和参数；
+- 不编造不存在的插件参数；
+- 修改后读回宿主实际状态；
+- 如需验证测量变化，可使用 Snapshot A/B；
+- 技术测量结论与音乐审美判断要分开表达。
+
+## 9. 输出纪律
+
+模型引用 Analyzer 数据时，应尽量包含必要上下文，例如：
+
+```text
+实例 / selector
+窗口长度
+signal_present
+active_ratio
+关键测量值
+测量是否有效
+```
+
+不要把以下内容写成 Analyzer 已测得的事实：
+
+- “这个声音应该更暖/更亮/更现代”；
+- “这个风格必须达到某个 LUFS”；
+- “这个频段必须削多少 dB”；
+- “出现频谱重叠就必须 EQ / Sidechain”；
+- “某个 correlation 值天然就是好或坏”。
+
+这些属于音乐判断或处理策略，不属于本 MCP 的测量事实，也不属于本 Skill 的职责。
