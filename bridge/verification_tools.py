@@ -104,6 +104,8 @@ def _comparison_for_states(
     before_state: dict[str, Any],
     after_state: dict[str, Any],
     target_selectors: list[str],
+    *,
+    baseline_ready: bool = True,
 ) -> dict[str, Any]:
     before_tracks = before_state.get("tracks") or {}
     after_tracks = after_state.get("tracks") or {}
@@ -189,7 +191,8 @@ def _comparison_for_states(
         - float(after_state.get("window_seconds") or 0.0)
     ) < 1.0e-6
     controlled_comparison = bool(
-        target_rows
+        baseline_ready
+        and target_rows
         and not missing_targets
         and not invalid_targets
         and not coverage_mismatch_targets
@@ -198,6 +201,10 @@ def _comparison_for_states(
     )
 
     warnings: list[str] = []
+    if not baseline_ready:
+        warnings.append(
+            "The Before baseline was not ready for an external change; this result cannot be labelled a controlled comparison."
+        )
     if added or removed or not topology_unchanged:
         warnings.append(
             "Analyzer topology changed between Before and After; confirm that any routing/plugin-instance change was intentional."
@@ -216,6 +223,7 @@ def _comparison_for_states(
     return {
         "controlled_comparison": controlled_comparison,
         "comparability": {
+            "baseline_ready": bool(baseline_ready),
             "same_window_seconds": same_window,
             "topology_unchanged": topology_unchanged,
             "active_ratio_tolerance": ACTIVE_RATIO_TOLERANCE,
@@ -239,7 +247,7 @@ def _comparison_for_states(
                 "A transparent passage-comparability guardrail, not a mix-quality threshold."
             ),
             "controlled_comparison": (
-                "True only when topology/window/target validity/active coverage satisfy the stated guardrails. "
+                "True only when the Before baseline was ready and topology/window/target validity/active coverage satisfy the stated guardrails. "
                 "It does not mean the change is artistically better."
             ),
         },
@@ -366,21 +374,30 @@ def audio_complete_verification(
             return response
         before_state = copy.deepcopy(session["before_state"])
         targets = list(session.get("target_selectors") or [])
+        baseline_ready = bool(session.get("ready_for_external_change"))
 
     baseline_seconds = float(before_state.get("window_seconds") or DEFAULT_VERIFICATION_SECONDS)
     after_seconds = baseline_seconds if float(seconds) <= 0.0 else project._clamp_seconds(seconds)
     after_project_status = project.audio_project_status()
     after_state = project._capture_state(after_seconds)
-    comparison = _comparison_for_states(before_state, after_state, targets)
+    comparison = _comparison_for_states(
+        before_state,
+        after_state,
+        targets,
+        baseline_ready=baseline_ready,
+    )
+    readback_supplied = bool(clean_readback)
+    closed_loop_complete = bool(comparison["controlled_comparison"] and readback_supplied)
 
     result = {
+        "closed_loop_complete": closed_loop_complete,
         "before": _state_summary(before_state),
         "after": _state_summary(after_state),
         "comparison": comparison,
         "external_change": {
             "change_summary": clean_change,
             "host_readback": clean_readback,
-            "readback_supplied": bool(clean_readback),
+            "readback_supplied": readback_supplied,
         },
         "project_status_after": {
             "project_ready": bool(after_project_status.get("project_ready")),
@@ -396,8 +413,19 @@ def audio_complete_verification(
             "captured_at_after": after_state.get("captured_at"),
             "baseline_window_seconds": baseline_seconds,
             "after_window_seconds": after_seconds,
+            "baseline_ready": baseline_ready,
             "measurement_only": True,
             "control_mcp_required_for_change": True,
+            "closed_loop_complete_requires_readback": True,
+        },
+        "interpretation": {
+            "controlled_comparison": (
+                "Technical Before/After measurement comparability only; not artistic success."
+            ),
+            "closed_loop_complete": (
+                "True only when the measurement comparison is controlled and caller-supplied actual host readback is present. "
+                "It still does not mean the artistic change is better."
+            ),
         },
     }
 
@@ -417,6 +445,8 @@ def audio_complete_verification(
     response["already_completed"] = False
     response["recommended_next_step"] = (
         "Use specialized Analyzer tools (temporal/masking/stereo/tonal) only where the measured deltas require deeper evidence."
+        if closed_loop_complete
+        else "Resolve the reported comparability/readback gap before treating this as a complete closed-loop verification."
     )
     return response
 
@@ -454,6 +484,11 @@ def audio_verification_status(verification_id: str = "") -> dict[str, Any]:
                     ((session.get("result") or {}).get("comparison") or {}).get(
                         "controlled_comparison"
                     )
+                    if session.get("status") == "completed"
+                    else None
+                ),
+                "closed_loop_complete": (
+                    (session.get("result") or {}).get("closed_loop_complete")
                     if session.get("status") == "completed"
                     else None
                 ),
