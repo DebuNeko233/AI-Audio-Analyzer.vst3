@@ -215,7 +215,7 @@ Do not mechanically call every tool if a higher-level result already answers the
 
 ## User installation
 
-The recommended user path is the GitHub **Release lazy package**, not manual Python setup.
+GitHub **Release packages are intentionally beginner-first**. They are designed for users who may have never used Python, a terminal, or programming tools.
 
 Current Release targets:
 
@@ -226,53 +226,49 @@ macOS Apple Silicon arm64
 
 Intel/x86_64 macOS is not packaged.
 
-Each Release contains roughly:
+Each user Release is one final ZIP. Extract it once; there is no second Release ZIP inside it.
+
+The extracted folder contains roughly:
 
 ```text
 AI Audio Analyzer.vst3
 mcp/
-├─ runtime/    PyInstaller standalone MCP
-└─ source/     Python source fallback
+└─ ai-audio-analyzer-mcp[.exe]   standalone executable
 skill/
 START-HERE.md
 INSTALL.en.md
 INSTALL.zh-CN.md
-platform installer script(s)
+VERSION.txt
+platform installer file(s)
 ```
 
-Normal users do **not** need to install Python, pip, a virtual environment, or access PyPI. The standalone MCP runtime is built with PyInstaller.
+User Releases deliberately do **not** contain MCP Python source, `requirements.txt`, a venv, PyInstaller `_internal`, or developer configuration examples.
 
 ### Windows
 
-Run:
+Download the Windows ZIP, choose **Extract All**, then double-click:
 
 ```text
 Install.cmd
 ```
 
-The VST3 is installed to the standard VST3 location and MCP/Skill files remain under the current user's application-data directory.
-
 ### macOS Apple Silicon
 
-Run:
+Download the macOS ZIP, extract it, then double-click:
 
 ```text
 Install.command
 ```
 
-If Gatekeeper blocks the downloaded script, right-click → **Open**, or run:
+If Gatekeeper blocks it, right-click `Install.command` and choose **Open**.
 
-```bash
-bash ./install.sh
-```
+Current macOS builds are ad-hoc signed, **not Apple Developer ID notarized**.
 
-Current macOS builds are ad-hoc signed, **not Apple Developer ID notarized**. The installer handles current quarantine/Gatekeeper requirements.
-
-Full instructions are inside each Release package.
+Full click-by-click instructions are included in `START-HERE.md` and the installation guides inside each Release.
 
 ## MCP source layout and entrypoint
 
-There is exactly one supported MCP source/PyInstaller entrypoint:
+Repository development still has exactly one supported MCP source/PyInstaller entrypoint:
 
 ```text
 bridge/server.py
@@ -295,7 +291,7 @@ bridge/temporal_tools.py  V0.6 temporal parsing and comparison
 bridge/masking_tools.py   V0.7 masking-evidence layer
 ```
 
-Python 3.12 is recommended for source mode:
+Python 3.12 is recommended for repository/source development:
 
 ```bash
 python3.12 -m venv .venv
@@ -304,13 +300,11 @@ python -m pip install -r bridge/requirements.txt
 AI_ANALYZER_SELF_TEST=1 python bridge/server.py
 ```
 
-Windows uses the equivalent `.venv\Scripts\Activate.ps1` flow.
-
-Source mode is a developer/debug fallback. Normal users should use the packaged runtime.
+This developer workflow exists in the repository only. **MCP source is not shipped in the user Release.**
 
 ## Cherry Studio source example
 
-`bridge/cherry-studio.example.json` points to `bridge/server.py`. The packaged installer instead generates a configuration whose `command` points directly to the standalone MCP executable.
+`bridge/cherry-studio.example.json` is a repository/developer example pointing to `bridge/server.py`. The user installer instead generates a configuration whose `command` points directly to the packaged standalone MCP executable.
 
 Do not run a manual Bridge process while Cherry Studio starts another copy on the same UDP port.
 
@@ -401,7 +395,7 @@ bridge/server.py                single MCP entrypoint
 bridge/analyzer_core.py         stable internal MCP/OSC core
 bridge/*_tools.py               feature modules
 skills/ai-analyzer-flstudio/    English LLM-facing Skill
-release/                        lazy-package installers/docs
+release/                        beginner Release installers/docs
 .github/workflows/build.yml     development CI
 .github/workflows/release.yml   manual Release packaging
 AGENT.md                        agent/maintainer roadmap and rules
