@@ -1,88 +1,82 @@
 # AI Audio Analyzer 0.7 — Start Here / 从这里开始
 
-[English manual](INSTALL.en.md) | [中文安装教程](INSTALL.zh-CN.md)
+[English guide](INSTALL.en.md) | [中文教程](INSTALL.zh-CN.md)
 
-This Release package contains:
+This package is designed for users who have never used Python, a terminal, or programming tools.
+
+You only need to **unzip the downloaded Release once** and run the installer inside.
+
+## Windows
+
+1. Download the file ending in `Windows.zip`.
+2. Right-click the ZIP and choose **Extract All**.
+3. Open the extracted folder.
+4. Double-click `Install.cmd`.
+5. Approve the Windows permission prompt if it appears.
+6. Wait until the installer says **Installation completed successfully**.
+7. Restart FL Studio and rescan plugins.
+
+## macOS Apple Silicon
+
+1. Download the file ending in `macOS.zip`.
+2. Double-click the ZIP to extract it.
+3. Open the extracted folder.
+4. Double-click `Install.command`.
+5. If macOS blocks it, right-click `Install.command` and choose **Open**.
+6. Wait until the installer says **Installation completed successfully**.
+7. Restart FL Studio and rescan plugins.
+
+Current macOS Release supports **Apple Silicon (arm64) only**. Intel Macs are not supported by the packaged Release.
+
+## What is inside
 
 ```text
 AI Audio Analyzer.vst3
-mcp/
-├─ runtime/     standalone PyInstaller MCP 0.7 runtime
-└─ source/      Python source fallback for developers
-skill/          English LLM-facing Skill
-Install script(s)
+mcp/                         standalone Analyzer connection executable
+skill/                       Cherry Studio Skill
+Install.cmd / Install.ps1    Windows installer
+Install.command / install.sh macOS installer
+START-HERE.md
 INSTALL.en.md
 INSTALL.zh-CN.md
+VERSION.txt
 ```
 
-**Normal installation does not require Python, pip, a virtual environment, or PyPI access.**
+There is **no MCP source code** in the user Release. There is also no Python environment, package manager, requirements file, or nested Release ZIP inside the package.
 
-Current Release platforms:
+After installation, the installer tells you where to find:
 
-```text
-Windows x64
-macOS Apple Silicon arm64
-```
-
-Intel/x86_64 macOS is not included.
-
-## Fastest path / 最快安装
-
-### Windows
-
-Double-click `Install.cmd`.
-
-The installer copies the VST3, installs the standalone MCP runtime for the current user, runs the MCP self-test, generates `cherry-studio-mcp.json`, and installs the Skill.
-
-### macOS Apple Silicon
-
-Double-click `Install.command`.
-
-If macOS blocks the downloaded script, right-click it and choose **Open**, or run:
-
-```bash
-bash ./install.sh
-```
-
-The installer copies the arm64 VST3 and standalone arm64 MCP runtime, removes quarantine metadata, verifies the local plugin signature, runs the MCP self-test, and generates the Cherry Studio configuration.
-
-> Current macOS builds are ad-hoc signed and are not Apple Developer ID notarized.
-
-## MCP 0.7
-
-The packaged runtime and source fallback both use one stable entrypoint:
-
-```text
-server.py
-```
-
-MCP/protocol versions are metadata rather than versioned server filenames. MCP 0.7 exposes 20 tools and adds:
-
-```text
-audio_masking_evidence()
-audio_project_masking_scan()
-```
-
-The evidence model re-bins existing Analyzer spectrum features onto equal ERB-rate regions and combines spectral occupancy, relative level, and V0.6 temporal overlap.
-
-It is **not** a gammatone/cochlear filterbank and **not** an audible-masking probability.
-
-The bundled Skill is English-only and teaches the LLM how to use these measurements without prescribing a mixing style.
+- the generated Cherry Studio MCP configuration;
+- the installed Cherry Studio Skill folder.
 
 ---
 
-## 中文快速说明
+# 中文快速说明
 
-Windows 用户直接双击 `Install.cmd`；macOS Release 仅支持 Apple Silicon（arm64），直接双击 `Install.command`。
+这个 Release 就是按“**完全没接触过编程也能安装**”来设计的。
 
-普通用户不需要自己安装 Python、pip、MCP SDK，也不依赖 PyPI / 清华 / 阿里云镜像。Release 已把 Python Runtime 和 MCP 依赖打包进 `mcp/runtime/`。
+你不需要安装 Python，不需要 pip，不需要打开命令行，也不需要理解 MCP 源码。
 
-源码 fallback 与 PyInstaller 都统一使用 `server.py`，以后不再使用 `server_vXX.py` 版本化入口。
+## Windows
 
-0.7 的 MCP 新增 `audio_masking_evidence()` 和 `audio_project_masking_scan()`，用于提供更强的遮蔽相关证据，但这些结果只是透明的 heuristic evidence，不是“可听遮蔽概率”，也不会自动给出 EQ / Sidechain 等处理方案。
+1. 下载名称以 `Windows.zip` 结尾的文件；
+2. 右键 ZIP → **全部解压缩**；
+3. 打开解压后的文件夹；
+4. 双击 `Install.cmd`；
+5. Windows 弹出权限确认时点击允许；
+6. 等待显示 **Installation completed successfully**；
+7. 重启 FL Studio，并重新扫描插件。
 
-如果自动安装失败或希望完全手动控制安装，请阅读 `INSTALL.zh-CN.md` 或 `INSTALL.en.md`。
+## macOS Apple Silicon
 
-配套 FL Studio 控制 MCP：
+1. 下载名称以 `macOS.zip` 结尾的文件；
+2. 双击 ZIP 解压；
+3. 打开解压后的文件夹；
+4. 双击 `Install.command`；
+5. 如果 macOS 阻止运行，右键 `Install.command` → **打开**；
+6. 等待显示安装成功；
+7. 重启 FL Studio，并重新扫描插件。
 
-https://github.com/rosasynthesiz/flstudio-mcp
+当前 macOS Release **只支持 Apple Silicon / arm64**，不提供 Intel Mac 包。
+
+安装完成后，安装器会直接告诉你 Cherry Studio 的 MCP 配置文件位置和 Skill 文件夹位置。
