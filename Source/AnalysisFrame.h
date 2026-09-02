@@ -46,6 +46,11 @@ constexpr std::uint32_t analysisFeatureMaskForProfile(AnalysisProfile profile) n
     }
 }
 
+constexpr std::uint32_t analysisFeatureMask(AnalysisProfile profile) noexcept
+{
+    return analysisFeatureMaskForProfile(profile);
+}
+
 inline constexpr std::array<float, kNumStereoCorrelationBands + 1> kStereoCorrelationBandEdgesHz {
     20.0f, 60.0f, 120.0f, 250.0f, 500.0f, 1000.0f, 2000.0f, 5000.0f, 20000.0f
 };
@@ -55,9 +60,6 @@ struct AnalysisFrame
     double sampleRate = 48000.0;
     double timestampSeconds = 0.0;
 
-    // Signal-state metadata. The detector uses a -50 dBFS close threshold,
-    // -48 dBFS reopen threshold and a short hold so near-threshold material does
-    // not chatter between active/silent states.
     bool signalPresent = false;
     float detectorPeakDb = -120.0f;
     float silenceSeconds = 0.0f;
@@ -78,45 +80,29 @@ struct AnalysisFrame
     float stereoCorrelation = 1.0f;
     float stereoWidth = 0.0f;
 
-    // Temporal fields. These are descriptive machine measurements rather than
-    // artistic quality scores. Network frames may aggregate several internal
-    // FFT hops into one ~10 Hz OSC update.
     float temporalWindowSeconds = 0.0f;
     float spectralFluxMean = 0.0f;
     float spectralFluxPeak = 0.0f;
     float rmsRisePeakDb = 0.0f;
-    float lowBandEnergyDb = -120.0f; // FFT-derived 40-160 Hz energy feature.
+    float lowBandEnergyDb = -120.0f;
 
-    // Mid/Side and stereo evidence. These values deliberately separate channel
-    // similarity, Side energy, and negative cross-spectrum evidence so a
-    // wide/decorrelated signal is not conflated with strong phase opposition.
     float midRmsDb = -120.0f;
     float sideRmsDb = -120.0f;
     float sideToMidDb = -120.0f;
     float negativeCrossEnergyRatio = 0.0f;
-    float lowBandCorrelation = 1.0f;      // 20-120 Hz aggregate correlation.
-    float lowBandSideToMidDb = -120.0f;  // 20-120 Hz Side/Mid power ratio in dB.
+    float lowBandCorrelation = 1.0f;
+    float lowBandSideToMidDb = -120.0f;
 
-    // Music-semantic evidence. Chroma is a normalized 12-TET pitch-class power
-    // distribution accumulated from the Mid spectrum over 80 Hz-5 kHz. The
-    // harmonic ratio is a single-F0 alignment heuristic, not pitch confidence.
     std::array<float, kNumChromaBins> chroma {};
     float chromaEnergyRatio = 0.0f;
     float singleF0HarmonicEnergyRatio = 0.0f;
     float harmonicF0CandidateHz = 0.0f;
 
-    // Historical bandsDb is the Mid-spectrum feature used since V0.1.
     std::array<float, kNumBands> bandsDb {};
     std::array<float, kNumStereoCorrelationBands> bandStereoCorrelation {};
-
-    // Explicit Side spectrum plus integrated Side/Mid ratios over the same
-    // eight frequency ranges used by bandStereoCorrelation.
     std::array<float, kNumBands> sideBandsDb {};
     std::array<float, kNumStereoCorrelationBands> bandSideToMidDb {};
 
-    // Adaptive-analysis/runtime telemetry. These fields are appended to OSC and
-    // never repurpose older indexes. They describe what this instance is
-    // actually computing and whether its background worker is keeping up.
     int analysisProfile = static_cast<int>(AnalysisProfile::Full);
     std::uint32_t analysisFeatureMask = analysisFeatureMaskForProfile(AnalysisProfile::Full);
     float workerLoadRatio = 0.0f;
