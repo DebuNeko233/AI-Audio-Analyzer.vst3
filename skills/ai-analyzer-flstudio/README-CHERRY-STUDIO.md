@@ -3,11 +3,11 @@
 This Skill targets:
 
 - Cherry Studio;
-- AI Audio Analyzer VST3 0.9.0;
-- AI Audio Analyzer MCP 0.9;
+- AI Audio Analyzer VST3 1.0.0;
+- AI Audio Analyzer MCP 1.0;
 - optional FL Studio control MCP: https://github.com/rosasynthesiz/flstudio-mcp
 
-Its purpose is to help an LLM **call Analyzer MCP correctly, interpret measurements correctly, manage multi-instance mapping, and judge evidence quality**.
+Its purpose is to help an LLM **call Analyzer MCP correctly, interpret measurements correctly, manage multi-instance mapping, judge evidence quality, and run auditable Before/After verification around externally controlled DAW changes**.
 
 It does **not** provide fixed mixing style, LUFS targets, EQ/compression/sidechain/stereo recipes, key-change rules, harmony-edit rules, or mastering chains.
 
@@ -21,9 +21,10 @@ V0.6  Spectral Flux / RMS Rise / temporal profile / band-envelope comparison
 V0.7  ERB-rebinned spectral + relative-level + temporal masking evidence
 V0.8  Mid/Side RMS / Side spectrum / frequency-dependent Side-Mid / negative-cross evidence
 V0.9  12-bin chroma / tonal-center candidate ranking / single-F0 harmonic-alignment evidence
+V1.0  controlled closed-loop Before/After verification around external DAW changes
 ```
 
-V0.9 extends the VST3 OSC frame append-only; indexes `0..111` remain unchanged and V0.9 fields are appended at `112..127`.
+V1.0 adds no new VST3 OSC fields. The current OSC protocol remains **0.9**, with append-only indexes `0..127`.
 
 ## Recommended initialization
 
@@ -68,10 +69,53 @@ two-track stereo comparison   audio_stereo_compare()
 two-track tonal comparison    audio_tonal_compare()
 legacy stereo bands           audio_stereo_bands()
 Snapshot management           audio_capture_snapshot() / audio_list_snapshots()
-Before/After                  audio_compare_snapshots()
+manual Snapshot A/B           audio_compare_snapshots()
+controlled change verification audio_begin_verification() / audio_complete_verification()
+verification recovery/status  audio_verification_status()
 ```
 
-MCP 0.9 exposes **24 tools**. Full signatures are in `references/analyzer-mcp.md`.
+MCP 1.0 exposes **27 tools**. Full signatures are in `references/analyzer-mcp.md`.
+
+## V1.0 closed-loop verification
+
+Use the verification session when a user asks the agent to **change the DAW and verify the measured result**.
+
+Canonical flow:
+
+```text
+audio_project_status()
+→ deterministic Identify binding if needed
+→ play the intended comparison passage
+→ audio_begin_verification(
+     "short factual label",
+     seconds=5,
+     target_selectors=["mixer:4/slot:9"]
+   )
+→ inspect ready_for_external_change / baseline_blockers
+→ external FL Studio control MCP makes the intended change
+→ external FL Studio control MCP reads back the actual host value/state
+→ replay the same intended passage
+→ audio_complete_verification(
+     verification_id,
+     change_summary="what was actually changed",
+     host_readback="actual host state reported after the write"
+   )
+→ inspect controlled_comparison and its comparability fields
+→ call specialized temporal/masking/stereo/tonal tools only if deeper evidence is needed
+```
+
+Important semantics:
+
+- Analyzer MCP does not perform the DAW change;
+- `host_readback` is supplied from the external control MCP and stored for auditability; Analyzer does not independently validate that text;
+- After uses the same measurement-window duration as Before by default;
+- the topology fingerprint is a live-session consistency marker, not a permanent FL Studio project ID;
+- current active-ratio comparability tolerance is `0.15` absolute difference;
+- topology drift, missing targets, invalid targets, window mismatch, or excessive active-coverage mismatch make `controlled_comparison=false`;
+- `controlled_comparison=true` means only that the stated technical A/B guardrails passed; it does **not** mean the change is better, correct, or worth keeping;
+- verification state is Bridge-session memory only.
+
+See `references/verification-evidence.md` before making strong Before/After claims from V1.0 verification.
 
 ## V0.9 tonal evidence
 
@@ -177,18 +221,36 @@ valid_frame_ratio
 active_ratio
 ```
 
+For V1.0 verification also inspect:
+
+```text
+ready_for_external_change
+baseline_blockers
+controlled_comparison
+same_window_seconds
+topology_unchanged
+missing_targets
+invalid_targets
+coverage_mismatch_targets
+active_ratio_tolerance
+```
+
 `null` means unavailable, not zero.
 
-## Snapshot A/B
+## Snapshot A/B versus V1.0 verification
+
+Manual Snapshot A/B remains useful for simple measurement comparisons:
 
 ```text
 audio_capture_snapshot("before", 5)
-# external control MCP changes the DAW
+# some external event/change
 audio_capture_snapshot("after", 5)
 audio_compare_snapshots("before", "after")
 ```
 
 Use comparable passages, similar windows, and similar active coverage. Snapshot state is Bridge-session scoped.
+
+When the agent itself is coordinating a DAW change through an external control MCP, prefer V1.0 verification because it additionally records baseline blockers, target selectors, topology consistency, active-coverage comparability, external change summary, and host readback.
 
 ## Suggested Agent instruction
 
@@ -198,17 +260,19 @@ Start with audio_project_status and establish deterministic Identify bindings fo
 Before interpreting content, inspect signal/feature validity and evidence-quality fields relevant to the selected tool.
 Use only the measurement family needed for the request: temporal, masking, stereo, or V0.9 tonal evidence.
 For exact note/key/chord facts, prefer exact DAW/MIDI/project data when available; use V0.9 as audio-domain inference evidence and report its uncertainty context.
-Keep correlation, Side/Mid energy, negative-cross evidence, chroma, tonal-center ranking, and harmonic-alignment evidence conceptually separate. Treat null as unavailable, not zero.
+When the task changes the DAW and asks for verification, call audio_begin_verification before the external control write, make the change through the actual FL Studio control MCP, read the host state back, replay a comparable passage, then call audio_complete_verification with the factual change summary and host readback.
+Treat controlled_comparison only as a measurement-comparability guardrail. If it is false, report the reason before making a strong A/B claim.
+Keep correlation, Side/Mid energy, negative-cross evidence, chroma, tonal-center ranking, harmonic-alignment evidence, and verification comparability conceptually separate. Treat null as unavailable, not zero.
 Never turn Analyzer measurements into automatic mixing, mastering, key-change, harmony-edit, tuning, or processing instructions.
-If the DAW is changed through an external control MCP, read back the actual host state and use Analyzer/Snapshot measurements for verification.
 ```
 
 ## References
 
 ```text
-references/analyzer-mcp.md       MCP tools and selector rules
-references/parameters.md         measurement parameter semantics
-references/masking-evidence.md   V0.7 masking evidence and limitations
-references/stereo-evidence.md    V0.8 Mid/Side/stereo evidence semantics
-references/tonal-evidence.md     V0.9 chroma/tonal/harmonic evidence semantics
+references/analyzer-mcp.md          MCP tools and selector rules
+references/parameters.md            measurement parameter semantics
+references/masking-evidence.md      V0.7 masking evidence and limitations
+references/stereo-evidence.md       V0.8 Mid/Side/stereo evidence semantics
+references/tonal-evidence.md        V0.9 chroma/tonal/harmonic evidence semantics
+references/verification-evidence.md V1.0 closed-loop verification semantics
 ```
