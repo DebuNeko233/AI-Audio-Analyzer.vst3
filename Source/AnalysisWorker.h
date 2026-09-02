@@ -25,6 +25,17 @@ public:
 
     void setOscConfig(juce::String instanceId, juce::String host, int port);
     void setAnalysisProfile(AnalysisProfile profile) noexcept;
+
+    // Realtime path: atomic handoff only. Do not call Thread::notify(), take a
+    // lock, allocate, or perform any analysis from the audio callback. The
+    // worker polls requestedProfile before each FIFO wait/processing cycle.
+    void setAnalysisProfileRealtimeSafe(AnalysisProfile profile) noexcept
+    {
+        requestedProfile.store(
+            juce::jlimit(0, 3, static_cast<int>(profile)),
+            std::memory_order_release);
+    }
+
     AnalysisProfile getAnalysisProfile() const noexcept;
 
     void requestIdentify() noexcept
