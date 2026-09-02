@@ -224,9 +224,11 @@ Any change to profiles, scheduling, FIFO behavior, or telemetry must review all 
 9. Skill / README / Release documentation impact
 ```
 
-### No per-block control wakeups
+### Realtime profile handoff is atomic-only
 
-The audio callback may cheaply read the host parameter, but it must only notify the worker when the profile actually changes. Do not add locks, allocation, network I/O, FFT, or heavyweight control work to `processBlock()`.
+The audio callback may cheaply read the host parameter and update atomic profile state when the value changes. It must not call `Thread::notify()`, take a lock, allocate, perform network I/O, run FFT, or execute heavyweight control work for profile changes.
+
+The worker observes the requested profile asynchronously on its own loop. Non-realtime control/state-restoration paths may use the normal worker setter when an immediate wake-up is useful.
 
 ### Profile transitions must not bridge unmeasured gaps
 
@@ -338,6 +340,24 @@ macOS arm64 VST3 build
 ```
 
 Do not substitute an older green run after the head has moved.
+
+### Development workflow scope
+
+`.github/workflows/build.yml` is intentionally path-scoped. Changes unrelated to plugin source/build files, Bridge, Analyzer Skill, Release installer material, or the build/release workflows should not start the development workflow.
+
+For `pull_request` `synchronize` events, component detection compares the previous PR head (`github.event.before`) with the new head instead of repeatedly comparing the PR base with the full current head. This is deliberate: a plugin change earlier in a PR must not force Windows/macOS VST3 rebuilds after a later docs-only, Skill-only, or Bridge-only commit.
+
+A build-workflow change itself is treated as requiring all validation families, including both plugin builds, so CI infrastructure changes are tested by the workflow they modify.
+
+### CMake / JUCE build cache
+
+The VST3 jobs use `actions/cache` with separate OS/architecture keys to restore the CMake `build/` tree, including FetchContent JUCE/libebur128 state and reusable JUCE module objects.
+
+Cache keys are tied to `CMakeLists.txt` and `.github/workflows/build.yml`, with platform-specific restore prefixes. Project `Source/` changes should normally reuse compatible JUCE compilation state rather than invalidating the whole dependency cache.
+
+The cache is only an acceleration mechanism. Every VST3 job still runs CMake configure and build, and a cache hit is never evidence that the latest source compiled successfully.
+
+The development workflow uses concurrency cancellation so a newer commit on the same PR/ref cancels an obsolete in-progress build run.
 
 `bridge/ci_regression.py` must remain development-only and must not ship in beginner Releases.
 
