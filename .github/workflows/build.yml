@@ -12,6 +12,7 @@ jobs:
     outputs:
       plugin: ${{ steps.filter.outputs.plugin }}
       bridge: ${{ steps.filter.outputs.bridge }}
+      skill: ${{ steps.filter.outputs.skill }}
       workflow: ${{ steps.filter.outputs.workflow }}
     steps:
       - uses: actions/checkout@v4
@@ -45,6 +46,7 @@ jobs:
 
           plugin=false
           bridge=false
+          skill=false
           workflow=false
 
           while IFS= read -r file; do
@@ -56,6 +58,9 @@ jobs:
               bridge/*)
                 bridge=true
                 ;;
+              skills/ai-analyzer-flstudio/*)
+                skill=true
+                ;;
               .github/workflows/build.yml)
                 workflow=true
                 ;;
@@ -64,14 +69,15 @@ jobs:
 
           echo "plugin=$plugin" >> "$GITHUB_OUTPUT"
           echo "bridge=$bridge" >> "$GITHUB_OUTPUT"
+          echo "skill=$skill" >> "$GITHUB_OUTPUT"
           echo "workflow=$workflow" >> "$GITHUB_OUTPUT"
 
-          echo "plugin=$plugin bridge=$bridge workflow=$workflow"
+          echo "plugin=$plugin bridge=$bridge skill=$skill workflow=$workflow"
 
   bridge:
-    name: Validate and package MCP v2 bridge
+    name: Validate and package MCP / skill components
     needs: changes
-    if: needs.changes.outputs.bridge == 'true' || needs.changes.outputs.workflow == 'true'
+    if: needs.changes.outputs.bridge == 'true' || needs.changes.outputs.skill == 'true' || needs.changes.outputs.workflow == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -114,8 +120,6 @@ jobs:
           missing = expected - names
           assert not missing, f"Missing MCP tools: {sorted(missing)}"
 
-          # V0.3 protocol: two same-name instances coexist; raw human name is
-          # ambiguous until V0.4 deterministic binding gives DAW context.
           base = [
               "Bass", 48000.0, 1.0, -20.0, -30.0, 10.0,
               500.0, 5000.0, 0.1, 0.8, 0.2,
@@ -139,8 +143,6 @@ jobs:
           else:
               raise AssertionError("Duplicate analyzer names must be ambiguous before binding")
 
-          # V0.4 identify event can be consumed exactly once and produces a
-          # deterministic FL mixer track/slot -> runtime UUID binding.
           server._on_identify("/aianalyzer/identify", "uuid-a", "Bass", 2.0, "0.4")
           last = server.audio_last_identify()
           assert last["runtime_id"] == "uuid-a"
@@ -162,8 +164,6 @@ jobs:
           assert topology["bound_count"] == 1
           assert topology["unbound_count"] == 1
 
-          # Silent V0.3 frame: spectral/stereo outputs must become None while
-          # LUFS-I remains a valid accumulated session value.
           silent = list(base)
           silent[3] = -80.0
           server._on_frame("/aianalyzer/frame", *(silent + [0, -80.0, 4.0, "uuid-a"]))
@@ -181,26 +181,28 @@ jobs:
           )
           PY
 
-      - name: Package bridge
+      - name: Package MCP and skill folders
         shell: bash
         run: |
           set -euo pipefail
           rm -rf dist
-          mkdir -p dist
-          (
-            cd bridge
-            zip -9 -r ../dist/bridge.zip \
-              server.py \
-              requirements.txt \
-              cherry-studio.example.json
-          )
+          mkdir -p dist/mcp dist/skill
 
-      - name: Upload bridge artifact
+          cp bridge/server.py dist/mcp/
+          cp bridge/requirements.txt dist/mcp/
+          cp bridge/cherry-studio.example.json dist/mcp/
+          cp -R skills/ai-analyzer-flstudio/. dist/skill/
+
+          echo "Component artifact contents:"
+          find dist -maxdepth 3 -type f -print | sort
+
+      - name: Upload component artifact
         uses: actions/upload-artifact@v4
         with:
-          name: AI-Audio-Analyzer-Bridge
-          path: dist/bridge.zip
+          name: AI-Audio-Analyzer-Components
+          path: dist/
           if-no-files-found: error
+          include-hidden-files: true
 
   plugin:
     name: Build VST3 (${{ matrix.os }})
@@ -226,13 +228,13 @@ jobs:
       - name: Build VST3
         run: cmake --build build --config Release --parallel 2
 
-      - name: Package macOS
+      - name: Package macOS three-part artifact
         if: runner.os == 'macOS'
         shell: bash
         run: |
           set -euo pipefail
           rm -rf dist
-          mkdir -p dist
+          mkdir -p dist/mcp dist/skill
 
           VST3_PATH="$(find build/AIAnalyzer_artefacts -type d -name 'AI Audio Analyzer.vst3' -print -quit)"
           if [ -z "$VST3_PATH" ]; then
@@ -254,45 +256,39 @@ jobs:
           codesign --force --deep --sign - --timestamp=none "$VST3_PATH"
           codesign --verify --deep --strict --verbose=4 "$VST3_PATH"
 
-          ditto -c -k --sequesterRsrc --keepParent \
-            "$VST3_PATH" \
-            "dist/AI-Audio-Analyzer-macOS.vst3.zip"
+          ditto "$VST3_PATH" "dist/AI Audio Analyzer.vst3"
 
-          (
-            cd bridge
-            zip -9 -r ../dist/bridge.zip \
-              server.py \
-              requirements.txt \
-              cherry-studio.example.json
-          )
+          cp bridge/server.py dist/mcp/
+          cp bridge/requirements.txt dist/mcp/
+          cp bridge/cherry-studio.example.json dist/mcp/
+          cp -R skills/ai-analyzer-flstudio/. dist/skill/
 
-          echo "Package contents:"
-          ls -lh dist
+          echo "Install artifact top level:"
+          find dist -maxdepth 1 -mindepth 1 -print | sort
 
-      - name: Package Windows
+      - name: Package Windows three-part artifact
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           if (Test-Path dist) { Remove-Item dist -Recurse -Force }
-          New-Item -ItemType Directory -Path dist | Out-Null
+          New-Item -ItemType Directory -Path 'dist/mcp' -Force | Out-Null
+          New-Item -ItemType Directory -Path 'dist/skill' -Force | Out-Null
 
           $vst3 = Get-ChildItem -Path build/AIAnalyzer_artefacts -Recurse -Directory -Filter 'AI Audio Analyzer.vst3' | Select-Object -First 1
           if (-not $vst3) {
             throw 'AI Audio Analyzer.vst3 bundle not found'
           }
 
-          Compress-Archive -Path $vst3.FullName -DestinationPath 'dist/AI-Audio-Analyzer-Windows.vst3.zip' -CompressionLevel Optimal
+          Copy-Item -Path $vst3.FullName -Destination 'dist/AI Audio Analyzer.vst3' -Recurse -Force
 
-          $bridgeFiles = @(
-            'bridge/server.py',
-            'bridge/requirements.txt',
-            'bridge/cherry-studio.example.json'
-          )
-          Compress-Archive -Path $bridgeFiles -DestinationPath 'dist/bridge.zip' -CompressionLevel Optimal
+          Copy-Item 'bridge/server.py' 'dist/mcp/server.py'
+          Copy-Item 'bridge/requirements.txt' 'dist/mcp/requirements.txt'
+          Copy-Item 'bridge/cherry-studio.example.json' 'dist/mcp/cherry-studio.example.json'
+          Copy-Item 'skills/ai-analyzer-flstudio/*' 'dist/skill/' -Recurse -Force
 
-          Write-Host 'Package contents:'
-          Get-ChildItem -Path dist | Select-Object Name, Length
+          Write-Host 'Install artifact top level:'
+          Get-ChildItem -Path dist | Select-Object Name, Mode
 
       - name: Upload install package
         uses: actions/upload-artifact@v4
