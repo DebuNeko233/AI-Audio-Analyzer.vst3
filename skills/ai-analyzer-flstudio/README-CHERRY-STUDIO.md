@@ -3,13 +3,13 @@
 This Skill targets:
 
 - Cherry Studio;
-- AI Audio Analyzer VST3 0.7.0;
-- AI Audio Analyzer MCP 0.7;
+- AI Audio Analyzer VST3 0.8.0;
+- AI Audio Analyzer MCP 0.8;
 - optional FL Studio control MCP: https://github.com/rosasynthesiz/flstudio-mcp
 
 Its purpose is to help an LLM **call Analyzer MCP correctly, interpret measurements correctly, manage multi-instance mapping, and judge evidence quality**.
 
-It does **not** provide fixed mixing style, LUFS targets, EQ/compression/sidechain recipes, or mastering chains.
+It does **not** provide fixed mixing style, LUFS targets, EQ/compression/sidechain recipes, stereo recipes, or mastering chains.
 
 ## Current capability layers
 
@@ -19,9 +19,10 @@ V0.4  Identify → FL Mixer Track/Slot deterministic mapping
 V0.5  Project Status / Mix Overview / Snapshot A-B
 V0.6  Spectral Flux / RMS Rise / temporal profile / band-envelope comparison
 V0.7  ERB-rebinned spectral + relative-level + temporal masking evidence
+V0.8  Mid/Side RMS / Side spectrum / frequency-dependent Side-Mid / negative-cross evidence
 ```
 
-V0.7 does not add new OSC fields. It reuses V0.6 measurements in the Bridge.
+V0.8 extends the VST3 OSC frame append-only; indexes `0..64` remain unchanged.
 
 ## Recommended initialization
 
@@ -57,15 +58,58 @@ project masking candidates    audio_project_masking_scan()
 stable single track           audio_average()
 current single frame          audio_snapshot()
 single-track temporal         audio_temporal_profile()
+deep single-track stereo      audio_stereo_profile()
 two-track basic spectrum      audio_compare_tracks()
-two-track detailed evidence   audio_masking_evidence()
+two-track detailed masking    audio_masking_evidence()
 custom-band temporal          audio_temporal_compare()
-stereo bands                  audio_stereo_bands()
+two-track stereo comparison   audio_stereo_compare()
+legacy stereo bands           audio_stereo_bands()
 Snapshot management           audio_capture_snapshot() / audio_list_snapshots()
 Before/After                  audio_compare_snapshots()
 ```
 
-MCP 0.7 exposes **20 tools**. Full signatures are in `references/analyzer-mcp.md`.
+MCP 0.8 exposes **22 tools**. Full signatures are in `references/analyzer-mcp.md`.
+
+## V0.8 stereo evidence
+
+Single-track recent profile:
+
+```text
+audio_stereo_profile("mixer:4/slot:9", seconds=5)
+```
+
+Two-track measurement comparison:
+
+```text
+audio_stereo_compare(
+  "mixer:4/slot:9",
+  "mixer:7/slot:9",
+  seconds=5
+)
+```
+
+Keep these axes separate:
+
+```text
+signed L/R correlation
+Side/Mid energy ratio
+1 - abs(correlation) decorrelation proxy
+negative cross-spectrum energy ratio
+20-120 Hz low-band correlation / Side-Mid
+32-band Mid spectrum
+32-band Side spectrum
+8-band frequency-dependent correlation / Side-Mid
+```
+
+Important limitations:
+
+- low correlation is not the same as anti-correlation;
+- large Side energy does not prove phase opposition;
+- `decorrelation_proxy = 1 - abs(correlation)` must be read with correlation sign;
+- negative-cross evidence is not a mono-cancellation percentage or audible-problem probability;
+- no universal width, Side/Mid, correlation, or low-band target is defined by this Skill.
+
+See `references/stereo-evidence.md` before making strong claims from V0.8 stereo measurements.
 
 ## V0.7 masking evidence
 
@@ -118,6 +162,7 @@ When input is invalid:
 
 - spectrum/stereo fields become `null` / unavailable;
 - V0.6 temporal fields have `temporal_valid=false`;
+- V0.8 deep stereo fields have `stereo_v08_valid=false`;
 - `null` is not zero;
 - LUFS-I and session max True Peak may remain available because they are session-level state.
 
@@ -139,9 +184,10 @@ Use comparable musical passages, similar windows, and similar active coverage. S
 ```text
 Use the ai-analyzer-flstudio Skill only as a technical MCP usage and measurement-semantics reference.
 Start with audio_project_status and establish deterministic Identify bindings for unbound Analyzer instances.
-Before interpreting content, inspect signal_present, analysis_valid, active_ratio, and temporal validity where relevant.
-Use audio_mix_overview for coarse project state, audio_project_masking_scan for ranked V0.7 masking-evidence candidates, and audio_masking_evidence for detailed pairwise ERB-region evidence.
-Treat null as unavailable, not zero. Treat spectral overlap, temporal overlap, onset candidates, and V0.7 masking evidence as evidence rather than automatic processing instructions.
+Before interpreting content, inspect signal_present, analysis_valid, active_ratio, temporal validity, and V0.8 stereo validity where relevant.
+Use audio_mix_overview for coarse project state, audio_project_masking_scan for ranked V0.7 masking-evidence candidates, audio_masking_evidence for detailed pairwise ERB-region evidence, and audio_stereo_profile for V0.8 Mid/Side and stereo evidence.
+Keep correlation, Side/Mid energy, decorrelation proxy, and negative-cross evidence separate. Treat null as unavailable, not zero.
+Treat spectral overlap, temporal overlap, onset candidates, masking evidence, and stereo evidence as measurements/evidence rather than automatic processing instructions.
 If the DAW is changed through an external control MCP, read back the actual host state and use Analyzer/Snapshot measurements for verification.
 ```
 
@@ -151,4 +197,5 @@ If the DAW is changed through an external control MCP, read back the actual host
 references/analyzer-mcp.md       MCP tools and selector rules
 references/parameters.md         measurement parameter semantics
 references/masking-evidence.md   V0.7 evidence model and limitations
+references/stereo-evidence.md    V0.8 Mid/Side and stereo evidence semantics
 ```
