@@ -11,22 +11,14 @@ PLUGIN_ROOT="$HOME/Library/Audio/Plug-Ins/VST3"
 PLUGIN_DEST="$PLUGIN_ROOT/AI Audio Analyzer.vst3"
 INSTALL_ROOT="$HOME/Library/Application Support/AI Audio Analyzer"
 
-case "$(uname -m)" in
-  arm64)
-    MCP_ARCH="arm64"
-    ;;
-  x86_64)
-    MCP_ARCH="x86_64"
-    ;;
-  *)
-    echo "Unsupported macOS architecture: $(uname -m)" >&2
-    exit 1
-    ;;
-esac
+if [ "$(uname -m)" != "arm64" ]; then
+  echo "This macOS package supports Apple Silicon (arm64) only. Detected: $(uname -m)" >&2
+  exit 1
+fi
 
 echo 'AI Audio Analyzer automatic installer'
 echo "Package: $ROOT"
-echo "Architecture: $MCP_ARCH"
+echo 'Architecture: arm64 (Apple Silicon)'
 
 step 'Removing package quarantine metadata where possible'
 xattr -dr com.apple.quarantine "$ROOT" 2>/dev/null || true
@@ -62,7 +54,7 @@ done
 
 xattr -dr com.apple.quarantine "$INSTALL_ROOT/mcp" 2>/dev/null || true
 
-MCP_EXE="$INSTALL_ROOT/mcp/runtime/$MCP_ARCH/ai-audio-analyzer-mcp/ai-audio-analyzer-mcp"
+MCP_EXE="$INSTALL_ROOT/mcp/runtime/ai-audio-analyzer-mcp/ai-audio-analyzer-mcp"
 if [ ! -f "$MCP_EXE" ]; then
   echo "Packaged MCP executable not found: $MCP_EXE" >&2
   exit 1
