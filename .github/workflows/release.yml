@@ -42,7 +42,12 @@ jobs:
           test -s release/common/START-HERE.md
           test -s release/common/INSTALL.en.md
           test -s release/common/INSTALL.zh-CN.md
-          python -m py_compile bridge/server.py bridge/project_tools.py bridge/server_v05.py
+          python -m py_compile \
+            bridge/server.py \
+            bridge/project_tools.py \
+            bridge/server_v05.py \
+            bridge/temporal_tools.py \
+            bridge/server_v06.py
 
   mcp-runtime:
     name: MCP runtime (${{ matrix.label }})
@@ -74,11 +79,16 @@ jobs:
           python -m pip install -r bridge/requirements.txt
           python -m pip install 'pyinstaller>=6.10,<7'
 
-      - name: Validate source MCP 0.5
+      - name: Validate source MCP 0.6
         shell: bash
         run: |
-          python -m py_compile bridge/server.py bridge/project_tools.py bridge/server_v05.py
-          AI_ANALYZER_SELF_TEST=1 python bridge/server_v05.py
+          python -m py_compile \
+            bridge/server.py \
+            bridge/project_tools.py \
+            bridge/server_v05.py \
+            bridge/temporal_tools.py \
+            bridge/server_v06.py
+          AI_ANALYZER_SELF_TEST=1 python bridge/server_v06.py
 
       - name: Build standalone MCP runtime
         shell: bash
@@ -91,7 +101,7 @@ jobs:
             --paths bridge \
             --collect-all mcp \
             --collect-all pythonosc \
-            bridge/server_v05.py
+            bridge/server_v06.py
 
       - name: Smoke-test packaged runtime (Unix)
         if: runner.os == 'macOS'
@@ -166,7 +176,15 @@ jobs:
           New-Item -ItemType Directory -Path (Join-Path $root 'mcp/runtime') -Force | Out-Null
           Copy-Item 'input/mcp-runtime/ai-audio-analyzer-mcp' (Join-Path $root 'mcp/runtime/ai-audio-analyzer-mcp') -Recurse -Force
           New-Item -ItemType Directory -Path (Join-Path $root 'mcp/source') -Force | Out-Null
-          Copy-Item 'bridge/server.py','bridge/server_v05.py','bridge/project_tools.py','bridge/requirements.txt','bridge/cherry-studio.example.json' (Join-Path $root 'mcp/source/') -Force
+          Copy-Item \
+            'bridge/server.py',\
+            'bridge/server_v05.py',\
+            'bridge/server_v06.py',\
+            'bridge/project_tools.py',\
+            'bridge/temporal_tools.py',\
+            'bridge/requirements.txt',\
+            'bridge/cherry-studio.example.json' \
+            (Join-Path $root 'mcp/source/') -Force
           Copy-Item 'skills/ai-analyzer-flstudio' (Join-Path $root 'skill') -Recurse -Force
 
           Copy-Item release/common/START-HERE.md (Join-Path $root 'START-HERE.md')
@@ -179,7 +197,7 @@ jobs:
           AI Audio Analyzer $version
           Platform: Windows x64
           VST3: Windows x64
-          MCP: PyInstaller standalone x64 runtime
+          MCP: PyInstaller standalone x64 runtime, MCP entrypoint 0.6
           Python required for normal install: No
           Release commit: $env:GITHUB_SHA
           "@ | Set-Content -Path (Join-Path $root 'VERSION.txt') -Encoding UTF8
@@ -247,7 +265,15 @@ jobs:
 
           ditto "$VST3_PATH" "$ROOT/AI Audio Analyzer.vst3"
           ditto input/mcp-arm64/ai-audio-analyzer-mcp "$ROOT/mcp/runtime/ai-audio-analyzer-mcp"
-          cp bridge/server.py bridge/server_v05.py bridge/project_tools.py bridge/requirements.txt bridge/cherry-studio.example.json "$ROOT/mcp/source/"
+          cp \
+            bridge/server.py \
+            bridge/server_v05.py \
+            bridge/server_v06.py \
+            bridge/project_tools.py \
+            bridge/temporal_tools.py \
+            bridge/requirements.txt \
+            bridge/cherry-studio.example.json \
+            "$ROOT/mcp/source/"
           ditto skills/ai-analyzer-flstudio "$ROOT/skill"
 
           cp release/common/START-HERE.md "$ROOT/START-HERE.md"
@@ -265,7 +291,7 @@ jobs:
           AI Audio Analyzer ${VERSION}
           Platform: macOS Apple Silicon
           VST3: arm64, minimum target macOS 11.0
-          MCP: PyInstaller standalone arm64 runtime
+          MCP: PyInstaller standalone arm64 runtime, MCP entrypoint 0.6
           Python required for normal install: No
           Release commit: ${GITHUB_SHA}
           EOF
@@ -322,6 +348,8 @@ jobs:
 
           - **Windows**: x64 VST3 + standalone PyInstaller MCP runtime + Skill + automatic installer.
           - **macOS**: Apple Silicon arm64 VST3 + native arm64 standalone MCP runtime + Skill + automatic installer.
+          - **MCP 0.6**: project tools plus temporal profile / time-aligned band-envelope comparison.
+          - **VST3 0.6**: append-only spectral-flux, RMS-rise and 40-160 Hz temporal descriptors.
 
           **Intel macOS / x86_64 is not included in current releases.**
 
