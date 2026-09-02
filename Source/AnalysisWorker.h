@@ -39,6 +39,7 @@ private:
 
     void resetAnalysisState();
     void resetLoudnessState();
+    void updateSignalState();
     void processLoudnessHop();
     void processWindow();
     void refreshOscConnectionIfNeeded();
@@ -78,6 +79,15 @@ private:
     float latestLufsIntegrated = -120.0f;
     float latestTruePeakDbtp = -120.0f;
     float maxTruePeakDbtp = -120.0f;
+
+    bool signalPresent = false;
+    float detectorPeakDb = -120.0f;
+    double silenceSeconds = 0.0;
+
+    // Generated once per live VST3 instance and deliberately not serialized.
+    // Duplicating a mixer track therefore creates a fresh identity even when
+    // the user-visible instance name is copied.
+    juce::String runtimeUuid;
 
     mutable std::mutex latestMutex;
     AnalysisFrame latestFrame;

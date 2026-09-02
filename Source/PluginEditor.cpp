@@ -97,15 +97,22 @@ void AIAnalyzerAudioProcessorEditor::paint(juce::Graphics& g)
                          metrics.withWidth(columnWidth).toNearestInt(),
                          juce::Justification::centred, 2);
         g.drawFittedText("RMS / Crest\n" + formatDb(latestFrame.rmsDb)
-                         + " / " + formatDb(latestFrame.crestDb),
+                         + " / " + (latestFrame.signalPresent ? formatDb(latestFrame.crestDb) : juce::String("--")),
                          metrics.withX(metrics.getX() + columnWidth).withWidth(columnWidth).toNearestInt(),
                          juce::Justification::centred, 2);
-        g.drawFittedText("LUFS-S / LUFS-I\n" + formatLufs(latestFrame.lufsShortTerm)
+
+        const auto shortTermText = (!latestFrame.signalPresent && latestFrame.silenceSeconds >= 3.0f)
+            ? juce::String("--")
+            : formatLufs(latestFrame.lufsShortTerm);
+        g.drawFittedText("LUFS-S / LUFS-I\n" + shortTermText
                          + " / " + formatLufs(latestFrame.lufsIntegrated),
                          metrics.withX(metrics.getX() + columnWidth * 2.0f).withWidth(columnWidth).toNearestInt(),
                          juce::Justification::centred, 2);
-        g.drawFittedText("Corr / Width\n" + juce::String(latestFrame.stereoCorrelation, 2)
-                         + " / " + juce::String(latestFrame.stereoWidth, 2),
+
+        const auto stereoText = latestFrame.signalPresent
+            ? juce::String(latestFrame.stereoCorrelation, 2) + " / " + juce::String(latestFrame.stereoWidth, 2)
+            : juce::String("NO SIGNAL");
+        g.drawFittedText("Corr / Width\n" + stereoText,
                          metrics.withX(metrics.getX() + columnWidth * 3.0f).withWidth(columnWidth).toNearestInt(),
                          juce::Justification::centred, 2);
     }
@@ -120,11 +127,23 @@ void AIAnalyzerAudioProcessorEditor::paint(juce::Graphics& g)
     {
         auto detail = analysisArea.removeFromTop(22.0f);
         g.setFont(juce::FontOptions(11.0f));
-        g.setColour(juce::Colours::lightgrey);
-        g.drawText("Centroid " + juce::String(latestFrame.spectralCentroidHz, 0) + " Hz"
-                   + "   ·   Rolloff " + juce::String(latestFrame.spectralRolloffHz, 0) + " Hz"
-                   + "   ·   Session max TP " + formatDbtp(latestFrame.maxTruePeakDbtp),
-                   detail.toNearestInt(), juce::Justification::centredLeft);
+        g.setColour(latestFrame.signalPresent ? juce::Colours::lightgrey : juce::Colours::orange);
+
+        if (latestFrame.signalPresent)
+        {
+            g.drawText("SIGNAL   ·   Detector " + formatDb(latestFrame.detectorPeakDb)
+                       + "   ·   Centroid " + juce::String(latestFrame.spectralCentroidHz, 0) + " Hz"
+                       + "   ·   Rolloff " + juce::String(latestFrame.spectralRolloffHz, 0) + " Hz"
+                       + "   ·   Session max TP " + formatDbtp(latestFrame.maxTruePeakDbtp),
+                       detail.toNearestInt(), juce::Justification::centredLeft);
+        }
+        else
+        {
+            g.drawText("NO INPUT (< -50 dBFS)   ·   Detector " + formatDb(latestFrame.detectorPeakDb)
+                       + "   ·   Silence " + juce::String(latestFrame.silenceSeconds, 1) + " s"
+                       + "   ·   Session max TP " + formatDbtp(latestFrame.maxTruePeakDbtp),
+                       detail.toNearestInt(), juce::Justification::centredLeft);
+        }
         analysisArea.removeFromTop(6.0f);
     }
 
@@ -144,6 +163,14 @@ void AIAnalyzerAudioProcessorEditor::drawSpectrum(juce::Graphics& g,
 
     if (!hasFrame)
         return;
+
+    if (!latestFrame.signalPresent)
+    {
+        g.setColour(juce::Colours::grey);
+        g.setFont(juce::FontOptions(13.0f));
+        g.drawText("No active input", bounds.toNearestInt(), juce::Justification::centred);
+        return;
+    }
 
     juce::Path path;
     const auto left = bounds.getX() + 10.0f;

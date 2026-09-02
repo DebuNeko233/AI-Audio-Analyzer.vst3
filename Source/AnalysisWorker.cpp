@@ -13,6 +13,13 @@ constexpr float kMaxFrequencyHz = 20000.0f;
 constexpr float kRolloffFraction = 0.85f;
 constexpr double kOscIntervalMs = 100.0; // 10 Hz network update rate
 
+// Treat material below -50 dBFS as absent, but use hysteresis and a short hold
+// to avoid chattering when a tail hovers around the threshold.
+constexpr float kSignalCloseDb = -50.0f;
+constexpr float kSignalOpenDb = -48.0f;
+constexpr double kSignalHoldSeconds = 0.4;
+constexpr double kShortTermInvalidSilenceSeconds = 3.0;
+
 float bandCenterHz(int index)
 {
     const auto t = (static_cast<float>(index) + 0.5f) / static_cast<float>(kNumBands);
@@ -33,7 +40,8 @@ int stereoBandForFrequency(float frequencyHz)
 } // namespace
 
 AnalysisWorker::AnalysisWorker()
-    : juce::Thread("AI Analyzer Analysis")
+    : juce::Thread("AI Audio Analyzer Analysis"),
+      runtimeUuid(juce::Uuid().toString())
 {
 }
 
@@ -133,6 +141,11 @@ void AnalysisWorker::resetAnalysisState()
     std::fill(fftRightData.begin(), fftRightData.end(), 0.0f);
     std::fill(midMagnitudes.begin(), midMagnitudes.end(), 0.0f);
     filledSamples = 0;
+
+    signalPresent = false;
+    detectorPeakDb = kFloorDb;
+    silenceSeconds = 0.0;
+
     resetLoudnessState();
 }
 
@@ -161,6 +174,47 @@ float AnalysisWorker::interpolateMagnitudeAtFrequency(const float* magnitudes,
     return magnitudes[static_cast<std::size_t>(lower)]
          + fraction * (magnitudes[static_cast<std::size_t>(upper)]
                      - magnitudes[static_cast<std::size_t>(lower)]);
+}
+
+void AnalysisWorker::updateSignalState()
+{
+    float peak = 0.0f;
+    for (int i = 0; i < kHopSize; ++i)
+    {
+        peak = std::max(peak, std::max(std::abs(hopLeft[static_cast<std::size_t>(i)]),
+                                      std::abs(hopRight[static_cast<std::size_t>(i)])));
+    }
+
+    detectorPeakDb = amplitudeToDb(peak);
+
+    const auto currentSampleRate = std::max(1.0, sampleRate.load(std::memory_order_acquire));
+    const auto hopSeconds = static_cast<double>(kHopSize) / currentSampleRate;
+
+    if (signalPresent)
+    {
+        if (detectorPeakDb >= kSignalCloseDb)
+        {
+            silenceSeconds = 0.0;
+        }
+        else
+        {
+            silenceSeconds += hopSeconds;
+            if (silenceSeconds >= kSignalHoldSeconds)
+                signalPresent = false;
+        }
+    }
+    else
+    {
+        if (detectorPeakDb > kSignalOpenDb)
+        {
+            signalPresent = true;
+            silenceSeconds = 0.0;
+        }
+        else
+        {
+            silenceSeconds += hopSeconds;
+        }
+    }
 }
 
 void AnalysisWorker::processLoudnessHop()
@@ -207,6 +261,9 @@ void AnalysisWorker::processWindow()
     AnalysisFrame frame;
     frame.sampleRate = currentSampleRate;
     frame.timestampSeconds = juce::Time::getMillisecondCounterHiRes() / 1000.0;
+    frame.signalPresent = signalPresent;
+    frame.detectorPeakDb = detectorPeakDb;
+    frame.silenceSeconds = static_cast<float>(silenceSeconds);
 
     double sumSquares = 0.0;
     double sumLR = 0.0;
@@ -246,7 +303,9 @@ void AnalysisWorker::processWindow()
     frame.peakDb = amplitudeToDb(peak);
     frame.rmsDb = amplitudeToDb(rms);
     frame.crestDb = frame.peakDb - frame.rmsDb;
-    frame.lufsShortTerm = latestLufsShortTerm;
+    frame.lufsShortTerm = (!signalPresent && silenceSeconds >= kShortTermInvalidSilenceSeconds)
+        ? kFloorDb
+        : latestLufsShortTerm;
     frame.lufsIntegrated = latestLufsIntegrated;
     frame.truePeakDbtp = latestTruePeakDbtp;
     frame.maxTruePeakDbtp = maxTruePeakDbtp;
@@ -369,6 +428,21 @@ void AnalysisWorker::processWindow()
             : 0.0f;
     }
 
+    // Once the signal gate has closed, spectral/stereo values are explicitly
+    // treated as invalid machine features instead of leaving random near-noise
+    // correlation values in the stream. Peak/RMS, LUFS-I and session max TP are
+    // retained because they still describe detector/session state.
+    if (!signalPresent)
+    {
+        frame.spectralCentroidHz = 0.0f;
+        frame.spectralRolloffHz = 0.0f;
+        frame.spectralFlatness = 0.0f;
+        frame.stereoCorrelation = 0.0f;
+        frame.stereoWidth = 0.0f;
+        frame.bandsDb.fill(kFloorDb);
+        frame.bandStereoCorrelation.fill(0.0f);
+    }
+
     {
         const std::scoped_lock lock(latestMutex);
         latestFrame = frame;
@@ -416,11 +490,12 @@ void AnalysisWorker::sendFrame(const AnalysisFrame& frame)
     message.addFloat32(frame.stereoCorrelation);
     message.addFloat32(frame.stereoWidth);
 
-    // Preserve the V0.1 prefix so an older bridge can still read the first
-    // 11 scalar fields plus 32 spectrum bands and simply ignore V0.2 extras.
+    // Preserve the V0.1 prefix so older bridges can still read the first
+    // 11 scalar fields plus 32 spectrum bands.
     for (const auto bandDb : frame.bandsDb)
         message.addFloat32(bandDb);
 
+    // V0.2 extras.
     message.addFloat32(frame.lufsShortTerm);
     message.addFloat32(frame.lufsIntegrated);
     message.addFloat32(frame.truePeakDbtp);
@@ -428,6 +503,12 @@ void AnalysisWorker::sendFrame(const AnalysisFrame& frame)
 
     for (const auto correlation : frame.bandStereoCorrelation)
         message.addFloat32(correlation);
+
+    // V0.3 extras. Keep these appended so V0.1/V0.2 bridges can ignore them.
+    message.addInt32(frame.signalPresent ? 1 : 0);
+    message.addFloat32(frame.detectorPeakDb);
+    message.addFloat32(frame.silenceSeconds);
+    message.addString(runtimeUuid);
 
     oscSender.send(message);
 }
@@ -451,6 +532,7 @@ void AnalysisWorker::run()
         if (!fifo.pop(hopLeft.data(), hopRight.data(), kHopSize))
             continue;
 
+        updateSignalState();
         processLoudnessHop();
 
         if (filledSamples < kFftSize)

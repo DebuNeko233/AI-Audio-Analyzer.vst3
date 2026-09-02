@@ -19,6 +19,13 @@ struct AnalysisFrame
     double sampleRate = 48000.0;
     double timestampSeconds = 0.0;
 
+    // V0.3 signal-state metadata. The detector uses a -50 dBFS close threshold,
+    // -48 dBFS reopen threshold and a short hold so near-threshold material does
+    // not chatter between active/silent states.
+    bool signalPresent = false;
+    float detectorPeakDb = -120.0f;
+    float silenceSeconds = 0.0f;
+
     float peakDb = -120.0f;
     float rmsDb = -120.0f;
     float crestDb = 0.0f;
