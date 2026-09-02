@@ -51,7 +51,24 @@ struct AnalysisFrame
     float rmsRisePeakDb = 0.0f;
     float lowBandEnergyDb = -120.0f; // FFT-derived 40-160 Hz energy feature.
 
+    // V0.8 Mid/Side and stereo evidence. These values deliberately separate
+    // channel similarity, Side energy, and negative cross-spectrum evidence so
+    // a wide/decorrelated signal is not conflated with a strongly phase-opposed
+    // signal. They remain measurements/evidence, not quality scores.
+    float midRmsDb = -120.0f;
+    float sideRmsDb = -120.0f;
+    float sideToMidDb = -120.0f;
+    float negativeCrossEnergyRatio = 0.0f;
+    float lowBandCorrelation = 1.0f;      // 20-120 Hz aggregate correlation.
+    float lowBandSideToMidDb = -120.0f;  // 20-120 Hz Side/Mid power ratio in dB.
+
+    // Historical bandsDb is the Mid-spectrum feature used since V0.1.
     std::array<float, kNumBands> bandsDb {};
     std::array<float, kNumStereoCorrelationBands> bandStereoCorrelation {};
+
+    // V0.8 adds an explicit Side spectrum plus integrated Side/Mid ratios over
+    // the same eight frequency ranges used by bandStereoCorrelation.
+    std::array<float, kNumBands> sideBandsDb {};
+    std::array<float, kNumStereoCorrelationBands> bandSideToMidDb {};
 };
 } // namespace aianalyzer
