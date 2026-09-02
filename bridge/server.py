@@ -8,11 +8,12 @@ the shared MCP server defined by `analyzer_core.py`.
 Current layers:
 - core: signal validity, runtime identity, FL Mixer binding, base measurements
 - project_tools: project overview and Snapshot A/B
-- temporal_tools: V0.6 temporal frame tail and temporal comparisons
-- masking_tools: V0.7 masking-evidence tools
-- stereo_tools: V0.8 Mid/Side, Side-spectrum, and stereo evidence
-- semantic_tools: V0.9 chroma, tonal-center, and harmonic-alignment evidence
-- verification_tools: V1.0 controlled Before/After verification sessions
+- temporal_tools: temporal frame tail and temporal comparisons
+- masking_tools: masking-evidence tools
+- stereo_tools: Mid/Side, Side-spectrum, and stereo evidence
+- semantic_tools: chroma, tonal-center, and harmonic-alignment evidence
+- performance_tools: Analysis Profile, feature-mask and worker telemetry parsing
+- verification_tools: controlled Before/After verification sessions
 
 Set AI_ANALYZER_SELF_TEST=1 to validate source or packaged runtime without
 opening the OSC listener or MCP stdio transport.
@@ -33,18 +34,14 @@ import analyzer_core as core
 # execute the entrypoint a second time under another module name.
 sys.modules.setdefault("server", sys.modules[__name__])
 
-# Public shared MCP object must exist before feature modules import `server`.
 mcp = core.mcp
 
 
 def __getattr__(name: str) -> Any:
-    """Forward legacy/core attribute reads to the internal core module."""
     return getattr(core, name)
 
 
-# Import order matters for protocol layers. V0.9 preserves the stable core +
-# V0.6 + V0.8 fields before attaching its music-semantic tail. V1.0 adds only
-# Bridge-side verification orchestration, so OSC protocol remains V0.9.
+# Import order matters because every protocol layer wraps the previous parser.
 import project_tools as project  # noqa: E402,F401
 import temporal_tools as temporal  # noqa: E402
 
@@ -59,10 +56,14 @@ import semantic_tools as semantic  # noqa: E402
 
 core._on_frame = semantic.on_frame_v09
 
+import performance_tools as performance  # noqa: E402
+
+core._on_frame = performance.on_frame_v11
+
 import verification_tools as verification  # noqa: E402,F401
 
-MCP_VERSION = "1.0"
-OSC_PROTOCOL_VERSION = "0.9"
+MCP_VERSION = "1.1"
+OSC_PROTOCOL_VERSION = "1.1"
 
 EXPECTED_TOOLS = {
     "audio_bridge_status",
@@ -89,6 +90,8 @@ EXPECTED_TOOLS = {
     "audio_stereo_compare",
     "audio_tonal_profile",
     "audio_tonal_compare",
+    "audio_analysis_status",
+    "audio_project_performance",
     "audio_begin_verification",
     "audio_complete_verification",
     "audio_verification_status",
