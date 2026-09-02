@@ -2,142 +2,187 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-**AI Audio Analyzer** 是一套面向 AI / LLM 音乐制作工作流的 **VST3 + MCP 音频测量层**。VST3 在 DAW 内部测量真实音频，MCP 把数据结构化提供给模型，配套 Skill 只负责教模型如何正确调用 MCP、理解参数和判断数据有效性，不预设某一种混音风格。
+**AI Audio Analyzer** 是一个面向 AI / LLM 音乐制作工作流的 JUCE VST3 音频测量层。
 
-当前产品版本：**0.6.0**。
+它不是让模型去“看”分析器界面，而是在 DAW 内部完成测量，通过 OSC 把紧凑数据发送给 Python MCP Bridge，再由 Cherry Studio 或其他 MCP 客户端结构化读取电平、响度、频谱、立体声、时间关系、工程概览、A/B 以及遮蔽相关证据。
 
-## 项目结构
+当前产品版本：**0.7.0**。
+
+## 项目组成
 
 ```text
 AI Audio Analyzer
-├─ VST3    在 DAW 内进行实时安全的音频测量
-├─ MCP     向模型提供结构化测量、比较与验证工具
-└─ Skill   MCP 调用技巧 + 参数技术语义
+├─ VST3    DAW 内的实时安全测量探针
+├─ MCP     将测量结果结构化提供给 LLM
+└─ Skill   英文 LLM 使用说明：工具调用、参数语义、有效性
 ```
 
-需要控制 FL Studio 时，推荐配合独立的控制 MCP：
+Skill **不是风格化混音教程**，不会内置固定 LUFS、EQ、压缩、Sidechain 或母带链规则。
+
+## 配套 FL Studio MCP
+
+当前工作流配套：
 
 **[rosasynthesiz/flstudio-mcp](https://github.com/rosasynthesiz/flstudio-mcp)**
+
+职责分开：
 
 ```text
 AI Audio Analyzer MCP   → 观察 / 测量 / 比较 / 验证
 FL Studio MCP           → 读取 / 控制 / 修改 FL Studio
 ```
 
-Analyzer 本身保持测量导向。Skill 不提供固定 LUFS 目标、EQ 配方、强制 Sidechain 规则或其他风格化混音策略。
+典型闭环：
 
-## 整体架构
+```text
+OBSERVE → REASON → CHANGE → READBACK → COMPARE
+观察       推理       修改       回读         对比
+```
+
+## 架构
 
 ```text
 FL Studio / DAW
 │
-├─ Mixer Track A ─ AI Audio Analyzer.vst3
-├─ Mixer Track B ─ AI Audio Analyzer.vst3
-└─ Master        ─ AI Audio Analyzer.vst3
-                      │
-                      │ OSC UDP 127.0.0.1:9855
-                      ▼
-              AI Audio Analyzer MCP
-              ├─ Live Instance Registry
-              ├─ Signal Validity
-              ├─ FL Track/Slot 确定绑定
-              ├─ Recent History Window
-              ├─ Project Overview / A-B Snapshot
-              └─ Temporal Comparison
-                      │
-                      ▼
-               Cherry Studio / LLM
+├─ Mixer Track A
+│   └─ AI Audio Analyzer.vst3
+├─ Mixer Track B
+│   └─ AI Audio Analyzer.vst3
+└─ Master
+    └─ AI Audio Analyzer.vst3
+             │
+             │ OSC UDP，默认 127.0.0.1:9855
+             ▼
+        Analyzer MCP Bridge
+        ├─ Live Instance Registry
+        ├─ Recent History
+        ├─ Signal Validity
+        ├─ FL Track/Slot 确定性映射
+        ├─ Project Overview / Snapshot A-B
+        ├─ V0.6 Temporal Evidence
+        └─ V0.7 Masking Evidence
+             │
+             ▼
+      Cherry Studio / LLM
 ```
 
-Audio Callback 只把 Sample 写入预分配的 SPSC FIFO。FFT、响度、Temporal Analysis、OSC 和 MCP 都不在实时音频线程上执行。
+多个 Analyzer 可以共用一个 UDP 端口；只有一个 MCP Bridge 进程应绑定 UDP `9855`。
 
-## 当前能力
+## 当前测量能力
 
-### 核心测量
+### 基础频谱 / 动态 / 响度
 
-- 4096 点 FFT，Hann Window，1024 Sample Hop
-- 20 Hz–20 kHz 的 32 个对数频谱 Band
-- Sample Peak dBFS / RMS dBFS / Crest Factor
-- 基于 `libebur128` 的 LUFS-S / LUFS-I
-- 当前 True Peak 与 Session Max True Peak dBTP
-- Spectral Centroid / 85% Rolloff / Flatness
+- 4096 点 FFT，Hann Window
+- 1024 Sample Analysis Hop
+- 20 Hz–20 kHz 的 32 个对数频谱特征
+- Sample Peak dBFS
+- RMS dBFS
+- Crest Factor
+- LUFS-S
+- 带 EBU R128 Gating 的 LUFS-I
+- Current True Peak dBTP
+- Session Max True Peak
+- Spectral Centroid
+- 约 85% Spectral Rolloff
+- Spectral Flatness
 - Full-band Stereo Correlation
 - Mid/Side Width Ratio
 - 8 个分频段 Stereo Correlation
 
-### V0.3 Signal Validity
+响度和 True Peak 使用 `libebur128`。
+
+### V0.3 Signal State
+
+大致逻辑：
 
 ```text
-Gate Close   低于约 -50 dBFS 持续约 0.4 s
-Gate Reopen  高于约 -48 dBFS
+关闭   低于 -50 dBFS 持续约 0.4 s
+重开   高于 -48 dBFS
 ```
 
-当 `signal_present=false` 时，依赖有效声音内容的 Spectrum / Stereo 指标会返回 unavailable，而不是伪造 0。`null` 的含义始终是“当前没有有效测量”，不是数字 0。
+`signal_present=false` 时，依赖真实音频内容的频谱/立体声字段会变为 unavailable，而不是返回误导性的 0。
 
-### V0.4 多实例确定映射
+`null` 表示**当前无有效测量**，不是数值 0。
 
-每个 Live VST3 实例都有 Session-scoped Runtime UUID，并向宿主公开：
+### V0.4 Analyzer ↔ FL Mixer 确定性映射
+
+每个 Live Analyzer 都有 Session Runtime UUID，并向宿主公开：
 
 ```text
 Parameter ID: identify
 Display name: Identify
-Type: Boolean
 ```
 
-每次 `Identify` 状态翻转都会发送 `/aianalyzer/identify`。模型知道自己刚操作的是哪个 FL Mixer Track / Slot，因此可以建立：
+每次 Identify 状态翻转都会发送 `/aianalyzer/identify`，即使 Transport 停止也可工作。
 
-```text
-FL Mixer Track / Slot
-        ↕
-Analyzer Runtime UUID
-```
-
-绑定后优先使用：
+控制端可将 Runtime UUID 与真实 FL Mixer Track/Slot 绑定，之后用：
 
 ```text
 mixer:7/slot:9
 ```
 
-而不是根据重复名称或声音内容猜测实例。
+稳定选中实例，不再依赖可能重复的显示名或音频内容猜测。
 
-### V0.5 Project Intelligence / A-B
+### V0.5 Project Intelligence / Snapshot A-B
 
-MCP 提供工程准备度、最近窗口 Overview 和 Session 内 Snapshot，使模型不需要每次都串联大量底层调用。
+提供工程准备度、最近窗口概览，以及当前 Bridge Session 内的 Before/After Snapshot。
 
 ### V0.6 Temporal Analysis
 
-VST3 0.6 在内部 FFT Hop 速率上计算时间特征，并汇总进约 10 Hz 的 OSC 数据：
+VST3 在内部分析 Hop 上计算时间特征，并聚合到约 10 Hz OSC：
 
 ```text
 temporal_window_seconds
 spectral_flux_mean
 spectral_flux_peak
 rms_rise_peak_db
-low_band_energy_db   # FFT-derived 40–160 Hz Energy
+low_band_energy_db   # FFT-derived 40–160 Hz
 ```
 
-MCP 新增：
+MCP 提供：
 
 ```text
-audio_temporal_profile(track, seconds=5)
-audio_temporal_compare(track_a, track_b, seconds=5,
-                       low_hz=40, high_hz=160,
-                       alignment_tolerance_ms=80)
+audio_temporal_profile()
+audio_temporal_compare()
 ```
 
-`audio_temporal_profile()` 用于汇总 Spectral Flux、快速 RMS Rise、40–160 Hz 能量变化以及基于显式阈值的 Onset/Change Candidate。
+Temporal overlap/correlation 是“时间共现/共变证据”，不是遮蔽概率，也不是处理指令。
 
-`audio_temporal_compare()` 会对齐两个 Analyzer Stream，并返回所选频段的 Envelope Correlation、Co-active Ratio 和 Normalized Temporal Overlap。这些都是**测量 / 启发式证据**，不是自动混音指令，也不是完整心理声学 Masking 概率。
+### V0.7 更强的 Masking Evidence
+
+0.7 主要在 Bridge/MCP 层增强，复用 V0.6 VST3 测量，**不增加新的 OSC 字段**。
+
+当前证据链：
+
+```text
+现有 32-band Spectrum
+→ 16 个 equal ERB-rate 区间
+→ 相对频谱占用
+→ 相对电平方向权重
+→ V0.6 时间重叠
+→ Region-level Masking Evidence
+```
+
+关键限制：这里是 **ERB-rate 重分箱（re-binning）**，不是 gammatone / cochlear filterbank，也不是经过听阈校准的心理声学模型。
+
+V0.7 新增：
+
+```text
+audio_masking_evidence()
+audio_project_masking_scan()
+```
+
+返回值用于候选排序、下钻和验证；**不是可听遮蔽概率**，也不会自动给出 EQ、Sidechain、压缩等处理方案。
 
 ## MCP 工具
 
-MCP 0.6 当前共 **18 个工具**：
+MCP 0.7 共 **20 个工具**：
 
 ```text
 audio_bridge_status()
 audio_list_tracks()
 audio_last_identify()
-audio_bind_last_identified(fl_track_index, fl_track_name, slot)
+audio_bind_last_identified(...)
 audio_instance_map()
 audio_snapshot(track)
 audio_average(track, seconds)
@@ -151,16 +196,32 @@ audio_capture_snapshot(name, seconds=5)
 audio_list_snapshots()
 audio_compare_snapshots(before, after)
 audio_temporal_profile(track, seconds=5)
-audio_temporal_compare(track_a, track_b, seconds=5,
-                       low_hz=40, high_hz=160,
-                       alignment_tolerance_ms=80)
+audio_temporal_compare(...)
+audio_masking_evidence(...)
+audio_project_masking_scan(...)
 ```
 
-`audio_detect_masking()` 目前仍是启发式频谱重叠证据。V0.6 增加了时间维度，但还不是完整 Bark/ERB 心理声学 Masking Model。
+历史的 `audio_detect_masking()` 仍是频谱重叠 heuristic。更完整的当前两轨证据优先用 `audio_masking_evidence()`。
 
-## 推荐安装方式
+## 推荐调用路径
 
-面向普通用户的 GitHub Release 与开发阶段 Artifact 分开。
+```text
+audio_project_status()
+    ↓
+audio_mix_overview()
+    ↓
+audio_project_masking_scan()      # 需要工程级 interaction candidates 时
+    ↓
+audio_masking_evidence(a, b)      # 两轨详细 ERB region evidence
+    ↓
+audio_temporal_compare(a, b, ...) # 需要自定义频段时间下钻时
+```
+
+不要为了“完整”而机械调用所有工具。
+
+## 用户安装
+
+推荐使用 GitHub **Release 懒人包**，普通用户无需手动搭 Python 环境。
 
 当前 Release 平台：
 
@@ -169,116 +230,112 @@ Windows x64
 macOS Apple Silicon arm64
 ```
 
-**不再提供 Intel macOS / x86_64 包。**
+不提供 Intel/x86_64 macOS 包。
 
-Release 懒人包包含：
+懒人包大致包含：
 
 ```text
 AI Audio Analyzer.vst3
 mcp/
-├─ runtime/   PyInstaller Standalone MCP
-└─ source/    Python 源码备用
+├─ runtime/    PyInstaller standalone MCP
+└─ source/     Python 源码 fallback
 skill/
 START-HERE.md
 INSTALL.en.md
 INSTALL.zh-CN.md
-平台自动安装脚本
+平台安装脚本
 ```
 
-普通用户**不需要自己安装 Python、pip、venv、MCP SDK，也不需要访问 PyPI**。
+正常安装**不需要 Python、pip、venv 或 PyPI**。
 
 ### Windows
 
-解压后双击：
+运行：
 
 ```text
 Install.cmd
 ```
 
-安装器会复制 VST3、安装 Standalone MCP、执行内建 Self-test、复制 Skill，并生成 `cherry-studio-mcp.json`。
-
 ### macOS Apple Silicon
 
-解压后双击：
+运行：
 
 ```text
 Install.command
 ```
 
-如果 Gatekeeper 阻止脚本本身，可右键 → **打开**，或执行：
+若 Gatekeeper 连脚本也拦截，可以右键 → **打开**，或运行：
 
 ```bash
 bash ./install.sh
 ```
 
-安装器会安装 arm64 VST3，移除 Quarantine，验证/必要时修复本地 ad-hoc 签名，安装 arm64 Standalone MCP、运行 Self-test、复制 Skill，并生成 Cherry Studio 配置。
+当前 macOS 包是 ad-hoc 签名，**不是 Apple Developer ID Notarization**；安装器负责处理现有 Quarantine / Gatekeeper 问题。
 
-当前 GitHub Build 是 **ad-hoc signed，不是 Apple Developer ID Notarized**。
+完整说明位于 Release 包内。
 
-完整中英文教程都随 Release 打包：`INSTALL.zh-CN.md` / `INSTALL.en.md`。
+## 开发者 / 源码 MCP
 
-## 开发者：Python 源码模式
+当前源码入口：
 
-正常用户不需要这一节。源码模式主要用于开发 Bridge、调试或 Standalone Runtime 的特殊 fallback。
+```text
+bridge/server_v07.py
+```
 
-要求：
-
-- Python 3.10+
-- 推荐 Python 3.12
-- `bridge/requirements.txt`
+建议 Python 3.12：
 
 ```bash
 python3.12 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r bridge/requirements.txt
-AI_ANALYZER_SELF_TEST=1 python bridge/server_v06.py
+AI_ANALYZER_SELF_TEST=1 python bridge/server_v07.py
 ```
 
-当前源码入口是：
+Windows 使用对应 `.venv\Scripts\Activate.ps1`。
+
+源码模式只用于开发、调试和特殊 fallback。普通用户优先使用 PyInstaller Runtime。
+
+## Cherry Studio
+
+源码示例：
 
 ```text
-bridge/server_v06.py
+bridge/cherry-studio.example.json
 ```
 
-`bridge/cherry-studio.example.json` 提供源码模式示例。
+现在指向 `server_v07.py`。Release 自动安装器生成的配置则直接指向 standalone MCP executable。
 
-## Cherry Studio + FL Studio 工作流
+不要同时手动运行一个 Bridge，再让 Cherry Studio 启动第二个 Bridge 占用同一 UDP 端口。
 
-新工程 / 新 Session 推荐：
+## Skill
+
+Skill 位于：
 
 ```text
-audio_project_status()
-↓
-如果需要：逐个 Identify 建立 Track/Slot Mapping
-↓
-audio_instance_map()
-↓
-按问题选择 Overview / Average / Temporal Tool
+skills/ai-analyzer-flstudio/
 ```
 
-修改前后测量：
+LLM-facing Skill 按项目规则统一使用英文：
 
 ```text
-audio_capture_snapshot("before", 5)
-↓
-通过 FL Studio MCP 修改工程
-↓
-audio_capture_snapshot("after", 5)
-↓
-audio_compare_snapshots("before", "after")
+SKILL.md
+README-CHERRY-STUDIO.md
+references/analyzer-mcp.md
+references/parameters.md
+references/masking-evidence.md
 ```
 
-Skill 只解释 MCP 用法和参数语义；具体音乐判断由用户目标、音乐上下文和模型自身推理决定。
+Skill 只负责工具调用、selector/mapping、有效性、参数语义、Temporal/Masking Evidence 限制；不预设混音审美。
 
 ## OSC 协议
 
-分析帧地址：
+Analysis 地址：
 
 ```text
 /aianalyzer/frame
 ```
 
-协议保持 Append-only：
+V0.7 不增加新字段，继续沿用 V0.6 append-only frame：
 
 ```text
 0      analyzer_name
@@ -310,124 +367,35 @@ Skill 只解释 MCP 用法和参数语义；具体音乐判断由用户目标、
 64     frame_schema_version = "0.6"
 ```
 
-Identify 地址仍然是：
+Identify 地址：
 
 ```text
 /aianalyzer/identify
 ```
 
-V0.6 没有改变 V0.4 Identify Schema。
+## 实时线程原则
 
-## Temporal 参数简要语义
-
-- `spectral_flux_*`：相邻归一化频谱分布的正向变化，刻意降低单纯整体 Gain 缩放的影响。
-- `rms_rise_peak_db`：当前 Temporal Aggregate 内最大的相邻窗口正向 RMS 增量。
-- `low_band_energy_db`：FFT-derived 40–160 Hz 能量特征，不是校准 SPL。
-- `band_envelope_correlation`：两个时间对齐所选频段能量包络的 Pearson Correlation。
-- `normalized_band_temporal_overlap`：两轨分别按自身窗口峰值归一化后，描述同时占用所选频段的相对程度。
-- `onset/change candidate`：基于工具明确返回阈值的启发式候选，不是 Ground-truth Onset Label。
-
-## 从源码构建 VST3
-
-要求：
-
-- CMake 3.22+
-- C++20 Compiler
-- JUCE 8.0.8 由 CMake FetchContent 获取
-- libebur128 1.2.6 由 CMake FetchContent 获取
-
-macOS 当前开发/发布策略为 arm64：
-
-```bash
-cmake -S . -B build \
-  -DCMAKE_BUILD_TYPE=Release \
-  -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 \
-  -DCMAKE_OSX_ARCHITECTURES=arm64
-cmake --build build --config Release --parallel
-```
-
-Windows：
-
-```powershell
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build --config Release --parallel
-```
-
-## CI 与 Release
-
-开发 CI 按路径增量执行：
-
-```text
-Source/** / CMakeLists.txt
-→ Windows + macOS arm64 重新构建 VST3
-
-bridge/**
-→ 验证 / 打包 MCP + Skill
-
-skills/**
-→ 验证 / 打包 MCP + Skill
-
-release/** / release workflow
-→ 验证安装器和 Release 逻辑
-
-纯文档改动
-→ 不重新构建 VST3
-```
-
-面向用户的手动 Release Workflow：
-
-```text
-.github/workflows/release.yml
-```
-
-它负责构建 Standalone MCP、运行 Self-test、重新构建平台 VST3、组装懒人包、生成 SHA256 并发布 / 更新 GitHub Release。
+Audio Callback 不做 FFT、响度、OSC、MCP、文件或网络 I/O，也不做重量级分配。Audio 只写入预分配 SPSC FIFO，其余分析在后台线程完成。
 
 ## 当前限制
 
-- 暂无 LUFS-M；
-- 暂无 Mid/Side Spectrum；
-- 暂无 Chroma / Key / Pitch-class；
-- Masking 仍是启发式证据，不是完整 Bark/ERB 心理声学模型；
-- V0.6 时间比较受约 10 Hz OSC 更新频率和对齐容差限制；
-- Onset Candidate 是 Frame-level Change Candidate，不是 Sample-accurate 标注；
-- Runtime UUID 和 FL Binding 是 Session-scoped；
-- macOS Release 仅 arm64，且尚未 Notarize；
-- 插件只观察音频，不主动改变音频信号。
+- V0.7 ERB 只是基于已有 32-band feature 的 re-binning，不是真正 auditory filterbank；
+- Masking evidence 是 heuristic，不应描述成心理声学 ground truth；
+- Temporal 对齐受独立 OSC Stream 和约 10 Hz 更新分辨率限制；
+- LUFS-I / Session Max True Peak 是 session 累积量；
+- FL Mixer binding 是 session-scoped，重新打开工程后可能需要重新 Identify；
+- macOS Release 仅支持 Apple Silicon，且当前未 Notarize。
 
 ## 仓库结构
 
 ```text
-.
-├─ Source/                          VST3 源码
-├─ bridge/
-│  ├─ server.py                     稳定 Core Bridge
-│  ├─ server_v05.py                 Project Intelligence Layer
-│  ├─ project_tools.py
-│  ├─ server_v06.py                 当前 MCP Entry Point
-│  └─ temporal_tools.py
-├─ skills/ai-analyzer-flstudio/     中立的 MCP Usage Skill
-├─ release/                         懒人包安装器与教程
-├─ .github/workflows/build.yml      开发 CI
-├─ .github/workflows/release.yml    手动 Release Workflow
-├─ CMakeLists.txt
-├─ AGENT.md                         Agent / Maintainer 规约与路线图
-├─ README.md
-└─ README.zh-CN.md
+Source/                         JUCE VST3
+bridge/                         MCP 源码层
+skills/ai-analyzer-flstudio/    英文 LLM-facing Skill
+release/                        懒人包安装器 / 文档
+.github/workflows/build.yml     开发 CI
+.github/workflows/release.yml   手动 Release 打包
+AGENT.md                        Agent / Maintainer 路线图与规则
 ```
 
-## 版本演进 / 路线图
-
-```text
-0.2   LUFS / True Peak / 8-band Stereo Correlation
-0.3   Signal Validity + Runtime UUID
-0.4   Identify + FL Mixer Track/Slot 确定映射
-0.4.1 Packaging / Installer Foundation
-0.5   Project Overview + Snapshot A/B
-0.6   Temporal Descriptors + Time-aligned Band Envelope Comparison
-
-下一阶段：
-0.7   更强 Masking Evidence（Bark/ERB + Level + Temporal Weighting）
-0.8   更深入 Mid/Side Analysis
-0.9   适合由音频推断的 Music-semantic Measurements
-1.0   Reliable Closed-loop Measurement System
-```
+修改仓库前先阅读 `AGENT.md`。
