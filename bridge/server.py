@@ -5,17 +5,16 @@ VST3 instances send compact analysis frames over UDP/OSC. This process caches
 latest/history per live plugin instance and exposes LLM-friendly tools through
 MCP stdio.
 
-V0.3 adds:
-- signal-present state with -50 dBFS close / -48 dBFS reopen semantics from the plugin
-- runtime UUIDs so duplicate user-visible instance names never overwrite each other
-- active-frame-only spectral/stereo averaging
-- structured ambiguity errors for duplicate names
+V0.3 adds signal validity and runtime UUIDs.
+V0.4 adds deterministic instance identification and session-scoped bindings
+between analyzer runtime UUIDs and DAW mixer track/slot locations.
 """
 
 from __future__ import annotations
 
 import math
 import os
+import re
 import sys
 import threading
 import time
@@ -32,12 +31,14 @@ NUM_STEREO_CORR_BANDS = 8
 MIN_HZ = 20.0
 MAX_HZ = 20000.0
 HISTORY_LENGTH = 3600
+IDENTIFY_HISTORY_LENGTH = 64
 DEFAULT_OSC_HOST = "127.0.0.1"
 DEFAULT_OSC_PORT = 9855
 SIGNAL_CLOSE_DB = -50.0
 SIGNAL_OPEN_DB = -48.0
 SHORT_TERM_INVALID_SILENCE_SECONDS = 3.0
 STALE_SECONDS = 3.0
+DEFAULT_IDENTIFY_MAX_AGE_SECONDS = 5.0
 
 BAND_EDGES = [
     MIN_HZ * (MAX_HZ / MIN_HZ) ** (i / NUM_BANDS)
@@ -60,11 +61,17 @@ STEREO_CORR_EDGES = [
 
 _lock = threading.RLock()
 
-# Keyed by runtime_id, not user-visible name. New V0.3 plugins send a random
-# runtime UUID per live instance. Legacy V0.1/V0.2 senders fall back to a
-# deterministic legacy key so the bridge remains backwards compatible.
+# Keyed by runtime_id, not user-visible name. V0.3+ plugins send a random
+# runtime UUID per live instance. Legacy senders fall back to a deterministic
+# legacy key so the bridge remains backwards compatible.
 _tracks: dict[str, dict[str, Any]] = {}
 _history: dict[str, deque[dict[str, Any]]] = {}
+
+# V0.4 identity state is intentionally session-scoped. Runtime UUIDs are also
+# session-scoped, so reopening the DAW/project naturally causes re-discovery.
+_bindings: dict[str, dict[str, Any]] = {}
+_identify_events: deque[dict[str, Any]] = deque(maxlen=IDENTIFY_HISTORY_LENGTH)
+_identify_sequence = 0
 
 _bridge_started_at = time.time()
 _osc_host = DEFAULT_OSC_HOST
@@ -72,6 +79,7 @@ _osc_port = DEFAULT_OSC_PORT
 _osc_listening = False
 _osc_error: str | None = None
 _last_frame_at: float | None = None
+_last_identify_at: float | None = None
 
 mcp = MCPServer("AI Audio Analyzer MCP")
 
@@ -123,17 +131,22 @@ def _read_osc_config() -> tuple[str, int, str | None]:
     return host, port, None
 
 
-def _duplicate_name_counts() -> Counter[str]:
-    with _lock:
-        return Counter(str(frame["track"]).casefold() for frame in _tracks.values())
+def _binding_public(binding: dict[str, Any] | None) -> dict[str, Any] | None:
+    if binding is None:
+        return None
+    return {
+        "runtime_id": binding["runtime_id"],
+        "fl_track_index": binding["fl_track_index"],
+        "fl_track_name": binding["fl_track_name"],
+        "slot": binding["slot"],
+        "analyzer_name": binding["analyzer_name"],
+        "identify_sequence": binding["identify_sequence"],
+        "bound_at": binding["bound_at"],
+    }
 
 
 def _public_frame(frame: dict[str, Any]) -> dict[str, Any]:
-    """Convert an internal raw frame into safe machine-readable output.
-
-    Invalid spectrum/stereo values become None rather than fake zeros. Session
-    values such as LUFS-I and max true peak remain available during silence.
-    """
+    """Convert an internal raw frame into safe machine-readable output."""
     result = {key: value for key, value in frame.items() if not key.startswith("_")}
 
     signal_present = bool(result.get("signal_present", True))
@@ -155,15 +168,16 @@ def _public_frame(frame: dict[str, Any]) -> dict[str, Any]:
     if silence_seconds >= SHORT_TERM_INVALID_SILENCE_SECONDS:
         result["lufs_s"] = None
 
+    runtime_id = str(result.get("id") or result.get("runtime_id") or "")
+    with _lock:
+        binding = _bindings.get(runtime_id)
+    result["bound"] = binding is not None
+    result["binding"] = _binding_public(binding)
     return result
 
 
 def _resolve_track(track: str) -> str:
-    """Resolve a runtime UUID, unique name, or unique runtime-ID prefix.
-
-    Duplicate user-visible names are deliberately rejected instead of silently
-    selecting whichever UDP packet arrived last.
-    """
+    """Resolve runtime ID, DAW binding selector/name, or analyzer instance name."""
     query = str(track).strip()
     if not query:
         raise ValueError("Track selector is empty.")
@@ -173,6 +187,41 @@ def _resolve_track(track: str) -> str:
     with _lock:
         if query in _tracks:
             return query
+
+        selector = re.fullmatch(r"(?:mixer|fl):(\d+)(?:/slot:(\d+))?", wanted)
+        if selector is not None:
+            track_index = int(selector.group(1))
+            slot = int(selector.group(2)) if selector.group(2) is not None else None
+            matches = [
+                runtime_id
+                for runtime_id, binding in _bindings.items()
+                if runtime_id in _tracks
+                and int(binding["fl_track_index"]) == track_index
+                and (slot is None or int(binding["slot"]) == slot)
+            ]
+            if len(matches) == 1:
+                return matches[0]
+            if len(matches) > 1:
+                raise ValueError(
+                    f"Ambiguous DAW selector {query!r}; multiple analyzer slots match: "
+                    f"{[_binding_public(_bindings[runtime_id]) for runtime_id in matches]}"
+                )
+            raise ValueError(f"No live analyzer is bound to DAW selector {query!r}.")
+
+        fl_name_matches = [
+            runtime_id
+            for runtime_id, binding in _bindings.items()
+            if runtime_id in _tracks
+            and str(binding["fl_track_name"]).casefold() == wanted
+        ]
+        if len(fl_name_matches) == 1:
+            return fl_name_matches[0]
+        if len(fl_name_matches) > 1:
+            raise ValueError(
+                f"Ambiguous FL mixer track name {query!r}; use mixer:<index>/slot:<slot> "
+                f"or a runtime id instead: "
+                f"{[_binding_public(_bindings[runtime_id]) for runtime_id in fl_name_matches]}"
+            )
 
         name_matches = [
             runtime_id
@@ -186,6 +235,7 @@ def _resolve_track(track: str) -> str:
                 {
                     "id": runtime_id,
                     "track": _tracks[runtime_id]["track"],
+                    "binding": _binding_public(_bindings.get(runtime_id)),
                     "age_seconds": round(
                         max(0.0, time.time() - float(_tracks[runtime_id]["_received_at"])),
                         3,
@@ -195,7 +245,7 @@ def _resolve_track(track: str) -> str:
             ]
             raise ValueError(
                 f"Ambiguous analyzer instance name {query!r}; multiple live instances match. "
-                f"Use one runtime id instead: {matches}"
+                f"Use an FL binding selector or runtime id instead: {matches}"
             )
 
         id_matches = [
@@ -211,7 +261,11 @@ def _resolve_track(track: str) -> str:
             )
 
         available = [
-            {"track": frame["track"], "id": runtime_id}
+            {
+                "track": frame["track"],
+                "id": runtime_id,
+                "binding": _binding_public(_bindings.get(runtime_id)),
+            }
             for runtime_id, frame in sorted(_tracks.items())
         ]
 
@@ -232,14 +286,9 @@ def _on_frame(_address: str, *args: Any) -> None:
     # 0 instance_name, 1 sample_rate, 2 plugin_timestamp,
     # 3 peak, 4 rms, 5 crest, 6 centroid, 7 rolloff, 8 flatness,
     # 9 correlation, 10 width, 11..42 32 spectrum bands.
-    #
-    # V0.2 extras:
-    # 43 LUFS-S, 44 LUFS-I, 45 current true peak, 46 max true peak,
-    # 47..54 eight band-limited stereo correlation values.
-    #
-    # V0.3 extras:
-    # 55 signal_present, 56 detector_peak_db, 57 silence_seconds,
-    # 58 runtime_uuid.
+    # V0.2 extras: 43..54 loudness/true-peak + 8 stereo bands.
+    # V0.3 extras: 55 signal_present, 56 detector_peak_db,
+    # 57 silence_seconds, 58 runtime_uuid.
     base_count = 11 + NUM_BANDS
     if len(args) < base_count:
         print(
@@ -283,10 +332,8 @@ def _on_frame(_address: str, *args: Any) -> None:
         runtime_id = str(args[v03_start + 3]).strip()
         if not runtime_id:
             runtime_id = f"legacy:{instance_name.casefold()}"
-        schema_version = "0.3"
+        schema_version = "0.3+"
     else:
-        # Legacy compatibility: no hysteresis/hold metadata exists, so infer
-        # active state from the configured close threshold.
         signal_present = peak_db >= SIGNAL_CLOSE_DB
         detector_peak_db = peak_db
         silence_seconds = 0.0 if signal_present else float("inf")
@@ -329,6 +376,42 @@ def _on_frame(_address: str, *args: Any) -> None:
         _tracks[runtime_id] = frame
         _history.setdefault(runtime_id, deque(maxlen=HISTORY_LENGTH)).append(frame)
         _last_frame_at = now
+
+
+def _on_identify(_address: str, *args: Any) -> None:
+    """Receive a V0.4 identify event emitted by a host parameter transition."""
+    global _identify_sequence, _last_identify_at
+
+    if len(args) < 2:
+        print(
+            f"AI Audio Analyzer: ignored malformed identify event with {len(args)} args",
+            file=sys.stderr,
+            flush=True,
+        )
+        return
+
+    runtime_id = str(args[0]).strip()
+    instance_name = str(args[1]).strip() or "Track"
+    if not runtime_id:
+        return
+
+    plugin_timestamp = float(args[2]) if len(args) >= 3 else None
+    schema_version = str(args[3]) if len(args) >= 4 else "0.4"
+    now = time.time()
+
+    with _lock:
+        _identify_sequence += 1
+        event = {
+            "sequence": _identify_sequence,
+            "runtime_id": runtime_id,
+            "analyzer_name": instance_name,
+            "plugin_timestamp": plugin_timestamp,
+            "schema_version": schema_version,
+            "received_at": now,
+            "_consumed": False,
+        }
+        _identify_events.append(event)
+        _last_identify_at = now
 
 
 def _compare_tracks(track_a: str, track_b: str) -> dict[str, Any]:
@@ -392,15 +475,17 @@ def _compare_tracks(track_a: str, track_b: str) -> dict[str, Any]:
 
 @mcp.tool()
 def audio_bridge_status() -> dict[str, Any]:
-    """Report MCP/OSC bridge health, startup errors, and analyzer stream state."""
+    """Report MCP/OSC bridge health, analyzer streams, and mapping state."""
     now = time.time()
     with _lock:
         frames = list(_tracks.values())
         last_frame_at = _last_frame_at
+        last_identify_at = _last_identify_at
         listening = _osc_listening
         error = _osc_error
         host = _osc_host
         port = _osc_port
+        bound_ids = set(_bindings)
 
     duplicate_counts = Counter(str(frame["track"]).casefold() for frame in frames)
     tracks = [
@@ -409,12 +494,14 @@ def audio_bridge_status() -> dict[str, Any]:
             "id": frame["id"],
             "signal_present": bool(frame.get("signal_present")),
             "duplicate_name": duplicate_counts[str(frame["track"]).casefold()] > 1,
+            "bound": frame["id"] in bound_ids,
             "age_seconds": round(max(0.0, now - float(frame["_received_at"])), 3),
         }
         for frame in sorted(frames, key=lambda item: (str(item["track"]).casefold(), str(item["id"])))
     ]
 
     last_age = None if last_frame_at is None else round(max(0.0, now - last_frame_at), 3)
+    identify_age = None if last_identify_at is None else round(max(0.0, now - last_identify_at), 3)
 
     if error:
         hint = (
@@ -450,27 +537,34 @@ def audio_bridge_status() -> dict[str, Any]:
             "error": error,
         },
         "track_count": len(tracks),
+        "bound_track_count": sum(1 for item in tracks if item["bound"]),
+        "unbound_track_count": sum(1 for item in tracks if not item["bound"]),
         "tracks": tracks,
         "last_frame_age_seconds": last_age,
+        "last_identify_age_seconds": identify_age,
         "hint": hint,
     }
 
 
 @mcp.tool()
 def audio_list_tracks() -> dict[str, Any]:
-    """List live analyzer instances, runtime IDs, signal state, and duplicate names."""
+    """List live analyzer instances, runtime IDs, signal state, and DAW bindings."""
     now = time.time()
     with _lock:
         frames = [dict(frame) for frame in _tracks.values()]
+        bindings = {runtime_id: dict(binding) for runtime_id, binding in _bindings.items()}
 
     duplicate_counts = Counter(str(frame["track"]).casefold() for frame in frames)
     tracks = []
     for frame in sorted(frames, key=lambda item: (str(item["track"]).casefold(), str(item["id"]))):
+        binding = bindings.get(frame["id"])
         tracks.append(
             {
                 "id": frame["id"],
                 "track": frame["track"],
                 "duplicate_name": duplicate_counts[str(frame["track"]).casefold()] > 1,
+                "bound": binding is not None,
+                "binding": _binding_public(binding),
                 "age_seconds": round(max(0.0, now - float(frame["_received_at"])), 3),
                 "signal_present": bool(frame.get("signal_present")),
                 "detector_peak_db": frame.get("detector_peak_db"),
@@ -490,9 +584,161 @@ def audio_list_tracks() -> dict[str, Any]:
         "tracks": tracks,
         "count": len(tracks),
         "duplicate_name_count": sum(1 for count in duplicate_counts.values() if count > 1),
+        "bound_count": sum(1 for item in tracks if item["bound"]),
         "note": (
-            "If duplicate_name is true, address that analyzer by its runtime id "
-            "or rename the plugin instances to unique human-readable names."
+            "After V0.4 discovery, prefer FL mixer names or mixer:<index>/slot:<slot> selectors. "
+            "Before discovery, duplicate analyzer names must be addressed by runtime id."
+        ),
+    }
+
+
+@mcp.tool()
+def audio_last_identify(max_age_seconds: float = 10.0) -> dict[str, Any]:
+    """Return the most recent host-triggered analyzer Identify event."""
+    max_age_seconds = max(0.1, min(float(max_age_seconds), 60.0))
+    now = time.time()
+    with _lock:
+        event = dict(_identify_events[-1]) if _identify_events else None
+
+    if event is None:
+        return {
+            "available": False,
+            "reason": "No Identify event has been received in this bridge session.",
+        }
+
+    age = max(0.0, now - float(event["received_at"]))
+    return {
+        "available": True,
+        "fresh": age <= max_age_seconds,
+        "age_seconds": round(age, 3),
+        "sequence": event["sequence"],
+        "runtime_id": event["runtime_id"],
+        "analyzer_name": event["analyzer_name"],
+        "schema_version": event["schema_version"],
+        "consumed": bool(event.get("_consumed")),
+    }
+
+
+@mcp.tool()
+def audio_bind_last_identified(
+    fl_track_index: int,
+    fl_track_name: str,
+    slot: int,
+    max_age_seconds: float = DEFAULT_IDENTIFY_MAX_AGE_SECONDS,
+) -> dict[str, Any]:
+    """Bind the newest unconsumed Identify event to a known FL mixer track/slot."""
+    fl_track_index = int(fl_track_index)
+    slot = int(slot)
+    if fl_track_index < 0:
+        raise ValueError("fl_track_index must be >= 0")
+    if slot < 0:
+        raise ValueError("slot must be >= 0")
+
+    clean_name = str(fl_track_name).strip() or f"Mixer {fl_track_index}"
+    max_age_seconds = max(0.1, min(float(max_age_seconds), 30.0))
+    now = time.time()
+
+    with _lock:
+        if not _identify_events:
+            raise ValueError(
+                "No Identify event is available. Toggle the target AI Audio Analyzer's "
+                "host parameter named 'Identify', then call this tool immediately."
+            )
+
+        event = _identify_events[-1]
+        age = max(0.0, now - float(event["received_at"]))
+        if age > max_age_seconds:
+            raise ValueError(
+                f"Latest Identify event is stale ({age:.3f}s old). Toggle the target "
+                "Analyzer's Identify parameter again before binding."
+            )
+        if bool(event.get("_consumed")):
+            raise ValueError(
+                "Latest Identify event was already consumed by a binding. Toggle the next "
+                "target Analyzer's Identify parameter before binding another mixer slot."
+            )
+
+        runtime_id = str(event["runtime_id"])
+
+        # A DAW location can point to only one current runtime instance. Remove
+        # an older runtime binding for the same mixer track/slot automatically.
+        for existing_id, existing in list(_bindings.items()):
+            if (
+                existing_id != runtime_id
+                and int(existing["fl_track_index"]) == fl_track_index
+                and int(existing["slot"]) == slot
+            ):
+                del _bindings[existing_id]
+
+        binding = {
+            "runtime_id": runtime_id,
+            "fl_track_index": fl_track_index,
+            "fl_track_name": clean_name,
+            "slot": slot,
+            "analyzer_name": str(event["analyzer_name"]),
+            "identify_sequence": int(event["sequence"]),
+            "bound_at": now,
+        }
+        _bindings[runtime_id] = binding
+        event["_consumed"] = True
+
+    return {
+        "ok": True,
+        "binding": _binding_public(binding),
+        "selector": f"mixer:{fl_track_index}/slot:{slot}",
+        "note": (
+            "Binding is session-scoped. If the plugin/runtime UUID changes after reopening "
+            "the project, run Identify discovery again."
+        ),
+    }
+
+
+@mcp.tool()
+def audio_instance_map() -> dict[str, Any]:
+    """Return the current live Analyzer <-> FL mixer track/slot topology."""
+    now = time.time()
+    with _lock:
+        frames = {runtime_id: dict(frame) for runtime_id, frame in _tracks.items()}
+        bindings = {runtime_id: dict(binding) for runtime_id, binding in _bindings.items()}
+
+    instances = []
+    for runtime_id, frame in sorted(
+        frames.items(), key=lambda item: (str(item[1]["track"]).casefold(), item[0])
+    ):
+        binding = bindings.get(runtime_id)
+        instances.append(
+            {
+                "runtime_id": runtime_id,
+                "analyzer_name": frame["track"],
+                "live": True,
+                "age_seconds": round(max(0.0, now - float(frame["_received_at"])), 3),
+                "signal_present": bool(frame.get("signal_present")),
+                "bound": binding is not None,
+                "binding": _binding_public(binding),
+                "selector": (
+                    f"mixer:{binding['fl_track_index']}/slot:{binding['slot']}"
+                    if binding is not None
+                    else runtime_id
+                ),
+            }
+        )
+
+    stale_bindings = [
+        _binding_public(binding)
+        for runtime_id, binding in bindings.items()
+        if runtime_id not in frames
+    ]
+
+    return {
+        "instances": instances,
+        "live_count": len(instances),
+        "bound_count": sum(1 for item in instances if item["bound"]),
+        "unbound_count": sum(1 for item in instances if not item["bound"]),
+        "stale_bindings": stale_bindings,
+        "discovery_complete": bool(instances) and all(item["bound"] for item in instances),
+        "note": (
+            "The map is deterministic because each binding is created from a host-triggered "
+            "Identify event carrying that plugin instance's runtime UUID."
         ),
     }
 
@@ -516,6 +762,7 @@ def audio_average(track: str, seconds: float = 5.0) -> dict[str, Any]:
             for frame in _history.get(runtime_id, ())
             if frame["_received_at"] >= cutoff
         ]
+        binding = _binding_public(_bindings.get(runtime_id))
 
     if not frames:
         return _snapshot(runtime_id)
@@ -527,6 +774,8 @@ def audio_average(track: str, seconds: float = 5.0) -> dict[str, Any]:
     result: dict[str, Any] = {
         "id": runtime_id,
         "track": latest["track"],
+        "bound": binding is not None,
+        "binding": binding,
         "window_seconds": seconds,
         "frames": len(frames),
         "active_frames": len(active_frames),
@@ -639,6 +888,7 @@ def audio_stereo_bands(track: str) -> dict[str, Any]:
         return {
             "id": frame["id"],
             "track": frame["track"],
+            "binding": frame.get("binding"),
             "available": False,
             "signal_present": frame.get("signal_present"),
             "reason": "No active input; stereo correlation is intentionally invalid while the signal gate is closed.",
@@ -660,6 +910,7 @@ def audio_stereo_bands(track: str) -> dict[str, Any]:
     return {
         "id": frame["id"],
         "track": frame["track"],
+        "binding": frame.get("binding"),
         "available": True,
         "bands": bands,
         "note": (
@@ -739,6 +990,8 @@ def audio_master_status(track: str = "Master") -> dict[str, Any]:
     return {
         "id": frame["id"],
         "track": frame["track"],
+        "bound": frame.get("bound"),
+        "binding": frame.get("binding"),
         "signal_present": signal_present,
         "detector_peak_db": frame.get("detector_peak_db"),
         "silence_seconds": frame.get("silence_seconds"),
@@ -778,6 +1031,7 @@ def main() -> None:
     if config_error is None:
         dispatcher = Dispatcher()
         dispatcher.map("/aianalyzer/frame", _on_frame)
+        dispatcher.map("/aianalyzer/identify", _on_identify)
         try:
             osc_server = ThreadingOSCUDPServer((host, port), dispatcher)
         except OSError as exc:
