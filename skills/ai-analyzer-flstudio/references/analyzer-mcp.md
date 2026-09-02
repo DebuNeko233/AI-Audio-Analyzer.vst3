@@ -1,6 +1,8 @@
-# AI Audio Analyzer MCP Reference
+# AI Audio Analyzer MCP 调用参考
 
-当前主要工具：
+本文件只描述工具选择、调用顺序、实例定位和结果有效性，不提供具体混音风格或处理方案。
+
+## 当前工具
 
 ```text
 audio_bridge_status()
@@ -14,44 +16,65 @@ audio_stereo_bands(track)
 audio_compare_tracks(track_a, track_b)
 audio_detect_masking(track_a, track_b)
 audio_master_status(track="Master")
+audio_project_status()
+audio_mix_overview(seconds=10, max_tracks=32)
+audio_capture_snapshot(name, seconds=5)
+audio_list_snapshots()
+audio_compare_snapshots(before, after)
 ```
 
-## 推荐调用策略
+共 16 个工具。
+
+## 调用层级
+
+优先从高层工具开始，信息不够时再下钻。
+
+### 工程准备度
 
 ```text
-开始任何分析
-audio_bridge_status()
-→ audio_list_tracks()
-→ audio_instance_map()
+audio_project_status()
 ```
 
-如果 `audio_instance_map().unbound_count > 0`，且 FL Studio MCP 可访问插件参数，优先先完成 V0.4 Identify 绑定，再做轨道级分析。
+优先用于判断：
 
-单轨快速检查：
+- 是否存在 live Analyzer；
+- 是否全部绑定；
+- 是否有 stale stream；
+- 当前是否有有效音频输入；
+- 是否存在重复名称；
+- Master 是否能确定。
+
+不要为了得到同样的信息无条件先调用多个底层工具。
+
+### 工程窗口概览
 
 ```text
-audio_average(track_selector, 5)
+audio_mix_overview(10)
 ```
 
-绑定完成后 `track_selector` 优先使用：
+一次获取多个实例最近窗口的核心测量值和潜在 spectral overlap candidates。
+
+`potential_spectral_conflicts` 是 heuristic candidate list，不代表听觉问题已经被证明。
+
+### 单实例稳定窗口
 
 ```text
-mixer:7/slot:9
+audio_average(track, 5)
 ```
 
-也可以使用唯一的 FL Mixer 轨道名，例如：
+适合查询最近一个时间窗口的稳定统计。
+
+### 单实例瞬时状态
 
 ```text
-Bass Sub
-Lead Vocal
-Master
+audio_snapshot(track)
 ```
 
-runtime UUID 只作为机器级 fallback，不应成为跨工程会话的永久名称。
+只表示最新安全快照，不应自动扩展成长期趋势。
 
-# V0.4 FL Studio <-> Analyzer Identify
+## V0.4 Identify：FL Mixer ↔ Analyzer 确定绑定
 
-V0.4 插件向宿主公开一个稳定参数：
+插件向宿主公开：
 
 ```text
 Parameter ID: identify
@@ -59,180 +82,136 @@ Display name: Identify
 Type: Boolean
 ```
 
-这个参数不是传统的一次性按钮。**每次布尔值发生翻转都会发送一次 Identify 事件**。因此自动化流程应：
+每次布尔值翻转都会发送一个 `/aianalyzer/identify` 事件，包含目标 live VST3 实例的 runtime UUID。
 
-1. 用 FL Studio MCP 找到目标 Mixer Track 上的 `AI Audio Analyzer` 插件槽位；
-2. 扫描该插件真实暴露的参数，找到显示名为 `Identify` 的参数；
-3. 读取 `Identify` 当前值；
-4. 将它设置为相反值；
-5. 立即调用 `audio_last_identify()` 确认收到新的事件；
-6. 立即调用 `audio_bind_last_identified(fl_track_index, fl_track_name, slot)`；
-7. 对下一个 Analyzer 重复上述过程；
-8. 最后调用 `audio_instance_map()` 验证 `discovery_complete=true` 或确认哪些实例仍未绑定。
+对每个 AI Audio Analyzer 实例：
 
-不要假设 FL Studio MCP 的插件参数工具名称。先读取/扫描真实可用工具与参数，再执行。
+1. 用 FL Studio MCP 找到真实 Mixer Track / Slot；
+2. 扫描该插件真实公开参数；
+3. 找到 `Identify`；
+4. 读取当前值；
+5. 将值设为相反值；
+6. 立即调用 `audio_last_identify()`；
+7. 确认事件新鲜且 `consumed=false`；
+8. 立即调用 `audio_bind_last_identified(fl_track_index, fl_track_name, slot)`；
+9. 最后调用 `audio_instance_map()` 验证所有绑定。
 
-## 为什么不能靠名字猜
+不要假设 FL Studio MCP 的参数读取/设置工具名称；使用当前实际暴露的工具。
 
-一个工程可能存在：
+### Identify 事件只能消费一次
+
+绑定成功后该事件会被标记 consumed。如果再次绑定同一个事件，Bridge 应拒绝。
+
+如果最新事件已 consumed：
 
 ```text
-Mixer 4  Kick
-Mixer 7  Bass Sub
-Mixer 8  Bass Mid
-Mixer 12 Lead Vocal
-Mixer 20 Vocal Bus
+重新翻转目标实例 Identify
+→ 读取新的 audio_last_identify()
+→ 再绑定
 ```
 
-而插件内部的人类名称可能仍然都是：
+### 为什么不能只靠名称
+
+插件显示名可能重复，例如多个实例都叫：
 
 ```text
 Track
-Track
-Track
-Track
-Track
 ```
 
-V0.4 的 Identify 事件直接携带该 live VST3 实例的 `runtime_uuid`。模型刚刚操作哪个 FL Mixer Track / Slot 是已知的，因此 Bridge 可以建立确定关系：
+runtime UUID 才是 live 实例身份，而 FL Mixer Track/Slot 是宿主位置身份。Identify 用于把二者确定关联。
+
+## Selector
+
+绑定后支持的常用 selector：
 
 ```text
-FL Mixer 7 / Slot 9
-        ↕
-runtime_uuid = 64cd7181...
-```
-
-这不是字符串相似度匹配，也不是音频特征猜测。
-
-## Identify 事件只能消费一次
-
-`audio_bind_last_identified()` 会把最新 Identify 事件标记为已消费。
-
-如果模型没有先翻转下一个插件的 `Identify`，却再次调用绑定工具，Bridge 会拒绝并提示：
-
-```text
-Latest Identify event was already consumed
-```
-
-这样可以避免同一个 runtime UUID 被误绑到两个 Mixer Track。
-
-## 推荐完整自动发现流程
-
-```text
-FL Studio MCP: 枚举 Mixer Tracks
-        ↓
-找到每条轨道中的 AI Audio Analyzer slot
-        ↓
-Track A: Identify 当前 0 → 设置 1
-        ↓
-audio_last_identify()
-        ↓
-audio_bind_last_identified(A.index, A.name, slot)
-        ↓
-Track B: Identify 当前 1 → 设置 0（或按它自己的当前值取反）
-        ↓
-audio_last_identify()
-        ↓
-audio_bind_last_identified(B.index, B.name, slot)
-        ↓
-...
-        ↓
-audio_instance_map()
-```
-
-注意：每个插件实例的 `Identify` 当前值是独立的，所以应读取目标插件自己的当前参数值后取反，不要假设所有实例当前值相同。
-
-# V0.4 selectors
-
-绑定后 Bridge 支持：
-
-```text
-mixer:<track_index>
 mixer:<track_index>/slot:<slot>
-fl:<track_index>
+mixer:<track_index>
 fl:<track_index>/slot:<slot>
-唯一的 FL Mixer track name
+fl:<track_index>
+唯一 FL Mixer Track 名称
 runtime UUID
 唯一 runtime UUID 前缀
-唯一 Analyzer 人类名称
+唯一 Analyzer 显示名
 ```
 
 推荐优先级：
 
 ```text
 mixer:index/slot:slot
-→ 唯一 FL Mixer track name
+→ 唯一 FL Mixer Track 名称
 → runtime UUID
-→ Analyzer 人类名称
+→ 唯一 Analyzer 显示名
 ```
 
-如果一个 Mixer Track 上放了多个 AI Audio Analyzer，必须使用包含 `slot` 的 selector。
+同一 Mixer Track 上存在多个 Analyzer 时必须包含 `slot`。
 
-# V0.4 instance map
+## `audio_instance_map()`
 
-`audio_instance_map()` 用来得到工程中的 Analyzer 拓扑，例如：
+用于查看当前 Analyzer 与 FL Mixer 的绑定拓扑。
 
-```json
-{
-  "instances": [
-    {
-      "runtime_id": "64cd7181...",
-      "analyzer_name": "Track",
-      "bound": true,
-      "binding": {
-        "fl_track_index": 7,
-        "fl_track_name": "Bass Sub",
-        "slot": 9
-      },
-      "selector": "mixer:7/slot:9"
-    }
-  ],
-  "bound_count": 1,
-  "unbound_count": 0,
-  "discovery_complete": true
-}
-```
-
-进行多轨混音分析前，如果 `discovery_complete=false`，优先解决未绑定实例，而不是靠名字猜它们对应哪条轨道。
-
-绑定是 session-scoped。关闭/重新打开 DAW 或重新实例化插件后 runtime UUID 可以变化，需要重新执行 Identify discovery。
-
-# V0.3 Signal State
-
-插件采用以下 signal detector：
+关注：
 
 ```text
-close threshold   ≈ -50 dBFS
-reopen threshold  ≈ -48 dBFS
-hold              ≈ 0.4 s
+bound_count
+unbound_count
+discovery_complete
+instances[].runtime_id
+instances[].binding
+instances[].selector
 ```
 
-Bridge 输出时：
+`discovery_complete=false` 时，如果任务依赖确定轨道身份，应优先完成 Identify，而不是靠名称或音频内容猜测。
 
-- `signal_present=false`：当前没有有效分析输入；
-- `spectrum_valid=false`：`bands_db`、centroid、rolloff、flatness 返回 `null`；
-- `stereo_valid=false`：full-band / band-limited correlation 和 width 返回 `null`；
-- 连续无输入约 3 秒后 `lufs_s=null`；
-- `lufs_i` 与 `max_true_peak_dbtp` 保留，因为它们是 session 累计值。
+runtime UUID / binding 都是 session-scoped。
 
-`null` 表示“此指标当前无有效测量”，绝不能按数值 0 解释。
+## Signal State 与有效性
 
-# Window averaging
-
-`audio_average()` 会同时返回：
+Signal detector 当前约为：
 
 ```text
+close threshold   -50 dBFS
+reopen threshold  -48 dBFS
+hold              0.4 s
+```
+
+内容相关字段读取前检查：
+
+```text
+signal_present
+analysis_valid
+active_ratio
+```
+
+当无有效信号时，Bridge 会将不适合解释的频谱和立体声字段返回为 `null` / unavailable。
+
+统一规则：
+
+```text
+null = 当前无有效测量
+null ≠ 0
+```
+
+详细字段语义见 `parameters.md`。
+
+## `audio_average()`
+
+常见返回：
+
+```text
+window_seconds
 frames
 active_frames
+active_seconds
 active_ratio
-analysis_valid
 signal_present
+analysis_valid
 binding
 ```
 
-频谱、立体声、Crest、LUFS-S 只对 active frames 统计。Peak/RMS 与 session loudness/true-peak 仍可描述完整请求窗口或累计 session。
+内容相关的频谱、立体声、Crest、LUFS-S 等统计只使用 active frames。
 
-示例：
+例如：
 
 ```json
 {
@@ -244,68 +223,129 @@ binding
 }
 ```
 
-这表示 5 秒窗口里约 20% 的 Analyzer 帧存在有效输入。不要把这种结果描述成“整个 5 秒都持续存在”的频谱问题。
+这只表示该窗口约 20% 的帧有有效输入。
 
-如果 `active_frames=0`，频谱/立体声类汇总会返回 `null`，应该要求开始播放、换到有声段落，或选择正确实例。
+## `audio_compare_tracks()`
 
-# 多实例与共享 OSC
+用于比较两个实例的相对频谱特征。调用前确保两个实例都能被唯一解析并有有效 `bands_db`。
 
-多个 AI Audio Analyzer 可以同时把 OSC 发到同一个：
+如果任一实例没有有效频谱，工具可能返回 unavailable，而不是伪造比较结果。
+
+## `audio_detect_masking()`
+
+这是当前项目对频谱重叠的启发式工具。不要因为函数名包含 `masking` 就把结果写成心理声学遮蔽的确定事实。
+
+适合用途：
+
+```text
+定位值得继续查看的频谱重叠候选
+```
+
+不适合直接推导：
+
+```text
+必须采取某种处理动作
+```
+
+## `audio_stereo_bands()`
+
+返回 8 段 Stereo Correlation。
+
+如果当前无有效信号或立体声数据不可用，应接受 unavailable/null，不要用默认 0 替代。
+
+## `audio_master_status()`
+
+提供指定 Master/目标实例的常用技术字段汇总。它只是数据入口，不编码任何固定 mastering target。
+
+## V0.5 Snapshot A/B
+
+### Capture
+
+```text
+audio_capture_snapshot("before", 5)
+```
+
+Snapshot 保存当前 Bridge session 内的项目级窗口测量。
+
+### List
+
+```text
+audio_list_snapshots()
+```
+
+用于确认当前保存了哪些 Snapshot。
+
+### Compare
+
+```text
+audio_compare_snapshots("before", "after")
+```
+
+Delta 定义：
+
+```text
+After - Before
+```
+
+A/B 时尽量保持：
+
+- 相同音乐片段；
+- 相近窗口长度；
+- 可比的 `active_ratio`；
+- 实例 binding 没有发生变化。
+
+LUFS-I 是 session 累积量，因此短窗口 A/B 时不要误认为它是两个独立 Integrated 测量。
+
+## V0.5 Project Overview
+
+`audio_mix_overview()` 返回的 `spectral_regions` 是频率范围聚合字段，`potential_spectral_conflicts` 是 heuristic overlap 排序。
+
+这些结果适合作为下一步工具调用的导航信息。例如先 Overview，再选择某两个 selector 做 `audio_compare_tracks()`。
+
+不要把 Overview 的候选列表自动转换成具体音乐处理建议。
+
+## 多实例与 OSC
+
+多个 VST3 实例都可以发送到：
 
 ```text
 127.0.0.1:9855
 ```
 
-只有 Python Bridge 绑定 UDP 9855；VST3 实例都是 sender，所以无需每实例分配端口。
+VST3 是 sender，Python MCP Bridge 是 UDP listener，因此不需要为每个 Analyzer 分配不同端口。
 
-每个 V0.3+ 插件实例发送：
+如果 Cherry Studio 启动了 Bridge，不要同时在终端再启动第二个 Bridge 占用同一个 UDP 端口。
 
-```text
-track = 用户可编辑的人类名称
-id    = 当前 live 实例的 runtime UUID
-```
+## 推荐技术调用模式
 
-Bridge 以 `id` 为内部 key，所以两个都叫 `Bass` 或 `Track` 的实例也不会互相覆盖。
-
-# OSC schema
-
-分析帧地址保持：
+工程未知：
 
 ```text
-/aianalyzer/frame
+audio_project_status()
+→ 必要时 Identify mapping
+→ audio_mix_overview()
+→ 按问题下钻
 ```
 
-V0.4 新增独立 Identify 地址：
+单实例：
 
 ```text
-/aianalyzer/identify
+audio_average(selector, seconds)
 ```
 
-Identify 参数：
+瞬时排查：
 
 ```text
-0 runtime_uuid      string
-1 analyzer_name     string
-2 plugin_timestamp  float
-3 schema_version    string
+audio_snapshot(selector)
 ```
 
-分析帧 V0.1/V0.2 前缀保持不变，V0.3 追加：
+A/B 测量：
 
 ```text
-55 signal_present      int
-56 detector_peak_db    float
-57 silence_seconds     float
-58 runtime_uuid        string
+audio_capture_snapshot("before")
+→ 外部状态发生变化
+→ audio_capture_snapshot("after")
+→ audio_compare_snapshots("before", "after")
 ```
 
-环境变量继续保持：
-
-```text
-AI_ANALYZER_OSC_HOST
-AI_ANALYZER_OSC_PORT
-```
-
-# Legacy compatibility
-
-V0.1/V0.2 插件没有 runtime UUID，也没有 Identify 参数。Bridge 会使用 `legacy:<name>` 作为兼容 key，并从电平近似推断 signal state。因此旧插件仍可用于基础分析，但无法获得 V0.4 的确定性 Mixer Track / Slot 绑定。
+整个过程中，工具返回的数据只作为测量事实。具体音乐风格判断不由本 Reference 规定。
