@@ -1,4 +1,4 @@
-# AI Audio Analyzer 1.0 — 中文安装教程
+# AI Audio Analyzer 1.1 — 中文安装教程
 
 [English guide](INSTALL.en.md)
 
@@ -47,14 +47,7 @@ VERSION.txt
 %LOCALAPPDATA%\AI Audio Analyzer\
 ```
 
-安装完成时，窗口会直接显示两个位置：
-
-```text
-cherry-studio-mcp.json
-skill\
-```
-
-在 Cherry Studio 里添加 MCP 时使用第一个文件，导入 Skill 时选择第二个文件夹。
+安装完成时会直接显示 `cherry-studio-mcp.json` 和 `skill` 文件夹的位置。
 
 ## macOS Apple Silicon 安装
 
@@ -78,32 +71,38 @@ Analyzer MCP 与 Skill 会安装到：
 ~/Library/Application Support/AI Audio Analyzer/
 ```
 
-不需要打开终端。要查看这个目录，可以在 Finder 里选择 **前往 → 前往文件夹…**，然后粘贴上面的路径。
-
-当前 macOS 包是 ad-hoc 签名，**不是 Apple Developer ID Notarization**。安装器会自动处理当前 Release 所需的 Quarantine / 本地签名检查。
+当前 macOS 包是 ad-hoc 签名，**不是 Apple Developer ID Notarization**。
 
 ## Cherry Studio
 
-安装完成后，安装器会告诉你：
+安装完成后，使用生成的 `cherry-studio-mcp.json` 添加 Analyzer MCP，并导入安装好的 `skill` 文件夹。
 
-1. `cherry-studio-mcp.json` 在哪里——用于添加 Analyzer MCP；
-2. `skill` 文件夹在哪里——用于导入 AI Audio Analyzer Skill。
+Skill 使用英文，以提高不同 LLM 对工具说明和参数含义的稳定理解。它会教模型发现 Analyzer、按任务选择最低需要的 Analysis Profile、理解测量数据，以及正确运行 Before/After Verification；不会预设具体混音、母带、和声或 Stereo 处理风格。
 
-Skill 使用英文，以提高不同 LLM 对工具说明和参数含义的稳定理解。Skill 只教模型怎么调用 MCP、理解测量数据和正确使用 V1.0 Verification，不预设具体混音、母带、和声或 Stereo 处理风格。
+## Analysis Profile
 
-AI Audio Analyzer 1.0 新增了围绕外部 DAW-control MCP 修改的受控 Before/After Verification，**安装方式没有增加任何额外步骤**。
+AI Audio Analyzer 向宿主公开以下测量 Profile：
 
-## V1.0 Verification 是什么
+```text
+Eco
+Balanced
+Mix
+Full
+```
 
-当 AI 工作流需要修改 FL Studio 时，Analyzer MCP 可以保存修改前的 Baseline，在外部 Control MCP 修改并回读宿主实际状态后，再测量 After，并检查两次测量是否满足透明的技术可比条件。
+它们只改变 **Analyzer 自己的测量计算量**，不会处理或改变声音。
+
+`Full` 是兼容默认值。AI 工作流可以在需要时通过真实 DAW-control MCP 临时切换到更轻或更深的 Profile，回读宿主设置，再由 Analyzer 状态确认是否生效。普通用户安装时不需要配置这些内容。
+
+## 闭环验证
+
+Analyzer MCP 可以保存修改前的 Before 测量，在外部 Control MCP 修改并回读真实宿主状态后，再测量 After，并检查两次测量是否满足透明的技术可比条件。
 
 这不代表 Analyzer 自己控制 FL Studio；而且“技术上可比”也不代表修改后的声音在艺术上更好。
 
-普通用户不需要手动配置这套流程，LLM-facing Skill 会告诉 Agent 如何正确调用这些工具。
+普通用户不需要手动配置这套流程，LLM-facing Skill 会告诉 Agent 如何正确调用。
 
 ## FL Studio 找不到插件
-
-按顺序尝试：
 
 1. 完全退出 FL Studio；
 2. 重新打开；
@@ -113,17 +112,13 @@ AI Audio Analyzer 1.0 新增了围绕外部 DAW-control MCP 修改的受控 Befo
 
 ## Cherry Studio 连不上 Analyzer
 
-重新运行一次安装器。安装器会自动检查 Analyzer 连接程序，并重新生成 `cherry-studio-mcp.json`。
+重新运行一次安装器。安装器会检查 Analyzer 连接程序，并重新生成 `cherry-studio-mcp.json`。
 
 另外确认电脑上没有同时运行第二个 AI Audio Analyzer MCP。
 
 ## macOS 提示无法打开安装器
 
-不要直接双击，改为：
-
-1. 右键 `Install.command`；
-2. 选择 **打开**；
-3. macOS 再次确认时继续选择 **打开**。
+右键 `Install.command` → **打开**。如果 macOS 再次确认，继续选择 **打开**。
 
 ## 重要说明
 
