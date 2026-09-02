@@ -182,8 +182,9 @@ void AnalysisWorker::updateSignalState()
     float peak = 0.0f;
     for (int i = 0; i < kHopSize; ++i)
     {
-        peak = std::max(peak, std::max(std::abs(hopLeft[static_cast<std::size_t>(i)]),
-                                      std::abs(hopRight[static_cast<std::size_t>(i)]))));
+        peak = std::max(peak,
+                        std::max(std::abs(hopLeft[static_cast<std::size_t>(i)]),
+                                 std::abs(hopRight[static_cast<std::size_t>(i)])));
     }
 
     detectorPeakDb = amplitudeToDb(peak);
