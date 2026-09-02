@@ -76,12 +76,12 @@ jobs:
           # Keep the complete installable VST3 package, including Contents/resources.
           Copy-Item -Path $vst3.FullName -Destination 'dist/AI Analyzer.vst3' -Recurse
 
-          Compress-Archive -Path \
-            'bridge/server.py', \
-            'bridge/requirements.txt', \
-            'bridge/cherry-studio.example.json' \
-            -DestinationPath 'dist/bridge.zip' \
-            -CompressionLevel Optimal
+          $bridgeFiles = @(
+            'bridge/server.py',
+            'bridge/requirements.txt',
+            'bridge/cherry-studio.example.json'
+          )
+          Compress-Archive -Path $bridgeFiles -DestinationPath 'dist/bridge.zip' -CompressionLevel Optimal
 
           Write-Host 'Package contents:'
           Get-ChildItem -Path dist -Recurse | Select-Object FullName
