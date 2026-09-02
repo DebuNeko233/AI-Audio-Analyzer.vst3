@@ -1,4 +1,4 @@
-# AI Audio Analyzer 0.7 — Start Here / 从这里开始
+# AI Audio Analyzer 0.8 — Start Here / 从这里开始
 
 [English guide](INSTALL.en.md) | [中文教程](INSTALL.zh-CN.md)
 
@@ -49,6 +49,8 @@ After installation, the installer tells you where to find:
 - the generated Cherry Studio MCP configuration;
 - the installed Cherry Studio Skill folder.
 
+AI Audio Analyzer 0.8 adds deeper Mid/Side and stereo measurements internally. Installation remains the same: no additional software or setup is required.
+
 ---
 
 # 中文快速说明
@@ -80,3 +82,5 @@ After installation, the installer tells you where to find:
 当前 macOS Release **只支持 Apple Silicon / arm64**，不提供 Intel Mac 包。
 
 安装完成后，安装器会直接告诉你 Cherry Studio 的 MCP 配置文件位置和 Skill 文件夹位置。
+
+AI Audio Analyzer 0.8 新增了更深入的 Mid/Side 与立体声测量，但安装方式没有增加任何额外步骤或依赖。
