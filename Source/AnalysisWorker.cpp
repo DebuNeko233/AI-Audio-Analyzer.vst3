@@ -12,6 +12,8 @@ constexpr float kMinFrequencyHz = 20.0f;
 constexpr float kMaxFrequencyHz = 20000.0f;
 constexpr float kRolloffFraction = 0.85f;
 constexpr double kOscIntervalMs = 100.0; // 10 Hz network update rate
+constexpr float kTemporalLowBandMinHz = 40.0f;
+constexpr float kTemporalLowBandMaxHz = 160.0f;
 
 // Treat material below -50 dBFS as absent, but use hysteresis and a short hold
 // to avoid chattering when a tail hovers around the threshold.
@@ -134,6 +136,17 @@ void AnalysisWorker::resetLoudnessState()
     loudnessState = ebur128_init(2, currentSampleRate, mode);
 }
 
+void AnalysisWorker::resetTemporalAccumulator() noexcept
+{
+    temporalAccumulatedSeconds = 0.0;
+    temporalSpectralFluxSum = 0.0;
+    temporalSpectralFluxCount = 0;
+    temporalSpectralFluxPeak = 0.0f;
+    temporalRmsRisePeakDb = 0.0f;
+    temporalLowBandPowerSum = 0.0;
+    temporalLowBandPowerCount = 0;
+}
+
 void AnalysisWorker::resetAnalysisState()
 {
     std::fill(windowLeft.begin(), windowLeft.end(), 0.0f);
@@ -141,12 +154,16 @@ void AnalysisWorker::resetAnalysisState()
     std::fill(fftLeftData.begin(), fftLeftData.end(), 0.0f);
     std::fill(fftRightData.begin(), fftRightData.end(), 0.0f);
     std::fill(midMagnitudes.begin(), midMagnitudes.end(), 0.0f);
+    std::fill(previousMidMagnitudes.begin(), previousMidMagnitudes.end(), 0.0f);
     filledSamples = 0;
 
     signalPresent = false;
     detectorPeakDb = kFloorDb;
     silenceSeconds = 0.0;
 
+    hasPreviousTemporalFrame = false;
+    previousWindowRmsDb = kFloorDb;
+    resetTemporalAccumulator();
     resetLoudnessState();
 }
 
@@ -260,6 +277,8 @@ void AnalysisWorker::processLoudnessHop()
 void AnalysisWorker::processWindow()
 {
     const auto currentSampleRate = sampleRate.load(std::memory_order_acquire);
+    const auto hopSeconds = static_cast<double>(kHopSize) / std::max(1.0, currentSampleRate);
+
     AnalysisFrame frame;
     frame.sampleRate = currentSampleRate;
     frame.timestampSeconds = juce::Time::getMillisecondCounterHiRes() / 1000.0;
@@ -355,6 +374,77 @@ void AnalysisWorker::processWindow()
             std::sqrt(midRe * midRe + midIm * midIm) / normalization;
     }
 
+    const bool hadPreviousTemporalFrame = hasPreviousTemporalFrame;
+    double currentMagnitudeSum = 0.0;
+    double previousMagnitudeSum = 0.0;
+    double lowBandPower = 0.0;
+    int lowBandBins = 0;
+
+    for (int k = firstBin; k <= lastBin; ++k)
+    {
+        const auto magnitude = std::max(0.0f, midMagnitudes[static_cast<std::size_t>(k)]);
+        currentMagnitudeSum += magnitude;
+        if (hadPreviousTemporalFrame)
+            previousMagnitudeSum += std::max(0.0f, previousMidMagnitudes[static_cast<std::size_t>(k)]);
+
+        const auto frequency = static_cast<float>(static_cast<double>(k) * currentSampleRate / kFftSize);
+        if (frequency >= kTemporalLowBandMinHz && frequency < kTemporalLowBandMaxHz)
+        {
+            lowBandPower += static_cast<double>(magnitude) * magnitude;
+            ++lowBandBins;
+        }
+    }
+
+    float spectralFlux = 0.0f;
+    if (hadPreviousTemporalFrame && currentMagnitudeSum > 1.0e-12 && previousMagnitudeSum > 1.0e-12)
+    {
+        double positiveDifference = 0.0;
+        for (int k = firstBin; k <= lastBin; ++k)
+        {
+            const auto currentNormalized =
+                static_cast<double>(midMagnitudes[static_cast<std::size_t>(k)]) / currentMagnitudeSum;
+            const auto previousNormalized =
+                static_cast<double>(previousMidMagnitudes[static_cast<std::size_t>(k)]) / previousMagnitudeSum;
+            positiveDifference += std::max(0.0, currentNormalized - previousNormalized);
+        }
+        spectralFlux = juce::jlimit(0.0f, 1.0f, static_cast<float>(positiveDifference));
+    }
+
+    const auto rmsRiseDb = hadPreviousTemporalFrame
+        ? std::max(0.0f, frame.rmsDb - previousWindowRmsDb)
+        : 0.0f;
+    const auto lowBandEnergyDb = lowBandBins > 0
+        ? amplitudeToDb(static_cast<float>(std::sqrt(lowBandPower / lowBandBins)))
+        : kFloorDb;
+
+    frame.temporalWindowSeconds = static_cast<float>(hopSeconds);
+    frame.spectralFluxMean = spectralFlux;
+    frame.spectralFluxPeak = spectralFlux;
+    frame.rmsRisePeakDb = rmsRiseDb;
+    frame.lowBandEnergyDb = lowBandEnergyDb;
+
+    std::copy_n(midMagnitudes.begin(), numBins, previousMidMagnitudes.begin());
+    hasPreviousTemporalFrame = true;
+    previousWindowRmsDb = frame.rmsDb;
+
+    if (signalPresent)
+    {
+        temporalAccumulatedSeconds += hopSeconds;
+        temporalSpectralFluxSum += spectralFlux;
+        ++temporalSpectralFluxCount;
+        temporalSpectralFluxPeak = std::max(temporalSpectralFluxPeak, spectralFlux);
+        temporalRmsRisePeakDb = std::max(temporalRmsRisePeakDb, rmsRiseDb);
+        if (lowBandBins > 0)
+        {
+            temporalLowBandPowerSum += lowBandPower / lowBandBins;
+            ++temporalLowBandPowerCount;
+        }
+    }
+    else
+    {
+        resetTemporalAccumulator();
+    }
+
     for (int k = firstBin; k <= lastBin; ++k)
     {
         const auto magnitude = std::max(midMagnitudes[static_cast<std::size_t>(k)], 1.0e-12f);
@@ -430,9 +520,9 @@ void AnalysisWorker::processWindow()
             : 0.0f;
     }
 
-    // Once the signal gate has closed, spectral/stereo values are explicitly
-    // treated as invalid machine features instead of leaving random near-noise
-    // correlation values in the stream. Peak/RMS, LUFS-I and session max TP are
+    // Once the signal gate has closed, spectral/stereo/temporal values are
+    // explicitly treated as invalid machine features instead of leaving random
+    // near-noise values in the stream. Peak/RMS, LUFS-I and session max TP are
     // retained because they still describe detector/session state.
     if (!signalPresent)
     {
@@ -441,6 +531,11 @@ void AnalysisWorker::processWindow()
         frame.spectralFlatness = 0.0f;
         frame.stereoCorrelation = 0.0f;
         frame.stereoWidth = 0.0f;
+        frame.temporalWindowSeconds = 0.0f;
+        frame.spectralFluxMean = 0.0f;
+        frame.spectralFluxPeak = 0.0f;
+        frame.rmsRisePeakDb = 0.0f;
+        frame.lowBandEnergyDb = kFloorDb;
         frame.bandsDb.fill(kFloorDb);
         frame.bandStereoCorrelation.fill(0.0f);
     }
@@ -454,9 +549,33 @@ void AnalysisWorker::processWindow()
     const auto nowMs = juce::Time::getMillisecondCounterHiRes();
     if (nowMs - lastOscSendMs >= kOscIntervalMs)
     {
+        AnalysisFrame outgoing = frame;
+        if (signalPresent && temporalSpectralFluxCount > 0)
+        {
+            outgoing.temporalWindowSeconds = static_cast<float>(temporalAccumulatedSeconds);
+            outgoing.spectralFluxMean = static_cast<float>(
+                temporalSpectralFluxSum / temporalSpectralFluxCount);
+            outgoing.spectralFluxPeak = temporalSpectralFluxPeak;
+            outgoing.rmsRisePeakDb = temporalRmsRisePeakDb;
+            outgoing.lowBandEnergyDb = temporalLowBandPowerCount > 0
+                ? amplitudeToDb(static_cast<float>(std::sqrt(
+                    temporalLowBandPowerSum / temporalLowBandPowerCount)))
+                : kFloorDb;
+        }
+        else
+        {
+            outgoing.temporalWindowSeconds = 0.0f;
+            outgoing.spectralFluxMean = 0.0f;
+            outgoing.spectralFluxPeak = 0.0f;
+            outgoing.rmsRisePeakDb = 0.0f;
+            outgoing.lowBandEnergyDb = kFloorDb;
+        }
+
         refreshOscConnectionIfNeeded();
         if (oscConnected)
-            sendFrame(frame);
+            sendFrame(outgoing);
+
+        resetTemporalAccumulator();
         lastOscSendMs = nowMs;
     }
 }
@@ -511,6 +630,17 @@ void AnalysisWorker::sendFrame(const AnalysisFrame& frame)
     message.addFloat32(frame.detectorPeakDb);
     message.addFloat32(frame.silenceSeconds);
     message.addString(runtimeUuid);
+
+    // V0.6 temporal extras. The schema remains append-only so older bridges can
+    // safely ignore these fields. Flux is normalized spectral redistribution;
+    // RMS rise is the largest positive window-to-window rise during this OSC
+    // aggregate; low-band energy is an FFT-derived 40-160 Hz feature.
+    message.addFloat32(frame.temporalWindowSeconds);
+    message.addFloat32(frame.spectralFluxMean);
+    message.addFloat32(frame.spectralFluxPeak);
+    message.addFloat32(frame.rmsRisePeakDb);
+    message.addFloat32(frame.lowBandEnergyDb);
+    message.addString("0.6");
 
     oscSender.send(message);
 }

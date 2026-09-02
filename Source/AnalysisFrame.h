@@ -42,6 +42,15 @@ struct AnalysisFrame
     float stereoCorrelation = 1.0f;
     float stereoWidth = 0.0f;
 
+    // V0.6 temporal fields. These are descriptive machine measurements rather
+    // than artistic quality scores. Network frames may aggregate several
+    // internal FFT hops into one ~10 Hz OSC update.
+    float temporalWindowSeconds = 0.0f;
+    float spectralFluxMean = 0.0f;
+    float spectralFluxPeak = 0.0f;
+    float rmsRisePeakDb = 0.0f;
+    float lowBandEnergyDb = -120.0f; // FFT-derived 40-160 Hz energy feature.
+
     std::array<float, kNumBands> bandsDb {};
     std::array<float, kNumStereoCorrelationBands> bandStereoCorrelation {};
 };
