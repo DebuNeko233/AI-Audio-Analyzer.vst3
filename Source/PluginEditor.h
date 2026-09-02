@@ -18,7 +18,7 @@ private:
     void applyConfig();
     void drawSpectrum(juce::Graphics&, juce::Rectangle<float> bounds) const;
 
-    AIAnalyzerAudioProcessor& processor;
+    AIAnalyzerAudioProcessor& ownerProcessor;
 
     juce::Label instanceLabel;
     juce::Label hostLabel;
