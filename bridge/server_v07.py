@@ -4,8 +4,8 @@
 Loads the stable 0.4 core bridge, the 0.5 project-intelligence layer, the 0.6
 temporal-analysis layer, and the 0.7 masking-evidence layer.
 
-V0.7 is Bridge/MCP-only: it reuses the existing 0.6 VST3 measurements and does
-not change the OSC frame schema or plugin DSP.
+V0.7 keeps the 0.6 OSC frame schema. The new masking-evidence logic is built
+from existing spectrum, level, and temporal measurements in the Bridge.
 
 Set AI_ANALYZER_SELF_TEST=1 to validate a source or PyInstaller-packaged runtime
 without opening the OSC listener or MCP stdio transport.
@@ -17,9 +17,9 @@ import asyncio
 import json
 import os
 
-import masking_tools as masking  # noqa: F401  # registers 0.7 tools
 import server as core
 import server_v06 as v06
+import masking_tools as masking  # noqa: F401  # registers 0.7 tools
 
 mcp = core.mcp
 
