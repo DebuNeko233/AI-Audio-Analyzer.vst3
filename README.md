@@ -270,12 +270,29 @@ Current macOS builds are ad-hoc signed, **not Apple Developer ID notarized**. Th
 
 Full instructions are inside each Release package.
 
-## Developer/source MCP
+## MCP source layout and entrypoint
 
-Current source entry point:
+There is exactly one supported MCP source/PyInstaller entrypoint:
 
 ```text
-bridge/server_v07.py
+bridge/server.py
+```
+
+Version numbers are metadata, not entrypoint filenames:
+
+```text
+MCP version          0.7
+OSC protocol version 0.6
+```
+
+Internal implementation is split by responsibility:
+
+```text
+bridge/server.py          single startup / self-test / tool registry entrypoint
+bridge/analyzer_core.py   stable OSC state, identity, base measurements and base tools
+bridge/project_tools.py   project overview and Snapshot A-B
+bridge/temporal_tools.py  V0.6 temporal parsing and comparison
+bridge/masking_tools.py   V0.7 masking-evidence layer
 ```
 
 Python 3.12 is recommended for source mode:
@@ -284,7 +301,7 @@ Python 3.12 is recommended for source mode:
 python3.12 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r bridge/requirements.txt
-AI_ANALYZER_SELF_TEST=1 python bridge/server_v07.py
+AI_ANALYZER_SELF_TEST=1 python bridge/server.py
 ```
 
 Windows uses the equivalent `.venv\Scripts\Activate.ps1` flow.
@@ -293,7 +310,7 @@ Source mode is a developer/debug fallback. Normal users should use the packaged 
 
 ## Cherry Studio source example
 
-`bridge/cherry-studio.example.json` points to `server_v07.py`. The packaged installer instead generates a configuration whose `command` points directly to the standalone MCP executable.
+`bridge/cherry-studio.example.json` points to `bridge/server.py`. The packaged installer instead generates a configuration whose `command` points directly to the standalone MCP executable.
 
 Do not run a manual Bridge process while Cherry Studio starts another copy on the same UDP port.
 
@@ -380,7 +397,9 @@ The audio callback does not perform FFT, loudness, OSC, MCP, allocation-heavy wo
 
 ```text
 Source/                         JUCE VST3
-bridge/                         MCP source layers
+bridge/server.py                single MCP entrypoint
+bridge/analyzer_core.py         stable internal MCP/OSC core
+bridge/*_tools.py               feature modules
 skills/ai-analyzer-flstudio/    English LLM-facing Skill
 release/                        lazy-package installers/docs
 .github/workflows/build.yml     development CI
