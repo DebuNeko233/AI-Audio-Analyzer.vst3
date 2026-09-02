@@ -107,7 +107,7 @@ jobs:
           cache: pip
           cache-dependency-path: bridge/requirements.txt
 
-      - name: Validate MCP 0.7 source and regressions
+      - name: Validate MCP 0.8 source and regressions
         shell: bash
         run: |
           set -euo pipefail
@@ -118,7 +118,8 @@ jobs:
             bridge/analyzer_core.py \
             bridge/project_tools.py \
             bridge/temporal_tools.py \
-            bridge/masking_tools.py
+            bridge/masking_tools.py \
+            bridge/stereo_tools.py
           AI_ANALYZER_SELF_TEST=1 python bridge/server.py
 
           python - <<'PY'
@@ -132,18 +133,19 @@ jobs:
           import project_tools as project
           import temporal_tools as temporal
           import masking_tools as masking
+          import stereo_tools as stereo
           from mcp.server import MCPServer
 
           mcp_version = version("mcp")
           assert mcp_version.split(".", 1)[0] == "2", mcp_version
           assert isinstance(entry.mcp, MCPServer)
           assert entry.mcp is core.mcp
-          assert entry.MCP_VERSION == "0.7"
-          assert entry.OSC_PROTOCOL_VERSION == "0.6"
+          assert entry.MCP_VERSION == "0.8"
+          assert entry.OSC_PROTOCOL_VERSION == "0.8"
 
           names = {tool.name for tool in asyncio.run(entry.mcp.list_tools())}
           assert names == entry.EXPECTED_TOOLS, sorted(names ^ entry.EXPECTED_TOOLS)
-          assert len(names) == 20
+          assert len(names) == 22
 
           with core._lock:
               core._tracks.clear()
@@ -154,7 +156,21 @@ jobs:
           with project._snapshot_lock:
               project._project_snapshots.clear()
 
-          def frame(name, runtime_id, timestamp, bands, peak=-14.0, rms=-24.0, flux=0.08, rise=1.0):
+          def frame(
+              name,
+              runtime_id,
+              timestamp,
+              bands,
+              peak=-14.0,
+              rms=-24.0,
+              flux=0.08,
+              rise=1.0,
+              side_offset_db=-12.0,
+              side_to_mid_db=-9.0,
+              negative_cross=0.08,
+              low_corr=0.92,
+              low_side_to_mid_db=-15.0,
+          ):
               prefix = [
                   name, 48000.0, timestamp, peak, rms, peak-rms,
                   700.0, 6000.0, 0.15, 0.75, 0.25,
@@ -162,7 +178,17 @@ jobs:
               v02 = [-18.0, -14.0, -1.0, -0.5] + [0.85] * 8
               v03 = [1, peak, 0.0, runtime_id]
               v06 = [0.1, flux * 0.5, flux, rise, -28.0, "0.6"]
-              return prefix + v02 + v03 + v06
+              side_bands = [float(value) + side_offset_db for value in bands]
+              band_side_mid = [-18.0, -16.0, -14.0, -12.0, -10.0, -8.0, -6.0, -4.0]
+              v08 = [
+                  rms - 1.0,
+                  rms - 10.0,
+                  side_to_mid_db,
+                  negative_cross,
+                  low_corr,
+                  low_side_to_mid_db,
+              ] + side_bands + band_side_mid + ["0.8"]
+              return prefix + v02 + v03 + v06 + v08
 
           shape_a = [-55.0 + min(i, 12) * 1.8 for i in range(32)]
           shape_b = [value + 2.0 for value in shape_a]
@@ -172,11 +198,43 @@ jobs:
               bands_b = [value + swing * 0.9 + 1.5 for value in shape_b]
               flux = 0.24 if i in (2, 5) else 0.06
               rise = 5.0 if i in (2, 5) else 0.8
-              core._on_frame("/aianalyzer/frame", *frame("Bass A", "uuid-a", 10.0 + i * 0.1, bands_a, flux=flux, rise=rise))
-              core._on_frame("/aianalyzer/frame", *frame("Bass B", "uuid-b", 10.01 + i * 0.1, bands_b, peak=-16.0, rms=-26.0, flux=flux * 0.9, rise=rise * 0.9))
+              core._on_frame(
+                  "/aianalyzer/frame",
+                  *frame(
+                      "Bass A",
+                      "uuid-a",
+                      10.0 + i * 0.1,
+                      bands_a,
+                      flux=flux,
+                      rise=rise,
+                      negative_cross=0.05 + i * 0.005,
+                      low_corr=0.94 - i * 0.005,
+                  ),
+              )
+              core._on_frame(
+                  "/aianalyzer/frame",
+                  *frame(
+                      "Bass B",
+                      "uuid-b",
+                      10.01 + i * 0.1,
+                      bands_b,
+                      peak=-16.0,
+                      rms=-26.0,
+                      flux=flux * 0.9,
+                      rise=rise * 0.9,
+                      side_offset_db=-7.0,
+                      side_to_mid_db=-5.0,
+                      negative_cross=0.22 + i * 0.01,
+                      low_corr=0.70 - i * 0.01,
+                      low_side_to_mid_db=-9.0,
+                  ),
+              )
 
           assert core._tracks["uuid-a"]["temporal_supported"] is True
-          assert core._tracks["uuid-a"]["schema_version"] == "0.6"
+          assert core._tracks["uuid-a"]["stereo_v08_supported"] is True
+          assert core._tracks["uuid-a"]["schema_version"] == "0.8"
+          assert len(core._tracks["uuid-a"]["side_bands_db"]) == 32
+          assert len(core._tracks["uuid-a"]["band_side_to_mid_db"]) == 8
 
           core._on_identify("/aianalyzer/identify", "uuid-a", "Bass A", 11.0, "0.4")
           bound = core.audio_bind_last_identified(7, "Bass A", 9)
@@ -204,6 +262,22 @@ jobs:
           assert scan["candidate_pair_count"] >= 1
           assert scan["pairs"][0]["top_region"] is not None
 
+          stereo_a = stereo.audio_stereo_profile("uuid-a", 5.0)
+          stereo_b = stereo.audio_stereo_profile("uuid-b", 5.0)
+          assert stereo_a["available"] is True
+          assert stereo_b["available"] is True
+          assert len(stereo_a["mid_spectrum_db"]) == 32
+          assert len(stereo_a["side_spectrum_db"]) == 32
+          assert len(stereo_a["frequency_dependent_stereo"]) == 8
+          assert stereo_a["full_band"]["decorrelation_proxy_mean"] is not None
+          assert stereo_a["full_band"]["negative_cross_energy_ratio_mean"] is not None
+          assert stereo_b["full_band"]["side_to_mid_db"] > stereo_a["full_band"]["side_to_mid_db"]
+
+          stereo_delta = stereo.audio_stereo_compare("uuid-a", "uuid-b", 5.0)
+          assert stereo_delta["available"] is True
+          assert stereo_delta["deltas_b_minus_a"]["side_to_mid_db"] is not None
+          assert len(stereo_delta["frequency_dependent_deltas"]) == 8
+
           before = project.audio_capture_snapshot("before", 5.0)
           assert before["track_count"] == 2
           assert project.audio_list_snapshots()["count"] == 1
@@ -211,7 +285,7 @@ jobs:
           print(
               f"AI Audio Analyzer MCP SDK {mcp_version}: {len(names)} tools; "
               "single server.py entrypoint + V0.4 mapping + V0.5 project A/B + "
-              "V0.6 temporal + V0.7 masking evidence OK"
+              "V0.6 temporal + V0.7 masking + V0.8 Mid/Side stereo evidence OK"
           )
           PY
 
@@ -226,6 +300,7 @@ jobs:
           cp bridge/project_tools.py dist/mcp/
           cp bridge/temporal_tools.py dist/mcp/
           cp bridge/masking_tools.py dist/mcp/
+          cp bridge/stereo_tools.py dist/mcp/
           cp bridge/requirements.txt dist/mcp/
           cp bridge/cherry-studio.example.json dist/mcp/
           cp -R skills/ai-analyzer-flstudio/. dist/skill/
