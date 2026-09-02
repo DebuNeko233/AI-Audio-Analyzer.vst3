@@ -1,6 +1,6 @@
 ---
 name: ai-analyzer-flstudio
-description: Technical usage skill for Cherry Studio + AI Audio Analyzer MCP. Teaches deterministic Analyzer discovery/binding, tool selection, measurement validity, level/loudness/spectrum/stereo/temporal semantics, project overview, Snapshot A/B, V0.7 masking evidence, V0.8 Mid/Side stereo evidence, and V0.9 audio-domain tonal evidence. It does not prescribe a mixing style, LUFS target, EQ/compression/sidechain/stereo recipe, key change, harmony edit, or aesthetic decision.
+description: Technical usage skill for Cherry Studio + AI Audio Analyzer MCP. Teaches deterministic Analyzer discovery/binding, tool selection, measurement validity, level/loudness/spectrum/stereo/temporal semantics, project overview, Snapshot A/B, V0.7 masking evidence, V0.8 Mid/Side stereo evidence, V0.9 audio-domain tonal evidence, and V1.0 controlled closed-loop verification around external DAW changes. It does not prescribe a mixing style, LUFS target, EQ/compression/sidechain/stereo recipe, key change, harmony edit, or aesthetic decision.
 ---
 
 # AI Audio Analyzer MCP Usage Skill
@@ -10,7 +10,7 @@ This Skill has two responsibilities only:
 1. help the model call **AI Audio Analyzer MCP** correctly;
 2. help the model interpret returned measurements and evidence without overstating them.
 
-It is **not a mixing, mastering, harmony, arrangement, or style guide**. Do not infer a mandatory EQ, compressor, limiter, sidechain, panning, stereo, mono, tuning, transposition, chord, harmony, or mastering action merely because a measurement is high, low, overlapping, correlated, anti-correlated, wide, tonal, chromatic, concentrated, or ambiguous. Artistic decisions come from the user's goal, musical context, references, DAW state, and the model's own reasoning—not from this Skill.
+It is **not a mixing, mastering, harmony, arrangement, or style guide**. Do not infer a mandatory EQ, compressor, limiter, sidechain, panning, stereo, mono, tuning, transposition, chord, harmony, or mastering action merely because a measurement is high, low, overlapping, correlated, anti-correlated, wide, tonal, chromatic, concentrated, ambiguous, or because a V1.0 comparison is technically controlled. Artistic decisions come from the user's goal, musical context, references, DAW state, and the model's own reasoning—not from this Skill.
 
 ## 1. Start at project level
 
@@ -117,7 +117,21 @@ evidence_quality.valid_frame_ratio
 evidence_quality.active_ratio
 ```
 
-A legacy Analyzer may still provide level/spectrum/stereo data while lacking V0.6 temporal, V0.8 Mid/Side, or V0.9 semantic evidence.
+For V1.0 closed-loop verification inspect both baseline and final comparability state:
+
+```text
+ready_for_external_change
+baseline_blockers
+controlled_comparison
+comparability.same_window_seconds
+comparability.topology_unchanged
+comparability.missing_targets
+comparability.invalid_targets
+comparability.coverage_mismatch_targets
+comparability.active_ratio_tolerance
+```
+
+A legacy Analyzer may still provide level/spectrum/stereo data while lacking V0.6 temporal, V0.8 Mid/Side, or V0.9 semantic evidence. V1.0 itself adds no OSC fields; it orchestrates existing measurements in the Bridge.
 
 ## 4. Tool selection
 
@@ -304,7 +318,130 @@ audio_compare_snapshots("before", "after")
 
 Use comparable musical passages, similar window lengths, and comparable `active_ratio`. Snapshot deltas are `After - Before`. LUFS-I is session cumulative, not reset per snapshot.
 
-## 5. How to read V0.9 tonal evidence
+### Controlled external-change verification — V1.0
+
+Use this when the agent is coordinating a real DAW modification through an external control MCP and the user wants measurement verification.
+
+```text
+audio_begin_verification(
+  label="short factual label",
+  seconds=5,
+  target_selectors=["mixer:4/slot:9"]
+)
+```
+
+Do **not** make the DAW change first. Establish the Before baseline first and inspect:
+
+```text
+ready_for_external_change
+baseline_blockers
+verification_id
+```
+
+If the baseline is ready:
+
+```text
+external FL Studio control MCP writes the intended change
+→ external FL Studio control MCP reads the actual host state back
+→ replay the same intended passage
+→ audio_complete_verification(
+     verification_id,
+     seconds=0,
+     change_summary="factual change actually attempted",
+     host_readback="actual host state reported after the write"
+   )
+```
+
+`seconds=0` means use the baseline measurement duration again.
+
+Then inspect:
+
+```text
+result.comparison.controlled_comparison
+result.comparison.comparability
+result.topology
+result.external_change.readback_supplied
+result.audit
+result.comparison.targets[].delta
+```
+
+Use:
+
+```text
+audio_verification_status()
+audio_verification_status(verification_id)
+```
+
+for current-session listing/recovery.
+
+V1.0 verification is session-scoped. It does not persist across Bridge restarts.
+
+## 5. How to read V1.0 verification evidence
+
+### `ready_for_external_change`
+
+This means the Before baseline passed the current measurement-workflow checks. It does not mean the proposed DAW change is appropriate.
+
+If false, resolve `baseline_blockers` and begin a new verification before changing the DAW.
+
+### Host readback is not a plan
+
+`host_readback` should contain the external control MCP's **actual post-write host state**. Do not fill it with the intended value merely because the write was requested.
+
+Analyzer stores caller-supplied readback text for auditability. Analyzer does not independently query FL Studio or validate that text.
+
+### Topology fingerprint
+
+The topology fingerprint summarizes sorted live Analyzer identity/binding metadata for Before/After consistency checking.
+
+It is not a persistent project ID, audio fingerprint, or proof that every DAW parameter is unchanged.
+
+### `controlled_comparison`
+
+Current V1.0 requires:
+
+```text
+at least one compared target
+same Before/After window duration
+topology unchanged
+no missing targets
+valid active analysis for all compared requested targets
+absolute active_ratio difference <= 0.15 for all compared requested targets
+```
+
+The `0.15` active-ratio tolerance is a transparent passage-coverage guardrail, not an audible or quality threshold.
+
+`controlled_comparison=true` means only that the current A/B measurement conditions satisfy these guardrails. It does **not** mean:
+
+```text
+After is better
+change should be kept
+processor setting is correct
+mix is more professional
+masking/stereo/tonal quality improved
+```
+
+If false, report the failed guardrail before making a strong A/B claim.
+
+### Verification delta convention
+
+Basic V1.0 deltas use:
+
+```text
+After - Before
+```
+
+Positive means numerically higher in After, not better.
+
+For deeper analysis after a controlled change, call only the relevant specialized tool family rather than pretending the basic verification deltas contain all temporal, masking, stereo, or tonal information.
+
+Detailed semantics:
+
+```text
+references/verification-evidence.md
+```
+
+## 6. How to read V0.9 tonal evidence
 
 ### Chroma is a pitch-class power distribution
 
@@ -373,7 +510,7 @@ Detailed semantics:
 references/tonal-evidence.md
 ```
 
-## 6. How to read V0.8 stereo evidence
+## 7. How to read V0.8 stereo evidence
 
 ### Correlation is signed
 
@@ -415,7 +552,7 @@ Detailed semantics:
 references/stereo-evidence.md
 ```
 
-## 7. How to read V0.7 masking evidence
+## 8. How to read V0.7 masking evidence
 
 `audio_masking_evidence()` reports transparent components rather than an opaque conclusion:
 
@@ -437,9 +574,9 @@ Detailed semantics:
 references/masking-evidence.md
 ```
 
-## 8. Evidence quality matters
+## 9. Evidence quality matters
 
-When interpreting window/pair evidence, inspect the relevant context:
+When interpreting window/pair/verification evidence, inspect the relevant context:
 
 ```text
 window_seconds
@@ -451,11 +588,12 @@ tonal_center_top2_margin for V0.9
 stereo_frames for V0.8
 aligned_pairs / tolerance / mean offset for temporal and masking evidence
 frequency / stereo band / ERB region when relevant
+verification topology/window/target/active-coverage comparability for V1.0
 ```
 
-Sparse, stale, mostly silent, poorly aligned, or weakly covered data should reduce certainty in the interpretation.
+Sparse, stale, mostly silent, poorly aligned, weakly covered, or technically non-comparable data should reduce certainty in the interpretation.
 
-## 9. Relationship between tools
+## 10. Relationship between tools
 
 Use tools progressively rather than mechanically:
 
@@ -475,6 +613,18 @@ choose evidence family only when needed:
 
 Do not call every layer if the user's question is already answered.
 
+For a requested DAW modification with verification:
+
+```text
+project ready + deterministic mapping
+→ audio_begin_verification()
+→ external control MCP change
+→ external control MCP host readback
+→ audio_complete_verification()
+→ inspect controlled_comparison
+→ specialized Analyzer evidence only if the question requires deeper detail
+```
+
 For exact symbolic music facts:
 
 ```text
@@ -485,7 +635,7 @@ audio-only evidence needed or symbolic data unavailable
 → use V0.9 tonal tools with validity/uncertainty context
 ```
 
-## 10. Parameter interpretation rules
+## 11. Parameter interpretation rules
 
 Detailed semantics:
 
@@ -494,6 +644,7 @@ references/parameters.md
 references/masking-evidence.md
 references/stereo-evidence.md
 references/tonal-evidence.md
+references/verification-evidence.md
 ```
 
 Tool/selector details:
@@ -526,27 +677,39 @@ Always keep these distinctions:
 - Single-F0 harmonic ratio is not probability of harmonic content.
 - Harmonic F0 candidate is not a detected musical note.
 - Chroma similarity is not harmonic compatibility.
+- V1.0 topology fingerprint is not a persistent DAW-project hash.
+- `host_readback` is caller-supplied external control-MCP evidence, not an Analyzer-verified host query.
+- `controlled_comparison` is a technical comparability gate, not an artistic quality score.
 - `null` is unavailable, not zero.
 
-## 11. Boundary with FL Studio control MCP
+## 12. Boundary with FL Studio control MCP
 
 AI Audio Analyzer MCP is responsible for:
 
 ```text
-measure / read / compare / verify
+measure / read / compare / verify measurement conditions
 ```
 
 FL Studio control MCP is responsible for:
 
 ```text
-DAW topology / project data / plugin access / host changes
+DAW topology / project data / plugin access / host changes / host readback
 ```
 
-This Skill may guide deterministic Identify mapping and measurement readback after an external DAW change. It must **not** prescribe what parameter to change, by how much, what key to use, what chord to replace, or which artistic style to follow.
+This Skill may guide deterministic Identify mapping and V1.0 measurement verification around an external DAW change. It must **not** prescribe what parameter to change, by how much, what key to use, what chord to replace, or which artistic style to follow.
 
-If the user asks to modify the project, first read the actual DAW tracks/slots/plugins/parameters and relevant symbolic project data when available; do not invent controls or notes. Read back the host state after changes and use Analyzer measurements only as technical evidence.
+If the user asks to modify the project:
 
-## 12. Output discipline
+1. inspect the actual DAW tracks/slots/plugins/parameters and relevant symbolic project data;
+2. establish `audio_begin_verification()` before the write when measured Before/After verification is desired;
+3. use the real control MCP to perform the write;
+4. read the actual host state back through that control MCP;
+5. pass a factual summary/readback to `audio_complete_verification()`;
+6. inspect measurement comparability before interpreting the A/B strongly.
+
+Do not invent controls, notes, write success, or readback values.
+
+## 13. Output discipline
 
 When citing Analyzer evidence, include enough context to make it auditable:
 
@@ -557,6 +720,7 @@ signal validity / active ratio
 evidence-quality fields when relevant
 frequency / stereo band / ERB region / pitch-class context
 alignment quality for temporal evidence
+verification_id / topology / coverage / readback context for V1.0 when relevant
 measurement/evidence value
 what the metric can and cannot establish
 ```
@@ -572,6 +736,8 @@ Do not present these as Analyzer-measured facts:
 - the top tonal-center candidate is certainly the song key;
 - an F0 candidate is certainly the played note;
 - similar/different chroma automatically means two sources are harmonically compatible/incompatible;
-- V0.9 evidence automatically requires transposition, tuning, chord replacement, harmony editing, arrangement changes, or any processing action.
+- V0.9 evidence automatically requires transposition, tuning, chord replacement, harmony editing, arrangement changes, or any processing action;
+- `controlled_comparison=true` means the After state is better, correct, or preferred;
+- caller-supplied `host_readback` was independently verified by Analyzer.
 
-Those are symbolic/artistic/processing judgments outside the measurement scope of this MCP and Skill.
+Those are symbolic/artistic/processing or external-host-state judgments outside the measurement scope of this MCP and Skill.
