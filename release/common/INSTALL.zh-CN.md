@@ -1,4 +1,4 @@
-# AI Audio Analyzer 0.9 — 中文安装教程
+# AI Audio Analyzer 1.0 — 中文安装教程
 
 [English guide](INSTALL.en.md)
 
@@ -28,7 +28,7 @@ VERSION.txt
 对应平台的一键安装文件
 ```
 
-用户 Release **不会夹带 MCP Python 源码**，也不会包含 `requirements.txt`、开发者配置示例、PyInstaller `_internal` 或“ZIP 里面再套一个 ZIP”。
+用户 Release **不会夹带 MCP Python 源码**、仓库回归测试代码、`requirements.txt`、开发者配置示例、PyInstaller `_internal`，也不会出现“ZIP 里面再套一个 ZIP”。
 
 ## Windows 安装
 
@@ -89,9 +89,17 @@ Analyzer MCP 与 Skill 会安装到：
 1. `cherry-studio-mcp.json` 在哪里——用于添加 Analyzer MCP；
 2. `skill` 文件夹在哪里——用于导入 AI Audio Analyzer Skill。
 
-Skill 使用英文，以提高不同 LLM 对工具说明和参数含义的稳定理解。Skill 只教模型怎么调用 MCP 和理解测量数据，不预设具体混音风格、调性修正、和声改写或 Stereo 处理配方。
+Skill 使用英文，以提高不同 LLM 对工具说明和参数含义的稳定理解。Skill 只教模型怎么调用 MCP、理解测量数据和正确使用 V1.0 Verification，不预设具体混音、母带、和声或 Stereo 处理风格。
 
-AI Audio Analyzer 0.9 新增 Chroma、Tonal-Center Candidate 和 Single-F0 Harmonic Alignment 等音频域语义证据。它们只用于测量和辅助理解，不会自动修改音符、和弦或调性。安装方式没有增加任何额外步骤。
+AI Audio Analyzer 1.0 新增了围绕外部 DAW-control MCP 修改的受控 Before/After Verification，**安装方式没有增加任何额外步骤**。
+
+## V1.0 Verification 是什么
+
+当 AI 工作流需要修改 FL Studio 时，Analyzer MCP 可以保存修改前的 Baseline，在外部 Control MCP 修改并回读宿主实际状态后，再测量 After，并检查两次测量是否满足透明的技术可比条件。
+
+这不代表 Analyzer 自己控制 FL Studio；而且“技术上可比”也不代表修改后的声音在艺术上更好。
+
+普通用户不需要手动配置这套流程，LLM-facing Skill 会告诉 Agent 如何正确调用这些工具。
 
 ## FL Studio 找不到插件
 
