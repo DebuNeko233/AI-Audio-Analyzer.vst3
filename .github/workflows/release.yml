@@ -103,7 +103,7 @@ jobs:
             --collect-all pythonosc \
             bridge/server_v06.py
 
-      - name: Smoke-test packaged runtime (Unix)
+      - name: Smoke-test packaged runtime (macOS)
         if: runner.os == 'macOS'
         shell: bash
         run: |
@@ -125,6 +125,7 @@ jobs:
       - name: Stage MCP runtime artifact
         shell: bash
         run: |
+          set -euo pipefail
           rm -rf runtime-artifact
           mkdir -p runtime-artifact
           cp -R dist/ai-audio-analyzer-mcp runtime-artifact/
@@ -147,6 +148,7 @@ jobs:
       - name: Configure and build VST3
         shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
           cmake --build build --config Release --parallel 2
 
@@ -176,15 +178,17 @@ jobs:
           New-Item -ItemType Directory -Path (Join-Path $root 'mcp/runtime') -Force | Out-Null
           Copy-Item 'input/mcp-runtime/ai-audio-analyzer-mcp' (Join-Path $root 'mcp/runtime/ai-audio-analyzer-mcp') -Recurse -Force
           New-Item -ItemType Directory -Path (Join-Path $root 'mcp/source') -Force | Out-Null
-          Copy-Item \
-            'bridge/server.py',\
-            'bridge/server_v05.py',\
-            'bridge/server_v06.py',\
-            'bridge/project_tools.py',\
-            'bridge/temporal_tools.py',\
-            'bridge/requirements.txt',\
-            'bridge/cherry-studio.example.json' \
-            (Join-Path $root 'mcp/source/') -Force
+
+          $sourceFiles = @(
+            'bridge/server.py'
+            'bridge/server_v05.py'
+            'bridge/server_v06.py'
+            'bridge/project_tools.py'
+            'bridge/temporal_tools.py'
+            'bridge/requirements.txt'
+            'bridge/cherry-studio.example.json'
+          )
+          Copy-Item -Path $sourceFiles -Destination (Join-Path $root 'mcp/source/') -Force
           Copy-Item 'skills/ai-analyzer-flstudio' (Join-Path $root 'skill') -Recurse -Force
 
           Copy-Item release/common/START-HERE.md (Join-Path $root 'START-HERE.md')
@@ -353,7 +357,7 @@ jobs:
 
           **Intel macOS / x86_64 is not included in current releases.**
 
-          **Normal users do not need to install Python, pip, MCP SDK, or access PyPI.** The packaged MCP runtime contains the required Python runtime and dependencies. Python source installation remains available under `mcp/source/` for developers and manual fallback.
+          **Normal users do not need to install Python, pip, MCP SDK, or access PyPI.** Python source remains under `mcp/source/` as a developer/manual fallback.
 
           macOS builds are currently ad-hoc signed rather than Apple-notarized; the bundled installer removes quarantine metadata and verifies/repairs the VST3 local signature.
 
