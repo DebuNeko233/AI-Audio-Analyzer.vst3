@@ -11,6 +11,8 @@ endif()
 
 project(AIAnalyzer VERSION 1.1.0 LANGUAGES C CXX)
 
+option(AI_ANALYZER_BUILD_TESTS "Build AI Audio Analyzer internal regression tests" OFF)
+
 include(FetchContent)
 
 FetchContent_Declare(
@@ -62,6 +64,7 @@ target_sources(AIAnalyzer PRIVATE
     Source/PluginEditor.h
     Source/AnalysisFrame.h
     Source/SpscStereoFifo.h
+    Source/WorkerScheduling.h
     Source/AnalysisWorker.cpp
     Source/AnalysisWorker.h
 )
@@ -88,3 +91,17 @@ target_link_libraries(AIAnalyzer PRIVATE
     juce::juce_recommended_lto_flags
     juce::juce_recommended_warning_flags
 )
+
+if(AI_ANALYZER_BUILD_TESTS)
+    enable_testing()
+    add_executable(AIAnalyzerWorkerSchedulingTests
+        tests/WorkerSchedulingTests.cpp
+    )
+    target_compile_features(AIAnalyzerWorkerSchedulingTests PRIVATE cxx_std_20)
+    target_include_directories(AIAnalyzerWorkerSchedulingTests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/Source
+        ${libebur128_SOURCE_DIR}/ebur128
+    )
+    target_link_libraries(AIAnalyzerWorkerSchedulingTests PRIVATE ebur128)
+    add_test(NAME worker-scheduling-regressions COMMAND AIAnalyzerWorkerSchedulingTests)
+endif()
