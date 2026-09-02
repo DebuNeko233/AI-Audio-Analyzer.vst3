@@ -188,6 +188,7 @@ void AnalysisWorker::resetLoudnessState()
     latestLufsIntegrated = kFloorDb;
     latestTruePeakDbtp = kFloorDb;
     maxTruePeakDbtp = kFloorDb;
+    lastLoudnessMetricsMs = 0.0;
 
     const auto currentSampleRate = static_cast<unsigned long>(
         std::max(1.0, std::round(sampleRate.load(std::memory_order_acquire))));
@@ -253,6 +254,7 @@ void AnalysisWorker::resetAnalysisState()
         latestLufsIntegrated = kFloorDb;
         latestTruePeakDbtp = kFloorDb;
         maxTruePeakDbtp = kFloorDb;
+        lastLoudnessMetricsMs = 0.0;
     }
 
     lastReducedAnalysisMs = 0.0;
@@ -282,6 +284,9 @@ void AnalysisWorker::applyProfileChangeIfNeeded()
             resetLoudnessState();
         else if (loudnessState != nullptr)
             ebur128_destroy(&loudnessState);
+
+        if (!newLoudness)
+            lastLoudnessMetricsMs = 0.0;
     }
 
     const bool oldTemporal = (oldMask & FeatureTemporal) != 0u;
@@ -386,6 +391,27 @@ void AnalysisWorker::processLoudnessHop()
     if (ebur128_add_frames_float(loudnessState, interleavedHop.data(), kHopSize) != EBUR128_SUCCESS)
         return;
 
+    // libebur128 performs the true-peak oversampling while frames are added.
+    // Read the most recent block every hop so short transients are never missed,
+    // and maintain the session maximum locally. This is equivalent to querying
+    // ebur128_true_peak() every hop but avoids repeatedly asking for the global
+    // accumulator value.
+    double leftPeak = 0.0;
+    double rightPeak = 0.0;
+    if (ebur128_prev_true_peak(loudnessState, 0, &leftPeak) == EBUR128_SUCCESS
+        && ebur128_prev_true_peak(loudnessState, 1, &rightPeak) == EBUR128_SUCCESS)
+    {
+        latestTruePeakDbtp = amplitudeToDb(static_cast<float>(std::max(leftPeak, rightPeak)));
+        maxTruePeakDbtp = std::max(maxTruePeakDbtp, latestTruePeakDbtp);
+    }
+
+    // Audio still enters libebur128 on every hop, but LUFS-S/I are exposed at
+    // network/GUI timescales. Polling those aggregate metrics faster than the
+    // 10 Hz OSC cadence only repeats expensive work without adding evidence.
+    const auto nowMs = juce::Time::getMillisecondCounterHiRes();
+    if (!loudnessMetricsDue(lastLoudnessMetricsMs, nowMs))
+        return;
+
     double value = 0.0;
     if (ebur128_loudness_shortterm(loudnessState, &value) == EBUR128_SUCCESS)
         latestLufsShortTerm = sanitizeLoudness(value);
@@ -393,21 +419,7 @@ void AnalysisWorker::processLoudnessHop()
     if (ebur128_loudness_global(loudnessState, &value) == EBUR128_SUCCESS)
         latestLufsIntegrated = sanitizeLoudness(value);
 
-    double leftPeak = 0.0;
-    double rightPeak = 0.0;
-    if (ebur128_prev_true_peak(loudnessState, 0, &leftPeak) == EBUR128_SUCCESS
-        && ebur128_prev_true_peak(loudnessState, 1, &rightPeak) == EBUR128_SUCCESS)
-    {
-        latestTruePeakDbtp = amplitudeToDb(static_cast<float>(std::max(leftPeak, rightPeak)));
-    }
-
-    double leftMax = 0.0;
-    double rightMax = 0.0;
-    if (ebur128_true_peak(loudnessState, 0, &leftMax) == EBUR128_SUCCESS
-        && ebur128_true_peak(loudnessState, 1, &rightMax) == EBUR128_SUCCESS)
-    {
-        maxTruePeakDbtp = amplitudeToDb(static_cast<float>(std::max(leftMax, rightMax)));
-    }
+    lastLoudnessMetricsMs = nowMs;
 }
 
 void AnalysisWorker::attachRuntimeMetadata(AnalysisFrame& frame) const noexcept
@@ -1164,9 +1176,14 @@ void AnalysisWorker::run()
                 sendIdentify();
         }
 
-        if (fifo.available() < static_cast<std::size_t>(kHopSize))
+        const auto availableSamples = fifo.available();
+        if (availableSamples < static_cast<std::size_t>(kHopSize))
         {
-            wait(2);
+            const auto waitMs = workerIdleWaitMilliseconds(
+                availableSamples,
+                static_cast<std::size_t>(kHopSize),
+                sampleRate.load(std::memory_order_acquire));
+            wait(waitMs);
             continue;
         }
 
