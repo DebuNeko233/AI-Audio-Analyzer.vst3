@@ -3,6 +3,7 @@
 
 The VST3 sends compact analysis frames to UDP localhost. This process caches the
 latest/history per plugin instance and exposes LLM-friendly MCP tools over stdio.
+Uses the stable MCP Python SDK v2 high-level MCPServer API.
 """
 
 from __future__ import annotations
@@ -15,7 +16,7 @@ import time
 from collections import deque
 from typing import Any
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server import MCPServer
 from pythonosc.dispatcher import Dispatcher
 from pythonosc.osc_server import ThreadingOSCUDPServer
 
@@ -36,7 +37,7 @@ _lock = threading.RLock()
 _tracks: dict[str, dict[str, Any]] = {}
 _history: dict[str, deque[dict[str, Any]]] = {}
 
-mcp = FastMCP("AI Analyzer Audio MCP")
+mcp = MCPServer("AI Analyzer Audio MCP")
 
 
 def _clean_frame(frame: dict[str, Any]) -> dict[str, Any]:
