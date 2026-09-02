@@ -1,6 +1,7 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include <atomic>
 #include <mutex>
 
 #include "AnalysisFrame.h"
@@ -55,7 +56,9 @@ private:
     int oscPort = 9855;
 
     juce::AudioParameterChoice* analysisProfileParameter = nullptr;
-    int lastWorkerProfileIndex = static_cast<int>(aianalyzer::AnalysisProfile::Full);
+    std::atomic<int> lastWorkerProfileIndex {
+        static_cast<int>(aianalyzer::AnalysisProfile::Full)
+    };
     aianalyzer::AnalysisWorker analysisWorker;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(AIAnalyzerAudioProcessor)
