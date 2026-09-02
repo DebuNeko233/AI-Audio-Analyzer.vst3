@@ -1,24 +1,29 @@
 # AI Audio Analyzer Cherry Studio Skill
 
-This Skill is intended for:
+This Skill targets:
 
 - Cherry Studio;
-- AI Audio Analyzer.vst3 0.6+;
-- AI Audio Analyzer MCP 0.6;
+- AI Audio Analyzer VST3 0.7.0;
+- AI Audio Analyzer MCP 0.7;
 - optional FL Studio control MCP: https://github.com/rosasynthesiz/flstudio-mcp
 
-Its purpose is to help the model **call Analyzer MCP correctly, interpret returned measurements, handle multi-instance mapping, and respect data validity**. It does not provide fixed mixing styles, LUFS targets, EQ/compression/sidechain recipes, or artistic presets.
+Its purpose is to help an LLM **call Analyzer MCP correctly, interpret measurements correctly, manage multi-instance mapping, and judge evidence quality**.
 
-## Current capabilities
+It does **not** provide fixed mixing style, LUFS targets, EQ/compression/sidechain recipes, or mastering chains.
+
+## Current capability layers
 
 ```text
 V0.3  Signal State / runtime UUID
-V0.4  Identify → deterministic FL Mixer Track/Slot mapping
+V0.4  Identify → FL Mixer Track/Slot deterministic mapping
 V0.5  Project Status / Mix Overview / Snapshot A-B
 V0.6  Spectral Flux / RMS Rise / temporal profile / band-envelope comparison
+V0.7  ERB-rebinned spectral + relative-level + temporal masking evidence
 ```
 
-## Recommended initialization flow
+V0.7 does not add new OSC fields. It reuses V0.6 measurements in the Bridge.
+
+## Recommended initialization
 
 Start with:
 
@@ -29,8 +34,8 @@ audio_project_status()
 If Analyzer instances are unbound:
 
 ```text
-Use FL Studio MCP to locate the real Mixer Track / Slot
-→ read the target Analyzer's current Identify value
+FL Studio control MCP finds real Mixer Track / Slot
+→ read target Analyzer Identify value
 → toggle Identify
 → audio_last_identify()
 → audio_bind_last_identified(...)
@@ -43,97 +48,107 @@ After binding, prefer:
 mixer:<index>/slot:<slot>
 ```
 
-## Tool selection
+## Recommended tool path
 
 ```text
-Project readiness         audio_project_status()
-Project recent window     audio_mix_overview()
-Stable single track       audio_average()
-Latest single frame       audio_snapshot()
-Single-track timing       audio_temporal_profile()
-Two-track spectrum        audio_compare_tracks()
-Two-track timing          audio_temporal_compare()
-Band stereo               audio_stereo_bands()
-Snapshot management       audio_capture_snapshot() / audio_list_snapshots()
-Before/After              audio_compare_snapshots()
+project readiness             audio_project_status()
+project recent overview       audio_mix_overview()
+project masking candidates    audio_project_masking_scan()
+stable single track           audio_average()
+current single frame          audio_snapshot()
+single-track temporal         audio_temporal_profile()
+two-track basic spectrum      audio_compare_tracks()
+two-track detailed evidence   audio_masking_evidence()
+custom-band temporal          audio_temporal_compare()
+stereo bands                  audio_stereo_bands()
+Snapshot management           audio_capture_snapshot() / audio_list_snapshots()
+Before/After                  audio_compare_snapshots()
 ```
 
-MCP 0.6 currently exposes 18 tools. See `references/analyzer-mcp.md` for the complete list.
+MCP 0.7 exposes **20 tools**. Full signatures are in `references/analyzer-mcp.md`.
 
-## V0.6 temporal analysis
+## V0.7 masking evidence
 
-VST3 0.6 appends these fields to the existing OSC frame:
-
-```text
-temporal_window_seconds
-spectral_flux_mean
-spectral_flux_peak
-rms_rise_peak_db
-low_band_energy_db   # FFT-derived 40-160 Hz energy
-frame_schema_version
-```
-
-Single track:
+Detailed pair query:
 
 ```text
-audio_temporal_profile("mixer:7/slot:9", 5)
-```
-
-Two tracks:
-
-```text
-audio_temporal_compare(
+audio_masking_evidence(
   "mixer:4/slot:9",
   "mixer:7/slot:9",
-  5,
-  40,
-  160,
-  80
+  seconds=5,
+  alignment_tolerance_ms=80,
+  max_regions=8
 )
 ```
 
-`band_envelope_correlation` describes how similarly the selected-band envelopes vary. `normalized_band_temporal_overlap` describes how often both tracks are simultaneously strong relative to their own selected-band peaks. Both are measurement evidence, not automatic processing instructions.
+Project-level scan:
 
-`onset_candidate_*` fields use explicit thresholds returned by the MCP. They are compressed change-event heuristics, not ground-truth onset labels.
+```text
+audio_project_masking_scan(
+  seconds=5,
+  max_pairs=8,
+  alignment_tolerance_ms=80
+)
+```
+
+Current model:
+
+```text
+existing 32 Analyzer spectrum features
+→ 16 equal ERB-rate regions
+→ relative spectral occupancy
+→ directional relative-level weighting
+→ V0.6 temporal overlap
+```
+
+Important limitations:
+
+- ERB is used as a **re-binning scale**, not as a gammatone/cochlear filterbank;
+- scores are transparent heuristics, not audible-masking probabilities;
+- `dominant_direction` indicates stronger measured evidence, not which track should be changed;
+- no universal `masking_evidence_score` threshold is defined.
+
+See `references/masking-evidence.md` before making strong claims from V0.7 scores.
 
 ## Signal State
 
-The Analyzer closes its signal gate after input remains below roughly `-50 dBFS` for about 0.4 seconds, and reopens above roughly `-48 dBFS`.
+The Analyzer gate closes after roughly 0.4 s below about `-50 dBFS` and reopens above about `-48 dBFS`.
 
-Without valid input:
+When input is invalid:
 
-- spectrum/stereo content fields become `null` or unavailable;
-- V0.6 temporal fields report `temporal_valid=false`;
-- `null` does not mean zero;
-- LUFS-I and session maximum True Peak may remain available as session-level values.
+- spectrum/stereo fields become `null` / unavailable;
+- V0.6 temporal fields have `temporal_valid=false`;
+- `null` is not zero;
+- LUFS-I and session max True Peak may remain available because they are session-level state.
 
-Always interpret windowed results together with `active_ratio`.
+Window results must be interpreted with `active_ratio`.
 
 ## Snapshot A/B
 
 ```text
 audio_capture_snapshot("before", 5)
-# external control MCP changes the project
+# external control MCP changes the DAW
 audio_capture_snapshot("after", 5)
 audio_compare_snapshots("before", "after")
 ```
 
-Use the same musical passage, similar window lengths, and comparable `active_ratio` when practical. Snapshots exist only in the current Bridge session.
+Use comparable musical passages, similar windows, and similar active coverage. Snapshot state is Bridge-session scoped.
 
-## Recommended Agent instruction
+## Suggested Agent instruction
 
 ```text
-Use the ai-analyzer-flstudio Skill only as technical guidance for AI Audio Analyzer MCP usage and measurement semantics.
-Start with audio_project_status to check project readiness. Use Identify to establish deterministic FL Mixer Track/Slot bindings for unbound instances.
-Before content analysis, check signal_present, analysis_valid, and active_ratio. For temporal analysis, also check temporal_supported and temporal_valid.
-Use audio_average for stable single-track windows, audio_temporal_profile for single-track temporal behavior, and audio_temporal_compare when determining whether two tracks occupy or vary within a frequency region at the same time.
-Do not treat null as zero. Do not convert spectral overlap, temporal overlap, correlation, or onset candidates directly into fixed mixing actions.
-If the FL Studio control MCP changes the project, read back the host state and use Analyzer/Snapshot A-B when measurement verification is useful.
+Use the ai-analyzer-flstudio Skill only as a technical MCP usage and measurement-semantics reference.
+Start with audio_project_status and establish deterministic Identify bindings for unbound Analyzer instances.
+Before interpreting content, inspect signal_present, analysis_valid, active_ratio, and temporal validity where relevant.
+Use audio_mix_overview for coarse project state, audio_project_masking_scan for ranked V0.7 masking-evidence candidates, and audio_masking_evidence for detailed pairwise ERB-region evidence.
+Treat null as unavailable, not zero. Treat spectral overlap, temporal overlap, onset candidates, and V0.7 masking evidence as evidence rather than automatic processing instructions.
+If the DAW is changed through an external control MCP, read back the actual host state and use Analyzer/Snapshot measurements for verification.
 ```
 
 ## References
 
 ```text
-references/analyzer-mcp.md   MCP tools, calling flow, selectors
-references/parameters.md     technical parameter semantics and validity
+references/analyzer-mcp.md       MCP tools and selector rules
+references/parameters.md         measurement parameter semantics
+references/masking-evidence.md   V0.7 evidence model and limitations
 ```
