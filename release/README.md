@@ -16,7 +16,7 @@ The normal `build` workflow is for development validation/artifacts. User-facing
 6. Enable `draft` when you want to inspect the Release before publication.
 7. Run the workflow.
 
-Current public product version is derived from `CMakeLists.txt` and is **0.7.0** for this stage.
+Current public product version is **0.7.0**.
 
 The workflow publishes:
 
@@ -37,24 +37,24 @@ Intel/x86_64 macOS is intentionally not built or packaged.
 
 ## Standalone MCP 0.7
 
-Release packages use a PyInstaller `onedir` runtime built from:
+Release packages use a PyInstaller `onedir` runtime built from the single supported entrypoint:
 
 ```text
-bridge/server_v07.py
+bridge/server.py
 ```
 
-Normal users do not need Python, pip, a venv, or PyPI.
+Do not add version-named entrypoints such as `server_v08.py`. MCP/protocol versions are metadata, not startup filenames.
 
-The runtime includes the current layers:
+Current source modules packaged for developer fallback:
 
 ```text
 server.py
-server_v05.py
+analyzer_core.py
 project_tools.py
-server_v06.py
 temporal_tools.py
-server_v07.py
 masking_tools.py
+requirements.txt
+cherry-studio.example.json
 ```
 
 MCP 0.7 exposes 20 tools and adds:
@@ -75,9 +75,7 @@ windows-latest   → Windows x64 MCP runtime
 macos-latest     → macOS arm64 MCP runtime
 ```
 
-No macOS Intel runtime is built.
-
-The macOS VST3 is also built arm64-only with deployment target macOS 11.0.
+No macOS Intel runtime is built. The macOS VST3 is also arm64-only with deployment target macOS 11.0.
 
 ## Final package layout
 
@@ -90,11 +88,9 @@ AI-Audio-Analyzer-v<version>-Windows/
 │  ├─ runtime/ai-audio-analyzer-mcp/...
 │  └─ source/
 │     ├─ server.py
-│     ├─ server_v05.py
+│     ├─ analyzer_core.py
 │     ├─ project_tools.py
-│     ├─ server_v06.py
 │     ├─ temporal_tools.py
-│     ├─ server_v07.py
 │     ├─ masking_tools.py
 │     ├─ requirements.txt
 │     └─ cherry-studio.example.json
@@ -106,12 +102,7 @@ AI-Audio-Analyzer-v<version>-Windows/
 └─ INSTALL.en.md
 ```
 
-macOS Apple Silicon has the same logical structure plus:
-
-```text
-Install.command
-install.sh
-```
+macOS Apple Silicon has the same logical structure plus `Install.command` and `install.sh`.
 
 `mcp/source/` is retained for development/manual fallback only.
 
@@ -151,16 +142,9 @@ Actions
 
 手动生成。
 
-当前 Release 目标只有：
+当前 Release 目标只有 Windows x64 和 macOS Apple Silicon / arm64，不构建 Intel/x86_64 macOS。
 
-```text
-Windows x64
-macOS Apple Silicon / arm64
-```
-
-不构建 Intel/x86_64 macOS。
-
-MCP 使用 PyInstaller 打包，当前入口是 `bridge/server_v07.py`。普通用户**不需要 Python、pip、venv 或 PyPI**。
+MCP 使用 PyInstaller 打包，**唯一源码和打包入口始终是 `bridge/server.py`**。普通用户不需要 Python、pip、venv 或 PyPI。
 
 0.7 新增的是 Bridge 侧的 ERB-rate 重分箱 + 相对电平 + V0.6 时间重叠证据模型。它不会增加 OSC 字段，也不应被描述成可听遮蔽概率或自动混音指令。
 
