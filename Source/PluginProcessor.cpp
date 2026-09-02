@@ -1,18 +1,44 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 
+#include <functional>
+#include <utility>
+
+namespace
+{
+class IdentifyParameter final : public juce::AudioParameterBool
+{
+public:
+    explicit IdentifyParameter(std::function<void()> callback)
+        : juce::AudioParameterBool(
+              juce::ParameterID { "identify", 1 },
+              "Identify",
+              false),
+          onChange(std::move(callback))
+    {
+    }
+
+protected:
+    void valueChanged(bool) override
+    {
+        if (onChange)
+            onChange();
+    }
+
+private:
+    std::function<void()> onChange;
+};
+} // namespace
+
 AIAnalyzerAudioProcessor::AIAnalyzerAudioProcessor()
     : AudioProcessor(BusesProperties()
                          .withInput("Input", juce::AudioChannelSet::stereo(), true)
                          .withOutput("Output", juce::AudioChannelSet::stereo(), true))
 {
-    auto* identify = new juce::AudioParameterBool(
-        juce::ParameterID { "identify", 1 },
-        "Identify",
-        false);
-    addParameter(identify);
-    identifyParameter = identify;
-    lastIdentifyState.store(identify->get(), std::memory_order_release);
+    addParameter(new IdentifyParameter([this]
+    {
+        analysisWorker.requestIdentify();
+    }));
 
     analysisWorker.setOscConfig(instanceId, oscHost, oscPort);
 }
@@ -54,16 +80,6 @@ void AIAnalyzerAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                                              juce::MidiBuffer&)
 {
     juce::ScopedNoDenormals noDenormals;
-
-    if (identifyParameter != nullptr)
-    {
-        const auto currentIdentifyState = identifyParameter->get();
-        const auto previousIdentifyState = lastIdentifyState.exchange(
-            currentIdentifyState, std::memory_order_acq_rel);
-
-        if (currentIdentifyState != previousIdentifyState)
-            analysisWorker.requestIdentify();
-    }
 
     const auto numInputChannels = getTotalNumInputChannels();
     if (numInputChannels <= 0 || buffer.getNumSamples() <= 0)
