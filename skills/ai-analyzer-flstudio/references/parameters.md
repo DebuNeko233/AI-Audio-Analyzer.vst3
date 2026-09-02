@@ -175,6 +175,113 @@ Analyzer 的 Mid/Side width ratio 测量值，用于描述当前左右声道所�
 
 如果某个频段能量很低，即使返回相关性数值，也不应赋予过强语义。Signal State 无效时 Bridge 会返回 unavailable/null。
 
+## V0.6 Temporal
+
+V0.6 的时间特征在 VST3 内部以 1024-sample hop 计算，再汇总到约 10 Hz OSC 帧。它们用于描述**变化和时间共现**，不是音质评分。
+
+### `temporal_supported`
+
+表示当前 frame 是否来自支持 V0.6 temporal tail 的插件版本。
+
+旧版 Analyzer 可以继续被 Bridge 读取，但该字段为 false/缺失时不能假装存在时间特征。
+
+### `temporal_valid`
+
+表示当前 V0.6 时间特征是否有有效输入。通常要求：
+
+```text
+signal_present = true
+且 temporal_window_seconds > 0
+```
+
+### `temporal_window_seconds`
+
+当前 OSC 时间特征汇总覆盖的内部分析时长。通常接近网络更新间隔，但不应硬编码为固定 0.1 s。
+
+### `spectral_flux_mean`
+
+V0.6 使用相邻 FFT 窗口的**归一化频谱分布**计算正向变化量，并在当前 OSC 汇总窗口内取平均。
+
+近似语义：
+
+```text
+接近 0 → 相邻频谱分布变化较少
+更高     → 频谱分布变化更明显
+```
+
+它刻意对整体电平缩放较不敏感，因此不能代替 RMS 电平变化。
+
+### `spectral_flux_peak`
+
+当前 OSC 汇总窗口内最大的 normalized spectral flux。
+
+它比 `spectral_flux_mean` 更强调短时变化峰值，但仍不是“检测到一次真实 musical onset”的绝对证明。
+
+### `rms_rise_peak_db`
+
+当前 OSC 汇总窗口内，相邻内部 FFT 窗口之间最大的**正向 RMS 增量**，单位 dB。
+
+它描述快速电平上升证据，不等于 Crest Factor，也不等于攻击时间常数。
+
+### `low_band_energy_db` / `low_band_40_160_energy_db`
+
+VST3 temporal tail 中的 `low_band_energy_db` 是 FFT-derived **40–160 Hz** 能量特征；`audio_temporal_profile()` 会把近期有效 frame 汇总为 `low_band_40_160_energy_db`、min 和 max。
+
+它用于构建低频能量包络，不是校准 SPL，也不代表某种乐器一定存在于该频段。
+
+### `onset_candidate_frames`
+
+`audio_temporal_profile()` 使用显式阈值，把 OSC frame 标记成“onset/change candidate”。当前默认阈值会随结果一起返回：
+
+```text
+rms_rise_peak_db >= 3.0
+OR
+spectral_flux_peak >= 0.18
+```
+
+这是压缩后的启发式事件候选，不是带人工标注验证的 onset ground truth。
+
+### `onset_candidate_density_hz`
+
+候选 frame 数量除以有效 temporal 覆盖秒数。它描述“变化候选出现密度”，不是 BPM、节拍或音符密度。
+
+### `band_envelope_correlation`
+
+`audio_temporal_compare()` 将两个 Analyzer 的同一频段能量包络按时间对齐后计算 Pearson correlation：
+
+```text
+接近 +1 → 两条包络倾向同向变化
+接近  0 → 线性共变较弱
+接近 -1 → 两条包络倾向反向变化
+```
+
+它描述共变关系，不说明哪条轨道“应该让位”。
+
+### `normalized_band_temporal_overlap`
+
+把两个轨道在所选频段的包络分别相对各自窗口峰值归一化后，对每个对齐点取 `min()` 再平均。
+
+范围通常约 0–1：
+
+```text
+更高 → 两条轨道更常同时处在各自较强的该频段状态
+更低 → 该频段强能量更少同时出现
+```
+
+它是时间占用的 heuristic score，不是完整听觉 masking 概率。
+
+### `coactive_ratio`
+
+时间对齐 frame 中，两边同时 `signal_present=true` 的比例。
+
+### `candidate_coincidence_ratio`
+
+两边 onset/change candidate 在对齐 frame 中同时出现的比例摘要。它依赖上述阈值和 OSC 时间分辨率，不能解释为样本级精确瞬态同步率。
+
+### `alignment_tolerance_ms` / `mean_abs_alignment_offset_ms`
+
+`audio_temporal_compare()` 对两个独立 Analyzer stream 做时间对齐时使用的容差和实际平均绝对时间偏差。对齐质量差时，不应过度解释包络相关性。
+
 ## Track comparison
 
 ### `spectral_overlap_score`
@@ -189,6 +296,8 @@ Analyzer 的 Mid/Side width ratio 测量值，用于描述当前左右声道所�
 高 overlap 只能说明频谱形状重叠较明显
 不能直接推出“存在可听遮蔽”
 ```
+
+V0.6 的 `audio_temporal_compare()` 可补充“是否在时间上共同变化/共同占用该频段”的证据，但两类指标都不等于最终听觉结论。
 
 ### `audio_detect_masking()`
 
