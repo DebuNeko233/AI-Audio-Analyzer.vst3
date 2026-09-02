@@ -115,17 +115,17 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Packaged MCP self-test failed: $LASTEXITCODE" }
           Remove-Item Env:AI_ANALYZER_SELF_TEST -ErrorAction SilentlyContinue
 
-      - name: Stage runtime
+      - name: Stage runtime file
         shell: bash
         run: |
           set -euo pipefail
           rm -rf runtime-artifact
-          mkdir -p runtime-artifact/ai-audio-analyzer-mcp
+          mkdir -p runtime-artifact
           if [ "${{ runner.os }}" = "Windows" ]; then
-            cp dist/ai-audio-analyzer-mcp.exe runtime-artifact/ai-audio-analyzer-mcp/
+            cp dist/ai-audio-analyzer-mcp.exe runtime-artifact/
           else
-            cp dist/ai-audio-analyzer-mcp runtime-artifact/ai-audio-analyzer-mcp/
-            chmod +x runtime-artifact/ai-audio-analyzer-mcp/ai-audio-analyzer-mcp
+            cp dist/ai-audio-analyzer-mcp runtime-artifact/
+            chmod +x runtime-artifact/ai-audio-analyzer-mcp
           fi
 
       - uses: actions/upload-artifact@v4
@@ -137,7 +137,7 @@ jobs:
           include-hidden-files: true
 
   package-windows:
-    name: Build Windows lazy package
+    name: Stage Windows beginner package
     needs: mcp-runtime
     runs-on: windows-latest
     steps:
@@ -147,12 +147,13 @@ jobs:
         run: |
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
           cmake --build build --config Release --parallel 2
+
       - uses: actions/download-artifact@v4
         with:
           name: mcp-runtime-windows-x64
           path: input/mcp-runtime
 
-      - name: Assemble Windows package
+      - name: Assemble Windows user folder
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -163,53 +164,48 @@ jobs:
           $vst3 = Get-ChildItem build/AIAnalyzer_artefacts -Recurse -Directory -Filter 'AI Audio Analyzer.vst3' | Select-Object -First 1
           if (-not $vst3) { throw 'AI Audio Analyzer.vst3 not found' }
 
-          if (Test-Path dist) { Remove-Item dist -Recurse -Force }
-          New-Item -ItemType Directory -Path dist | Out-Null
-          $root = Join-Path dist "AI-Audio-Analyzer-v$version-Windows"
-          New-Item -ItemType Directory -Path $root | Out-Null
+          if (Test-Path package) { Remove-Item package -Recurse -Force }
+          New-Item -ItemType Directory -Path 'package/mcp' -Force | Out-Null
 
-          Copy-Item $vst3.FullName (Join-Path $root 'AI Audio Analyzer.vst3') -Recurse -Force
-          New-Item -ItemType Directory -Path (Join-Path $root 'mcp/runtime') -Force | Out-Null
-          Copy-Item 'input/mcp-runtime/ai-audio-analyzer-mcp' (Join-Path $root 'mcp/runtime/ai-audio-analyzer-mcp') -Recurse -Force
-          New-Item -ItemType Directory -Path (Join-Path $root 'mcp/source') -Force | Out-Null
-          Copy-Item bridge/server.py,bridge/analyzer_core.py,bridge/project_tools.py,bridge/temporal_tools.py,bridge/masking_tools.py,bridge/requirements.txt,bridge/cherry-studio.example.json (Join-Path $root 'mcp/source/') -Force
-          Copy-Item 'skills/ai-analyzer-flstudio' (Join-Path $root 'skill') -Recurse -Force
-          Copy-Item release/common/START-HERE.md (Join-Path $root 'START-HERE.md')
-          Copy-Item release/common/INSTALL.en.md (Join-Path $root 'INSTALL.en.md')
-          Copy-Item release/common/INSTALL.zh-CN.md (Join-Path $root 'INSTALL.zh-CN.md')
-          Copy-Item release/windows/Install.ps1 (Join-Path $root 'Install.ps1')
-          Copy-Item release/windows/Install.cmd (Join-Path $root 'Install.cmd')
+          Copy-Item $vst3.FullName 'package/AI Audio Analyzer.vst3' -Recurse -Force
+          Copy-Item 'input/mcp-runtime/ai-audio-analyzer-mcp.exe' 'package/mcp/ai-audio-analyzer-mcp.exe' -Force
+          Copy-Item 'skills/ai-analyzer-flstudio' 'package/skill' -Recurse -Force
+          Copy-Item release/common/START-HERE.md 'package/START-HERE.md'
+          Copy-Item release/common/INSTALL.en.md 'package/INSTALL.en.md'
+          Copy-Item release/common/INSTALL.zh-CN.md 'package/INSTALL.zh-CN.md'
+          Copy-Item release/windows/Install.ps1 'package/Install.ps1'
+          Copy-Item release/windows/Install.cmd 'package/Install.cmd'
 
           @"
           AI Audio Analyzer $version
           Platform: Windows x64
-          VST3 protocol/measurements: 0.6-compatible temporal frame
-          MCP feature layer: 0.7 masking evidence
-          MCP source entrypoint: server.py
-          MCP: PyInstaller one-file x64 runtime
-          Python required for normal install: No
+          MCP: 0.7 standalone executable
+          OSC protocol: 0.6-compatible
           Release commit: $env:GITHUB_SHA
-          "@ | Set-Content (Join-Path $root 'VERSION.txt') -Encoding UTF8
+          "@ | Set-Content 'package/VERSION.txt' -Encoding UTF8
 
-          $null = [scriptblock]::Create((Get-Content (Join-Path $root 'Install.ps1') -Raw))
+          $null = [scriptblock]::Create((Get-Content 'package/Install.ps1' -Raw))
           $env:AI_ANALYZER_SELF_TEST = '1'
-          & (Join-Path $root 'mcp/runtime/ai-audio-analyzer-mcp/ai-audio-analyzer-mcp.exe')
+          & 'package/mcp/ai-audio-analyzer-mcp.exe'
           if ($LASTEXITCODE -ne 0) { throw 'Packaged Windows MCP failed final self-test' }
           Remove-Item Env:AI_ANALYZER_SELF_TEST -ErrorAction SilentlyContinue
 
-          $zip = Join-Path dist "AI-Audio-Analyzer-v$version-Windows.zip"
-          Compress-Archive -Path $root -DestinationPath $zip -CompressionLevel Optimal
-          Get-FileHash -Algorithm SHA256 $zip | Format-List
+          $forbidden = Get-ChildItem package -Recurse -File | Where-Object {
+            $_.Extension -eq '.py' -or $_.Extension -eq '.zip' -or $_.Name -eq 'requirements.txt' -or $_.Name -eq 'cherry-studio.example.json'
+          }
+          if ($forbidden) { throw "Forbidden developer/nested archive files in user package: $($forbidden.FullName -join ', ')" }
+          if (Test-Path 'package/mcp/source') { throw 'mcp/source must never be present in a user Release.' }
 
       - uses: actions/upload-artifact@v4
         with:
-          name: AI-Audio-Analyzer-Release-Windows
-          path: dist/*.zip
+          name: AI-Audio-Analyzer-Package-Windows
+          path: package/
           if-no-files-found: error
-          retention-days: 30
+          retention-days: 7
+          include-hidden-files: true
 
   package-macos:
-    name: Build macOS Apple Silicon lazy package
+    name: Stage macOS Apple Silicon beginner package
     needs: mcp-runtime
     runs-on: macos-latest
     steps:
@@ -223,12 +219,13 @@ jobs:
             -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 \
             -DCMAKE_OSX_ARCHITECTURES=arm64
           cmake --build build --config Release --parallel 2
+
       - uses: actions/download-artifact@v4
         with:
           name: mcp-runtime-macos-arm64
-          path: input/mcp-arm64
+          path: input/mcp-runtime
 
-      - name: Assemble macOS package
+      - name: Assemble macOS user folder
         shell: bash
         run: |
           set -euo pipefail
@@ -242,59 +239,63 @@ jobs:
           codesign --force --deep --sign - --timestamp=none "$VST3_PATH"
           codesign --verify --deep --strict --verbose=4 "$VST3_PATH"
 
-          rm -rf dist
-          ROOT="dist/AI-Audio-Analyzer-v${VERSION}-macOS"
-          mkdir -p "$ROOT/mcp/runtime" "$ROOT/mcp/source"
-          ditto "$VST3_PATH" "$ROOT/AI Audio Analyzer.vst3"
-          ditto input/mcp-arm64/ai-audio-analyzer-mcp "$ROOT/mcp/runtime/ai-audio-analyzer-mcp"
-          cp bridge/server.py bridge/analyzer_core.py bridge/project_tools.py bridge/temporal_tools.py bridge/masking_tools.py bridge/requirements.txt bridge/cherry-studio.example.json "$ROOT/mcp/source/"
-          ditto skills/ai-analyzer-flstudio "$ROOT/skill"
-          cp release/common/START-HERE.md "$ROOT/START-HERE.md"
-          cp release/common/INSTALL.en.md "$ROOT/INSTALL.en.md"
-          cp release/common/INSTALL.zh-CN.md "$ROOT/INSTALL.zh-CN.md"
-          cp release/macos/install.sh "$ROOT/install.sh"
-          cp release/macos/Install.command "$ROOT/Install.command"
-          chmod +x "$ROOT/install.sh" "$ROOT/Install.command"
-          chmod +x "$ROOT/mcp/runtime/ai-audio-analyzer-mcp/ai-audio-analyzer-mcp"
-          AI_ANALYZER_SELF_TEST=1 "$ROOT/mcp/runtime/ai-audio-analyzer-mcp/ai-audio-analyzer-mcp"
+          rm -rf package
+          mkdir -p package/mcp
+          ditto "$VST3_PATH" 'package/AI Audio Analyzer.vst3'
+          cp input/mcp-runtime/ai-audio-analyzer-mcp package/mcp/ai-audio-analyzer-mcp
+          chmod +x package/mcp/ai-audio-analyzer-mcp
+          ditto skills/ai-analyzer-flstudio package/skill
+          cp release/common/START-HERE.md package/START-HERE.md
+          cp release/common/INSTALL.en.md package/INSTALL.en.md
+          cp release/common/INSTALL.zh-CN.md package/INSTALL.zh-CN.md
+          cp release/macos/install.sh package/install.sh
+          cp release/macos/Install.command package/Install.command
+          chmod +x package/install.sh package/Install.command
+          AI_ANALYZER_SELF_TEST=1 package/mcp/ai-audio-analyzer-mcp
 
-          cat > "$ROOT/VERSION.txt" <<EOF
+          cat > package/VERSION.txt <<EOF
           AI Audio Analyzer ${VERSION}
           Platform: macOS Apple Silicon arm64
-          VST3 protocol/measurements: 0.6-compatible temporal frame
-          MCP feature layer: 0.7 masking evidence
-          MCP source entrypoint: server.py
-          MCP: PyInstaller one-file arm64 runtime
-          Python required for normal install: No
+          MCP: 0.7 standalone executable
+          OSC protocol: 0.6-compatible
           Release commit: ${GITHUB_SHA}
           EOF
 
-          ZIP="dist/AI-Audio-Analyzer-v${VERSION}-macOS.zip"
-          ditto -c -k --sequesterRsrc --keepParent "$ROOT" "$ZIP"
-          shasum -a 256 "$ZIP"
+          if find package -type f \( -name '*.py' -o -name '*.zip' -o -name 'requirements.txt' -o -name 'cherry-studio.example.json' \) | grep -q .; then
+            echo 'Forbidden developer/nested archive file found in user package.' >&2
+            find package -type f \( -name '*.py' -o -name '*.zip' -o -name 'requirements.txt' -o -name 'cherry-studio.example.json' \) >&2
+            exit 1
+          fi
+          test ! -d package/mcp/source
 
       - uses: actions/upload-artifact@v4
         with:
-          name: AI-Audio-Analyzer-Release-macOS
-          path: dist/*.zip
+          name: AI-Audio-Analyzer-Package-macOS
+          path: package/
           if-no-files-found: error
-          retention-days: 30
+          retention-days: 7
+          include-hidden-files: true
 
   publish:
-    name: Publish GitHub Release
+    name: Create single-zip GitHub Release
     needs: [package-windows, package-macos]
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/download-artifact@v4
         with:
-          pattern: AI-Audio-Analyzer-Release-*
-          path: release-assets
-          merge-multiple: true
+          name: AI-Audio-Analyzer-Package-Windows
+          path: staging/windows
 
-      - name: Resolve metadata and checksums
+      - uses: actions/download-artifact@v4
+        with:
+          name: AI-Audio-Analyzer-Package-macOS
+          path: staging/macos
+
+      - name: Resolve release metadata
         id: meta
         shell: bash
         run: |
@@ -304,11 +305,56 @@ jobs:
           if [ -z "$TAG" ]; then TAG="v${VERSION}"; fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          cd release-assets
-          sha256sum *.zip > SHA256SUMS.txt
-          cat SHA256SUMS.txt
 
-      - name: Build release notes
+      - name: Create final archives exactly once
+        shell: bash
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          set -euo pipefail
+          rm -rf release-assets
+          mkdir -p release-assets
+
+          WIN_ROOT="release-assets/AI-Audio-Analyzer-v${VERSION}-Windows"
+          MAC_ROOT="release-assets/AI-Audio-Analyzer-v${VERSION}-macOS"
+          mkdir -p "$WIN_ROOT" "$MAC_ROOT"
+          ditto staging/windows "$WIN_ROOT"
+          ditto staging/macos "$MAC_ROOT"
+
+          chmod +x "$MAC_ROOT/install.sh" "$MAC_ROOT/Install.command"
+          chmod +x "$MAC_ROOT/mcp/ai-audio-analyzer-mcp"
+          chmod +x "$MAC_ROOT/AI Audio Analyzer.vst3/Contents/MacOS/AI Audio Analyzer"
+
+          codesign --verify --deep --strict --verbose=4 "$MAC_ROOT/AI Audio Analyzer.vst3"
+          AI_ANALYZER_SELF_TEST=1 "$MAC_ROOT/mcp/ai-audio-analyzer-mcp"
+
+          if find "$WIN_ROOT" "$MAC_ROOT" -type f \( -name '*.py' -o -name '*.zip' -o -name 'requirements.txt' -o -name 'cherry-studio.example.json' \) | grep -q .; then
+            echo 'Final user package contains source/developer files or a nested ZIP.' >&2
+            find "$WIN_ROOT" "$MAC_ROOT" -type f \( -name '*.py' -o -name '*.zip' -o -name 'requirements.txt' -o -name 'cherry-studio.example.json' \) >&2
+            exit 1
+          fi
+          test ! -d "$WIN_ROOT/mcp/source"
+          test ! -d "$MAC_ROOT/mcp/source"
+
+          pushd release-assets >/dev/null
+          zip -qry "AI-Audio-Analyzer-v${VERSION}-Windows.zip" "AI-Audio-Analyzer-v${VERSION}-Windows"
+          ditto -c -k --sequesterRsrc --keepParent "AI-Audio-Analyzer-v${VERSION}-macOS" "AI-Audio-Analyzer-v${VERSION}-macOS.zip"
+          rm -rf "AI-Audio-Analyzer-v${VERSION}-Windows" "AI-Audio-Analyzer-v${VERSION}-macOS"
+
+          if unzip -Z1 "AI-Audio-Analyzer-v${VERSION}-Windows.zip" | grep -Ei '\.zip$'; then
+            echo 'Windows Release ZIP contains a nested ZIP.' >&2
+            exit 1
+          fi
+          if unzip -Z1 "AI-Audio-Analyzer-v${VERSION}-macOS.zip" | grep -Ei '\.zip$'; then
+            echo 'macOS Release ZIP contains a nested ZIP.' >&2
+            exit 1
+          fi
+
+          shasum -a 256 *.zip > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+          popd >/dev/null
+
+      - name: Build beginner-facing release notes
         shell: bash
         env:
           TAG: ${{ steps.meta.outputs.tag }}
@@ -316,17 +362,15 @@ jobs:
           cat > release-assets/RELEASE-NOTES.md <<EOF
           # AI Audio Analyzer ${TAG}
 
-          - Windows x64 and macOS Apple Silicon arm64 lazy packages.
-          - MCP runtime is packaged with PyInstaller one-file mode (`-F`); normal users do not need Python or PyPI.
-          - MCP uses one stable source/PyInstaller entrypoint: bridge/server.py.
-          - MCP 0.7 adds equal-ERB-rate re-binned spectral/relative-level/temporal masking evidence and a project masking scan.
-          - The 0.7 evidence model is transparent heuristic evidence, not a calibrated cochlear/gammatone filterbank and not a probability of audible masking.
-          - VST3 OSC measurement schema remains compatible with 0.6; indexes 0..64 are unchanged.
-          - Skill remains English-only and measurement/tool oriented; it does not prescribe a mixing style.
+          Download the package for your computer, unzip it once, and run the installer inside.
 
-          macOS builds are ad-hoc signed rather than Apple-notarized. The bundled installer handles current quarantine/Gatekeeper requirements.
+          - **Windows:** download `AI-Audio-Analyzer-*-Windows.zip`, unzip it, then double-click `Install.cmd`.
+          - **macOS Apple Silicon:** download `AI-Audio-Analyzer-*-macOS.zip`, unzip it, then double-click `Install.command`.
+          - No Python, source code, package manager, or programming setup is included or required.
+          - Each user package contains the VST3, standalone MCP executable, Cherry Studio Skill, installer, and simple installation guides.
+          - macOS Release is Apple Silicon arm64 only and is currently ad-hoc signed rather than Apple-notarized.
 
-          Companion FL Studio control MCP: https://github.com/rosasynthesiz/flstudio-mcp
+          See `START-HERE.md` inside the downloaded package for the shortest setup path.
           EOF
 
       - name: Create or update GitHub Release
@@ -337,15 +381,21 @@ jobs:
           DRAFT: ${{ inputs.draft }}
         run: |
           set -euo pipefail
+          if ! command -v gh >/dev/null 2>&1; then
+            brew install gh
+          fi
+
           shopt -s nullglob
           files=(release-assets/*.zip release-assets/SHA256SUMS.txt)
           if [ "${#files[@]}" -lt 3 ]; then
             echo 'Expected Windows zip, macOS zip and SHA256SUMS.txt' >&2
             exit 1
           fi
+
           flags=()
           if [ "$PRERELEASE" = 'true' ]; then flags+=(--prerelease); fi
           if [ "$DRAFT" = 'true' ]; then flags+=(--draft); fi
+
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" "${files[@]}" --clobber
             gh release edit "$TAG" --title "AI Audio Analyzer $TAG" --notes-file release-assets/RELEASE-NOTES.md
