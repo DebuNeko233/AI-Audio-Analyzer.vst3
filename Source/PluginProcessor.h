@@ -55,6 +55,7 @@ private:
     int oscPort = 9855;
 
     juce::AudioParameterChoice* analysisProfileParameter = nullptr;
+    int lastWorkerProfileIndex = static_cast<int>(aianalyzer::AnalysisProfile::Full);
     aianalyzer::AnalysisWorker analysisWorker;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(AIAnalyzerAudioProcessor)
