@@ -12,6 +12,7 @@ Current layers:
 - masking_tools: V0.7 masking-evidence tools
 - stereo_tools: V0.8 Mid/Side, Side-spectrum, and stereo evidence
 - semantic_tools: V0.9 chroma, tonal-center, and harmonic-alignment evidence
+- verification_tools: V1.0 controlled Before/After verification sessions
 
 Set AI_ANALYZER_SELF_TEST=1 to validate source or packaged runtime without
 opening the OSC listener or MCP stdio transport.
@@ -41,9 +42,9 @@ def __getattr__(name: str) -> Any:
     return getattr(core, name)
 
 
-# Import order matters. Each protocol layer wraps the previous append-only
-# frame parser. V0.9 therefore preserves the stable core + V0.6 + V0.8 fields
-# before attaching its own music-semantic tail.
+# Import order matters for protocol layers. V0.9 preserves the stable core +
+# V0.6 + V0.8 fields before attaching its music-semantic tail. V1.0 adds only
+# Bridge-side verification orchestration, so OSC protocol remains V0.9.
 import project_tools as project  # noqa: E402,F401
 import temporal_tools as temporal  # noqa: E402
 
@@ -58,7 +59,9 @@ import semantic_tools as semantic  # noqa: E402
 
 core._on_frame = semantic.on_frame_v09
 
-MCP_VERSION = "0.9"
+import verification_tools as verification  # noqa: E402,F401
+
+MCP_VERSION = "1.0"
 OSC_PROTOCOL_VERSION = "0.9"
 
 EXPECTED_TOOLS = {
@@ -86,6 +89,9 @@ EXPECTED_TOOLS = {
     "audio_stereo_compare",
     "audio_tonal_profile",
     "audio_tonal_compare",
+    "audio_begin_verification",
+    "audio_complete_verification",
+    "audio_verification_status",
 }
 
 
