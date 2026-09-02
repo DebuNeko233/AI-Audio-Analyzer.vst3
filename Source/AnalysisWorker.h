@@ -132,7 +132,7 @@ private:
     float latestLufsIntegrated = -120.0f;
     float latestTruePeakDbtp = -120.0f;
     float maxTruePeakDbtp = -120.0f;
-    double lastLoudnessMetricsMs = 0.0;
+    std::uint64_t loudnessSamplesSinceMetrics = 0;
 
     bool signalPresent = false;
     float detectorPeakDb = -120.0f;
