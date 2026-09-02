@@ -2,7 +2,8 @@
 param(
     [ValidateSet('auto', 'official', 'tsinghua', 'aliyun')]
     [string]$PyPI = 'auto',
-    [switch]$SkipPlugin
+    [switch]$SkipPlugin,
+    [switch]$PluginOnly
 )
 
 Set-StrictMode -Version Latest
@@ -81,28 +82,10 @@ function Get-PyPIIndexes([string]$Mode) {
 
 $PackageRoot = Split-Path -Parent $PSCommandPath
 $PluginSource = Join-Path $PackageRoot 'AI Audio Analyzer.vst3'
-$McpSource = Join-Path $PackageRoot 'mcp'
-$SkillSource = Join-Path $PackageRoot 'skill'
 $InstallRoot = Join-Path $env:LOCALAPPDATA 'AI Audio Analyzer'
 $VenvRoot = Join-Path $InstallRoot 'venv'
 
-if (-not $SkipPlugin -and -not (Test-IsAdministrator)) {
-    Write-Host 'VST3 installation needs Administrator permission. Requesting UAC...'
-    $arguments = @(
-        '-NoProfile',
-        '-ExecutionPolicy', 'Bypass',
-        '-File', ('"{0}"' -f $PSCommandPath),
-        '-PyPI', $PyPI
-    )
-    Start-Process -FilePath 'powershell.exe' -Verb RunAs -ArgumentList $arguments -Wait
-    exit $LASTEXITCODE
-}
-
-Write-Host 'AI Audio Analyzer automatic installer'
-Write-Host "Package: $PackageRoot"
-
-if (-not $SkipPlugin) {
-    Write-Step 'Installing VST3'
+function Install-Vst3 {
     if (-not (Test-Path $PluginSource)) {
         throw "Plugin bundle not found: $PluginSource"
     }
@@ -116,7 +99,38 @@ if (-not $SkipPlugin) {
     Write-Host "Installed: $PluginDestination"
 }
 
-Write-Step 'Preparing Analyzer MCP and Skill'
+if ($PluginOnly) {
+    if (-not (Test-IsAdministrator)) {
+        throw 'PluginOnly mode requires Administrator permission.'
+    }
+    Write-Step 'Installing VST3'
+    Install-Vst3
+    exit 0
+}
+
+Write-Host 'AI Audio Analyzer automatic installer'
+Write-Host "Package: $PackageRoot"
+
+if (-not $SkipPlugin) {
+    if (Test-IsAdministrator) {
+        Write-Step 'Installing VST3'
+        Install-Vst3
+    } else {
+        Write-Host 'VST3 installation needs Administrator permission. Requesting UAC for the plugin copy only...'
+        $arguments = @(
+            '-NoProfile',
+            '-ExecutionPolicy', 'Bypass',
+            '-File', ('"{0}"' -f $PSCommandPath),
+            '-PluginOnly'
+        )
+        $process = Start-Process -FilePath 'powershell.exe' -Verb RunAs -ArgumentList $arguments -Wait -PassThru
+        if ($process.ExitCode -ne 0) {
+            throw "VST3 installation failed with exit code $($process.ExitCode)."
+        }
+    }
+}
+
+Write-Step 'Preparing Analyzer MCP and Skill for the current user'
 New-Item -ItemType Directory -Path $InstallRoot -Force | Out-Null
 
 foreach ($name in @('mcp', 'skill')) {
