@@ -1,0 +1,22 @@
+# Build products
+build/
+out/
+cmake-build-*/
+*.xcodeproj/
+*.xcworkspace/
+
+# IDE / OS
+.DS_Store
+.vscode/
+.idea/
+*.user
+*.suo
+
+# Python bridge
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+
+# JUCE local generated files
+JuceLibraryCode/
