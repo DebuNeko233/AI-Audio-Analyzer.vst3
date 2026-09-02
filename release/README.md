@@ -8,7 +8,7 @@ User-facing Release packages are created by:
 
 The normal `build` workflow is for development validation/artifacts. It is not the user distribution path.
 
-Current product target: **AI Audio Analyzer 0.8.0 / MCP 0.8 / OSC 0.8**.
+Current product target: **AI Audio Analyzer 0.9.0 / MCP 0.9 / OSC 0.9**.
 
 ## Release audience
 
@@ -49,7 +49,7 @@ Build-time source entrypoint remains:
 bridge/server.py
 ```
 
-V0.8 also imports `bridge/stereo_tools.py` into that single executable. The build pipeline may use Python internally, but the **user package must not contain MCP Python source**.
+V0.9 imports the feature modules, including `bridge/semantic_tools.py`, into that single executable. The build pipeline may use Python internally, but the **user package must not contain MCP Python source**.
 
 ## User package layout
 
@@ -97,7 +97,7 @@ inner Release ZIP files
 
 ## Single-compression rule
 
-Do not create a final ZIP in the platform packaging jobs and then upload that ZIP inside a GitHub Actions artifact.
+Do not create a final ZIP in platform packaging jobs and then upload that ZIP inside a GitHub Actions artifact.
 
 Required pipeline:
 
@@ -119,10 +119,11 @@ Before publication, verify at least:
 
 ```text
 source MCP syntax/self-test
-MCP 0.8 / 22-tool registry
+MCP 0.9 / 24-tool registry
+V0.4–V0.9 source regressions
 PyInstaller one-file build
 packaged MCP self-test on its native OS
-no PyInstaller _internal tree in the staged/final user package
+no PyInstaller _internal tree in staged/final user package
 Windows x64 VST3 build
 macOS arm64 VST3 build
 Windows installer parse
@@ -133,9 +134,24 @@ no nested ZIP in user package
 final checksums
 ```
 
-`-F / --onefile` is a release invariant: if an `_internal/` directory appears in the staged or final user package, treat the package as invalid rather than silently accepting an `onedir`-style runtime.
+`-F / --onefile` is a Release invariant: if an `_internal/` directory appears in staged or final user content, treat the package as invalid rather than silently accepting an `onedir` runtime.
 
 A successful source self-test does not prove PyInstaller, VST3, final package assembly, or publication succeeded.
+
+## V0.9 user-facing capability note
+
+Release notes may explain that V0.9 adds:
+
+```text
+12-bin audio chroma
+tonal-center candidate evidence
+single-F0 harmonic-alignment evidence
+24 MCP measurement tools
+```
+
+Do not market tonal-center candidates as exact key detection, harmonic ratio as a probability, or F0 candidates as guaranteed note detection. Exact DAW/MIDI symbolic data should be preferred for exact symbolic facts when available.
+
+The Skill remains measurement/tool oriented and must not prescribe key changes, harmony edits, tuning edits, mixing style, or automatic processing actions.
 
 ## macOS signing
 
@@ -145,7 +161,7 @@ The installer handles the current quarantine/local-signature path. Documentation
 
 ## Documentation rule
 
-When Release layout, version metadata, or installation behavior changes, review and update together:
+When Release layout, version metadata, installation behavior, or public capability changes, review and update together:
 
 ```text
 release/common/START-HERE.md

@@ -1,6 +1,6 @@
 ---
 name: ai-analyzer-flstudio
-description: Technical usage skill for Cherry Studio + AI Audio Analyzer MCP. Teaches deterministic Analyzer discovery/binding, tool selection, measurement validity, level/loudness/spectrum/stereo/temporal semantics, project overview, Snapshot A/B, V0.7 masking-evidence interpretation, and V0.8 Mid/Side stereo evidence. It does not prescribe a mixing style, LUFS target, EQ/compression/sidechain recipe, stereo recipe, or aesthetic decision.
+description: Technical usage skill for Cherry Studio + AI Audio Analyzer MCP. Teaches deterministic Analyzer discovery/binding, tool selection, measurement validity, level/loudness/spectrum/stereo/temporal semantics, project overview, Snapshot A/B, V0.7 masking evidence, V0.8 Mid/Side stereo evidence, and V0.9 audio-domain tonal evidence. It does not prescribe a mixing style, LUFS target, EQ/compression/sidechain/stereo recipe, key change, harmony edit, or aesthetic decision.
 ---
 
 # AI Audio Analyzer MCP Usage Skill
@@ -10,7 +10,7 @@ This Skill has two responsibilities only:
 1. help the model call **AI Audio Analyzer MCP** correctly;
 2. help the model interpret returned measurements and evidence without overstating them.
 
-It is **not a mixing-style guide**. Do not infer a mandatory EQ, compressor, limiter, sidechain, panning, stereo, mono, or mastering action merely because a measurement is high, low, overlapping, correlated, anti-correlated, wide, or temporally coincident. Artistic decisions come from the user's goal, musical context, references, DAW state, and the model's own reasoning—not from this Skill.
+It is **not a mixing, mastering, harmony, arrangement, or style guide**. Do not infer a mandatory EQ, compressor, limiter, sidechain, panning, stereo, mono, tuning, transposition, chord, harmony, or mastering action merely because a measurement is high, low, overlapping, correlated, anti-correlated, wide, tonal, chromatic, concentrated, or ambiguous. Artistic decisions come from the user's goal, musical context, references, DAW state, and the model's own reasoning—not from this Skill.
 
 ## 1. Start at project level
 
@@ -66,7 +66,7 @@ mixer:<index>/slot:<slot>
 
 If multiple Analyzers exist on one Mixer Track, include `slot`.
 
-Do not guess mapping from names, spectrum shape, or musical content when Identify is available.
+Do not guess mapping from names, spectrum shape, chroma, tonal evidence, or musical content when Identify is available.
 
 ## 3. Validate data before interpreting it
 
@@ -104,7 +104,20 @@ stereo_frames
 active_ratio
 ```
 
-A legacy Analyzer may still provide level/spectrum/legacy stereo data while lacking V0.6 temporal or V0.8 Mid/Side evidence.
+For V0.9 tonal/music-semantic evidence inspect:
+
+```text
+semantic_v09_supported
+semantic_v09_valid
+valid_frames
+evidence_quality.mean_chroma_energy_ratio
+evidence_quality.normalized_pitch_class_entropy
+evidence_quality.tonal_center_top2_margin
+evidence_quality.valid_frame_ratio
+evidence_quality.active_ratio
+```
+
+A legacy Analyzer may still provide level/spectrum/stereo data while lacking V0.6 temporal, V0.8 Mid/Side, or V0.9 semantic evidence.
 
 ## 4. Tool selection
 
@@ -128,9 +141,7 @@ Its `potential_spectral_conflicts` are coarse spectral candidates only.
 audio_project_masking_scan(seconds=5, max_pairs=8, alignment_tolerance_ms=80)
 ```
 
-Use this when the user wants likely interaction candidates across the project. It starts from project spectral candidates and ranks them with the V0.7 auditory-band/relative-level/temporal evidence model.
-
-It is still a **candidate ranking**, not an automatic list of mix problems.
+Use this when the user wants likely interaction candidates across the project. It ranks candidates with spectral/relative-level/temporal evidence. It is not an automatic list of mix problems.
 
 ### Stable single-track window
 
@@ -146,7 +157,7 @@ Prefer this to a single frame for observations that should represent several sec
 audio_snapshot(track)
 ```
 
-Use for current-state/connection inspection, not as a substitute for a stable measurement window.
+Use for current-state/connection inspection, not as a stable-window substitute.
 
 ### Single-track temporal profile — V0.6
 
@@ -162,19 +173,9 @@ Use for normalized spectral flux, RMS-rise evidence, low-band temporal energy, a
 audio_stereo_profile(track, seconds=5)
 ```
 
-Use when the question depends on Mid/Side energy, Side spectrum, signed L/R correlation, low-frequency stereo relation, or negative cross-spectrum evidence over a passage.
+Use when the question depends on Mid/Side energy, Side spectrum, signed L/R correlation, low-frequency stereo relation, or negative cross-spectrum evidence.
 
-Important output groups:
-
-```text
-full_band
-low_band_20_120_hz
-mid_spectrum_db
-side_spectrum_db
-frequency_dependent_stereo
-```
-
-Keep these evidence axes separate:
+Keep these axes separate:
 
 ```text
 correlation
@@ -183,15 +184,51 @@ decorrelation_proxy_mean
 negative_cross_energy_ratio_mean
 ```
 
-Do not treat them as interchangeable definitions of "width" or "phase".
-
 ### Two-track stereo measurement comparison — V0.8
 
 ```text
 audio_stereo_compare(track_a, track_b, seconds=5)
 ```
 
-Use when the user asks how two measured stereo states differ. Deltas are `B - A` and are not labelled better/worse.
+Deltas are `B - A` and are not labelled better/worse.
+
+### Single-track audio-domain tonal profile — V0.9
+
+```text
+audio_tonal_profile(track, seconds=8)
+```
+
+Use when the question requires audio-derived pitch-class distribution, tonal-center candidate evidence, or single-F0 harmonic-alignment evidence over a passage.
+
+Important output groups:
+
+```text
+chroma
+tonal_center_evidence
+harmonic_alignment
+evidence_quality
+```
+
+Do not use this tool to replace exact symbolic project data. If the DAW/MIDI control MCP can provide exact note events, key metadata, chord data, or tuning metadata and the question asks for those exact facts, prefer that data.
+
+### Two-track tonal measurement comparison — V0.9
+
+```text
+audio_tonal_compare(track_a, track_b, seconds=8)
+```
+
+Use when the user asks how two measured pitch-class distributions differ.
+
+Important outputs:
+
+```text
+pitch_class_comparison.cosine_similarity
+pitch_class_comparison.jensen_shannon_divergence
+pitch_class_comparison.normalized_power_delta_b_minus_a[12]
+harmonic_alignment_delta_b_minus_a
+```
+
+These do not establish harmonic compatibility, consonance, correctness, arrangement quality, or a required musical action.
 
 ### Two-track spectral comparison
 
@@ -229,7 +266,7 @@ audio_masking_evidence(
 )
 ```
 
-Use this for the most detailed current masking-related evidence. It combines:
+It combines:
 
 ```text
 existing 32-band Analyzer spectrum
@@ -239,7 +276,7 @@ existing 32-band Analyzer spectrum
 → V0.6 selected-band temporal overlap
 ```
 
-The ERB stage is **re-binning**, not a gammatone/cochlear filterbank. The score is **heuristic evidence**, not an audible-masking probability.
+The ERB stage is re-binning, not a gammatone/cochlear filterbank. The score is heuristic evidence, not an audible-masking probability.
 
 ### Legacy stereo bands
 
@@ -247,7 +284,7 @@ The ERB stage is **re-binning**, not a gammatone/cochlear filterbank. The score 
 audio_stereo_bands(track)
 ```
 
-Use for the existing eight correlation bands when V0.8 detail is unnecessary or unavailable. Prefer `audio_stereo_profile()` when Mid/Side or Side-spectrum evidence matters.
+Use for the existing eight correlation bands when V0.8 detail is unnecessary or unavailable.
 
 ### Master technical summary
 
@@ -265,9 +302,78 @@ audio_capture_snapshot("after", seconds=5)
 audio_compare_snapshots("before", "after")
 ```
 
-Use comparable musical passages, similar window lengths, and comparable `active_ratio`. Snapshot deltas are `After - Before`. LUFS-I is session cumulative, not a reset per snapshot.
+Use comparable musical passages, similar window lengths, and comparable `active_ratio`. Snapshot deltas are `After - Before`. LUFS-I is session cumulative, not reset per snapshot.
 
-## 5. How to read V0.8 stereo evidence
+## 5. How to read V0.9 tonal evidence
+
+### Chroma is a pitch-class power distribution
+
+V0.9 exposes twelve normalized bins in this fixed order:
+
+```text
+C C# D D# E F F# G G# A A# B
+```
+
+The plugin accumulates Mid-spectrum power approximately over `80 Hz–5 kHz`, maps FFT bins to the nearest 12-TET pitch class, and collapses octave information.
+
+Therefore:
+
+```text
+chroma != note probability
+chroma != MIDI note list
+chroma != note count
+chroma != chord-membership probability
+```
+
+### `chroma_energy_ratio`
+
+This describes how much measured Mid-spectrum power falls inside the chroma-analysis frequency range. Use it as coverage context, not correctness probability.
+
+### `normalized_pitch_class_entropy`
+
+Approximately:
+
+```text
+0 → pitch-class power more concentrated
+1 → pitch-class power more uniformly distributed
+```
+
+It is distribution concentration, not quality, consonance, complexity, or certainty.
+
+### Tonal-center candidates
+
+V0.9 ranks 24 major/minor tonal-center templates using Pearson correlation against Krumhansl-Kessler key profiles.
+
+`profile_correlation` means template similarity, not key probability.
+
+`top2_margin` means:
+
+```text
+best profile correlation - second-best profile correlation
+```
+
+It is separation within this template set, not calibrated confidence.
+
+Short, modal, chromatic, changing, sparse, percussion-heavy, atonal, or mixed-source passages can be ambiguous. Do not report the top candidate as a ground-truth key without appropriate qualification.
+
+### Single-F0 harmonic alignment
+
+```text
+single_f0_harmonic_energy_ratio
+harmonic_f0_candidate_hz
+```
+
+These come from a transparent single-harmonic-series spectral heuristic. They are not pitch-tracker confidence, note detection, harmonic/percussive source separation, or probability that the source is harmonic.
+
+The F0 candidate can jump by octave/subharmonic, especially for polyphonic, noisy, distorted, weak-fundamental, or percussive material. Do not convert it directly into a note label and claim that note was detected.
+
+Detailed semantics:
+
+```text
+references/tonal-evidence.md
+```
+
+## 6. How to read V0.8 stereo evidence
 
 ### Correlation is signed
 
@@ -279,116 +385,77 @@ Use comparable musical passages, similar window lengths, and comparable `active_
 
 Correlation does not by itself quantify Side energy.
 
-### `side_to_mid_db` is an energy relation
+### `side_to_mid_db`
 
 ```text
 10 * log10(Side power / Mid power)
 ```
 
-Negative values mean Mid energy exceeds Side energy. Positive values mean Side exceeds Mid. There is no universal target.
+Negative means Mid energy exceeds Side; positive means Side exceeds Mid. There is no universal target.
 
 ### `decorrelation_proxy_mean`
-
-Transparent derived formula:
 
 ```text
 1 - abs(L/R correlation)
 ```
 
-This becomes high near correlation `0`, but both `+1` and `-1` produce values near `0`. Always read it with correlation sign.
+It is a mathematical proxy, not perceptual spaciousness. Read it with correlation sign.
 
 ### `negative_cross_energy_ratio`
 
-Fraction of bilateral FFT-bin weight whose real L/R cross-spectrum is negative.
+Weighted fraction of bilateral FFT-bin evidence with negative real L/R cross-spectrum. It is phase-opposition evidence, not a phase-angle histogram, mono-cancellation percentage, audibility probability, or quality score.
 
-Use it as phase-opposition evidence. It is not a phase-angle histogram, mono-cancellation percentage, audible-problem probability, or quality score.
+### Mid/Side spectra and low-band evidence
 
-### Low-frequency evidence
+Historical `bands_db` is the Mid spectrum. V0.8 adds Side spectrum and 20–120 Hz stereo relations. Very low-energy bands should not be overinterpreted.
 
-```text
-low_band_20_120_correlation
-low_band_20_120_side_to_mid_db
-```
-
-These describe approximately 20–120 Hz stereo relation. Very low-energy bands should not be overinterpreted. Do not impose a universal mono requirement from this Skill.
-
-### Mid and Side spectra
-
-The historical `bands_db` field is the Mid spectrum. V0.8 adds `side_bands_db` and exposes window means as:
-
-```text
-mid_spectrum_db
-side_spectrum_db
-```
-
-Use them to identify where common versus difference energy is concentrated. They are FFT-derived machine features, not calibrated SPL.
-
-Detailed semantics are in:
+Detailed semantics:
 
 ```text
 references/stereo-evidence.md
 ```
 
-## 6. How to read V0.7 masking evidence
+## 7. How to read V0.7 masking evidence
 
-`audio_masking_evidence()` reports multiple transparent components instead of one opaque conclusion.
-
-### `relative_spectral_overlap`
-
-Each track's ERB-region powers are normalized to that track's own strongest ERB region. The score uses the minimum relative power of the two tracks.
-
-It describes local spectral coexistence, not audibility or importance.
-
-### `level_delta_a_minus_b_db`
+`audio_masking_evidence()` reports transparent components rather than an opaque conclusion:
 
 ```text
-positive → A is stronger in that ERB region
-negative → B is stronger in that ERB region
+relative_spectral_overlap
+level_delta_a_minus_b_db
+level_direction_weight_*
+spectral_level_evidence_*
+normalized_band_temporal_overlap
+combined_evidence_*
+masking_evidence_score
 ```
 
-This is a relative Analyzer level difference, not an auditory masking threshold.
+The scores are heuristic evidence for relative ranking in comparable contexts. They are not probabilities of audible masking and do not automatically require EQ or sidechain.
 
-### `level_direction_weight_a_over_b` / `...b_over_a`
+Detailed semantics:
 
-A bounded logistic weighting derived from the regional level difference. It only indicates which direction is more supported by relative level. It is not a probability.
+```text
+references/masking-evidence.md
+```
 
-### `spectral_level_evidence_*`
+## 8. Evidence quality matters
 
-Combines relative spectral overlap with the directional level weight.
-
-### `normalized_band_temporal_overlap`
-
-Comes from aligned V0.6 band-energy envelopes. Higher values mean the two sources more often occupy strong states in that same region at the same time.
-
-### `combined_evidence_*`
-
-Combines spectral/level evidence with temporal overlap when temporal data is available.
-
-Do not compare these values to an undocumented universal threshold. Prefer relative ranking across regions/pairs within the same measurement context.
-
-### `masking_evidence_score`
-
-A compact summary of the strongest returned regions. Use it to rank candidates, not to label a pair as objectively "bad".
-
-## 7. Evidence quality matters
-
-When interpreting pair/window evidence, report or inspect the relevant validity context:
+When interpreting window/pair evidence, inspect the relevant context:
 
 ```text
 window_seconds
 active_ratio
-stereo_frames for V0.8 stereo profiles
-active_ratio_a / active_ratio_b for pair evidence
-alignment.aligned_pairs for temporal/masking evidence
-alignment.tolerance_ms
-alignment.mean_abs_offset_ms
-temporal_usable_pairs
-frequency / stereo band / ERB region
+valid_frames / valid_frame_ratio
+mean_chroma_energy_ratio for V0.9
+normalized_pitch_class_entropy for V0.9
+tonal_center_top2_margin for V0.9
+stereo_frames for V0.8
+aligned_pairs / tolerance / mean offset for temporal and masking evidence
+frequency / stereo band / ERB region when relevant
 ```
 
-Sparse, stale, mostly silent, or poorly aligned data should reduce confidence in the interpretation.
+Sparse, stale, mostly silent, poorly aligned, or weakly covered data should reduce certainty in the interpretation.
 
-## 8. Relationship between tools
+## 9. Relationship between tools
 
 Use tools progressively rather than mechanically:
 
@@ -399,22 +466,26 @@ audio_project_status()
 audio_mix_overview()
     coarse project state
         ↓
-audio_project_masking_scan()
-    project interaction ranking when needed
-        ↓
-audio_masking_evidence(a, b)
-    detailed masking-related pair evidence
-
-audio_stereo_profile(track)
-    detailed Mid/Side and stereo evidence for one track
-        ↓
-audio_stereo_compare(a, b)
-    measurement-only comparison when two stereo states matter
+choose evidence family only when needed:
+    audio_project_masking_scan() / audio_masking_evidence()
+    audio_stereo_profile() / audio_stereo_compare()
+    audio_tonal_profile() / audio_tonal_compare()
+    audio_temporal_profile() / audio_temporal_compare()
 ```
 
 Do not call every layer if the user's question is already answered.
 
-## 9. Parameter interpretation rules
+For exact symbolic music facts:
+
+```text
+exact DAW/MIDI/project data available
+→ prefer that data
+
+audio-only evidence needed or symbolic data unavailable
+→ use V0.9 tonal tools with validity/uncertainty context
+```
+
+## 10. Parameter interpretation rules
 
 Detailed semantics:
 
@@ -422,6 +493,7 @@ Detailed semantics:
 references/parameters.md
 references/masking-evidence.md
 references/stereo-evidence.md
+references/tonal-evidence.md
 ```
 
 Tool/selector details:
@@ -446,9 +518,17 @@ Always keep these distinctions:
 - RMS Rise is rapid level-increase evidence, not Crest Factor or attack time.
 - Spectral overlap, temporal overlap, and V0.7 masking evidence are not probabilities of audible masking.
 - Onset candidates are threshold-based change candidates, not ground-truth labels.
+- Chroma is not note probability or MIDI transcription.
+- Tonal-center profile correlation is not key probability.
+- Tonal-center top-2 margin is not calibrated confidence.
+- Pitch-class entropy is not musical quality.
+- Chroma energy coverage is not correctness probability.
+- Single-F0 harmonic ratio is not probability of harmonic content.
+- Harmonic F0 candidate is not a detected musical note.
+- Chroma similarity is not harmonic compatibility.
 - `null` is unavailable, not zero.
 
-## 10. Boundary with FL Studio control MCP
+## 11. Boundary with FL Studio control MCP
 
 AI Audio Analyzer MCP is responsible for:
 
@@ -459,14 +539,14 @@ measure / read / compare / verify
 FL Studio control MCP is responsible for:
 
 ```text
-DAW topology / plugin access / host changes
+DAW topology / project data / plugin access / host changes
 ```
 
-This Skill may guide deterministic Identify mapping and measurement readback after an external DAW change. It must **not** prescribe what parameter to change, by how much, or which artistic style to follow.
+This Skill may guide deterministic Identify mapping and measurement readback after an external DAW change. It must **not** prescribe what parameter to change, by how much, what key to use, what chord to replace, or which artistic style to follow.
 
-If the user asks to modify the project, first read the actual DAW tracks/slots/plugins/parameters, do not invent controls, read back the host state after changes, and use Analyzer measurements only as technical evidence.
+If the user asks to modify the project, first read the actual DAW tracks/slots/plugins/parameters and relevant symbolic project data when available; do not invent controls or notes. Read back the host state after changes and use Analyzer measurements only as technical evidence.
 
-## 11. Output discipline
+## 12. Output discipline
 
 When citing Analyzer evidence, include enough context to make it auditable:
 
@@ -474,7 +554,8 @@ When citing Analyzer evidence, include enough context to make it auditable:
 instance / selector
 measurement window
 signal validity / active ratio
-frequency / stereo band / ERB region when relevant
+evidence-quality fields when relevant
+frequency / stereo band / ERB region / pitch-class context
 alignment quality for temporal evidence
 measurement/evidence value
 what the metric can and cannot establish
@@ -485,8 +566,12 @@ Do not present these as Analyzer-measured facts:
 - a sound "should" be warmer, brighter, wider, louder, narrower, or more modern;
 - a genre must hit a fixed LUFS number;
 - a frequency must be cut/boosted by a specific amount;
-- spectral or V0.7 masking evidence automatically requires EQ or sidechain;
+- spectral/masking evidence automatically requires EQ or sidechain;
 - one correlation/Side-Mid/negative-cross score is inherently good or bad;
-- V0.8 stereo evidence automatically requires mono, narrowing, widening, phase rotation, or a stereo processor.
+- stereo evidence automatically requires mono, narrowing, widening, phase rotation, or a stereo processor;
+- the top tonal-center candidate is certainly the song key;
+- an F0 candidate is certainly the played note;
+- similar/different chroma automatically means two sources are harmonically compatible/incompatible;
+- V0.9 evidence automatically requires transposition, tuning, chord replacement, harmony editing, arrangement changes, or any processing action.
 
-Those are artistic or processing judgments, outside the measurement scope of this MCP and Skill.
+Those are symbolic/artistic/processing judgments outside the measurement scope of this MCP and Skill.

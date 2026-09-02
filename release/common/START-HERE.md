@@ -1,4 +1,4 @@
-# AI Audio Analyzer 0.8 — Start Here / 从这里开始
+# AI Audio Analyzer 0.9 — Start Here / 从这里开始
 
 [English guide](INSTALL.en.md) | [中文教程](INSTALL.zh-CN.md)
 
@@ -42,14 +42,14 @@ INSTALL.zh-CN.md
 VERSION.txt
 ```
 
-There is **no MCP source code** in the user Release. There is also no Python environment, package manager, requirements file, or nested Release ZIP inside the package.
+There is **no MCP source code** in the user Release. There is also no Python environment, package manager, requirements file, PyInstaller `_internal` folder, or nested Release ZIP inside the package.
 
 After installation, the installer tells you where to find:
 
 - the generated Cherry Studio MCP configuration;
 - the installed Cherry Studio Skill folder.
 
-AI Audio Analyzer 0.8 adds deeper Mid/Side and stereo measurements internally. Installation remains the same: no additional software or setup is required.
+AI Audio Analyzer 0.9 adds audio-domain chroma, tonal-center candidate evidence, and harmonic-alignment evidence internally. Installation remains exactly the same: no additional software or setup is required.
 
 ---
 
@@ -83,4 +83,4 @@ AI Audio Analyzer 0.8 adds deeper Mid/Side and stereo measurements internally. I
 
 安装完成后，安装器会直接告诉你 Cherry Studio 的 MCP 配置文件位置和 Skill 文件夹位置。
 
-AI Audio Analyzer 0.8 新增了更深入的 Mid/Side 与立体声测量，但安装方式没有增加任何额外步骤或依赖。
+AI Audio Analyzer 0.9 新增了音频域 Chroma、Tonal-center Candidate 和 Harmonic-alignment Evidence，但安装方式没有增加任何额外步骤或依赖。

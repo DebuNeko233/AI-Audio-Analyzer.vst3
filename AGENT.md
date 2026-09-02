@@ -19,21 +19,21 @@ Analyzer MCP is the measurement/perception channel. DAW control is separate and 
 
 https://github.com/rosasynthesiz/flstudio-mcp
 
-The Analyzer must remain measurement-oriented. Do not encode one artistic mixing style into MCP or Skill.
+The Analyzer must remain measurement-oriented. Do not encode one artistic mixing, mastering, harmony, or arrangement style into MCP or Skill.
 
 ## 2. Current architecture
 
 ### VST3
 
 - JUCE 8.0.8, C++20, CMake.
-- Current public/product version: **0.8.0**.
+- Current public/product version: **0.9.0**.
 - Visible product name: `AI Audio Analyzer`.
 - Internal target: `AIAnalyzer`.
 - Bundle ID: `com.debuneko.aianalyzer`.
 - Manufacturer/plugin IDs remain stable for DAW-project compatibility.
 - Default OSC endpoint: `127.0.0.1:9855`.
 - Audio callback only writes to a preallocated SPSC FIFO.
-- FFT, loudness, temporal/stereo analysis and OSC run off the realtime audio thread.
+- FFT, loudness, temporal, stereo, music-semantic analysis and OSC run off the realtime audio thread.
 - `libebur128` provides LUFS / True Peak measurement.
 
 Do not casually change host/plugin identity fields.
@@ -46,7 +46,7 @@ There is exactly **one supported source/PyInstaller entrypoint**:
 bridge/server.py
 ```
 
-Do not create `server_v09.py`, `server_v10.py`, or any other version-named startup file. Versions are metadata, not filenames.
+Do not create `server_v10.py`, `server_v11.py`, or any other version-named startup file. Versions are metadata, not filenames.
 
 Current internal layout:
 
@@ -57,13 +57,14 @@ bridge/project_tools.py   V0.5 project overview / Snapshot A-B
 bridge/temporal_tools.py  V0.6 temporal parsing/tools
 bridge/masking_tools.py   V0.7 masking evidence
 bridge/stereo_tools.py    V0.8 Mid/Side and stereo evidence
+bridge/semantic_tools.py  V0.9 chroma / tonal-center / harmonic evidence
 ```
 
-Current MCP tool count: **22**.
+Current MCP tool count: **24**.
 
 ```text
-MCP_VERSION = "0.8"
-OSC_PROTOCOL_VERSION = "0.8"
+MCP_VERSION = "0.9"
+OSC_PROTOCOL_VERSION = "0.9"
 ```
 
 ### Skill
@@ -80,9 +81,9 @@ README-CHERRY-STUDIO.md
 references/*.md
 ```
 
-Skill scope is limited to MCP calling strategy, selector/mapping rules, measurement validity, parameter semantics, temporal evidence, masking evidence, Mid/Side/stereo evidence, and limitations.
+Skill scope is limited to MCP calling strategy, selector/mapping rules, measurement validity, parameter semantics, temporal evidence, masking evidence, Mid/Side/stereo evidence, V0.9 audio-domain tonal evidence, and limitations.
 
-Do not add fixed genre EQ recipes, LUFS targets, mandatory sidechain rules, stereo recipes, mastering chains, or “metric X always means processor Y”.
+Do not add fixed genre EQ recipes, LUFS targets, mandatory sidechain rules, stereo recipes, mastering chains, key-change rules, harmony-edit rules, tuning recipes, or “metric X always means processor/action Y”.
 
 ## 3. Implemented milestones
 
@@ -195,9 +196,9 @@ The Release is designed for people with **zero programming experience**.
 
 ### 0.8 — deeper Mid/Side and stereo measurement
 
-V0.8 keeps OSC append-only: existing indexes `0..64` remain unchanged and fields `65..111` are appended.
+V0.8 keeps OSC append-only and appends fields `65..111`.
 
-New VST3 measurements:
+Measurements:
 
 ```text
 mid_rms_db
@@ -212,14 +213,14 @@ low_band_20_120_side_to_mid_db
 
 Historical `bands_db` remains the 32-band **Mid spectrum**.
 
-New MCP tools:
+MCP tools:
 
 ```text
 audio_stereo_profile()
 audio_stereo_compare()
 ```
 
-V0.8 deliberately keeps these concepts separate:
+Keep these concepts independent:
 
 ```text
 signed L/R correlation
@@ -229,24 +230,68 @@ negative cross-spectrum evidence
 frequency-dependent stereo relation
 ```
 
-Important semantics:
+`negative_cross_energy_ratio` is phase-opposition evidence, not mono-cancellation percentage, audibility probability, or quality score. No universal stereo target/action is encoded.
 
-- low correlation is not anti-correlation;
-- high Side energy is not proof of phase opposition;
-- `negative_cross_energy_ratio` is weighted negative real cross-spectrum evidence, not a phase-angle histogram, mono-cancellation percentage, audibility probability, or quality score;
-- no universal stereo target or processing action is encoded.
+### 0.9 — audio-domain music-semantic measurement
+
+V0.9 keeps OSC append-only: existing indexes `0..111` remain unchanged and fields `112..127` are appended.
+
+VST3 fields:
+
+```text
+112..123  chroma[12] = C..B
+124       chroma_energy_ratio
+125       single_f0_harmonic_energy_ratio
+126       harmonic_f0_candidate_hz
+127       V0.9 schema marker = "0.9"
+```
+
+Implementation characteristics:
+
+```text
+Chroma source        Mid spectrum
+Chroma range         approximately 80 Hz–5 kHz
+Pitch-class model    nearest 12-TET pitch class; octave-collapsed
+F0 search            approximately 55–1000 Hz
+Harmonics            up to 8 integer harmonics with narrow FFT-bin tolerance
+```
+
+MCP adds:
+
+```text
+audio_tonal_profile()
+audio_tonal_compare()
+```
+
+`audio_tonal_profile()` derives transparent windowed evidence:
+
+```text
+12-bin normalized pitch-class distribution
+normalized pitch-class entropy
+24 major/minor Krumhansl-Kessler profile correlations
+top tonal-center candidates
+top-2 candidate correlation margin
+chroma energy coverage
+single-F0 harmonic-alignment mean/max
+candidate F0 median/min/max
+```
+
+`audio_tonal_compare()` adds chroma cosine similarity, Jensen-Shannon divergence, 12-bin B-minus-A pitch-class deltas, and evidence-quality context.
+
+Required semantics:
+
+- chroma is pitch-class power, not note probability, note count, or MIDI transcription;
+- `chroma_energy_ratio` is analysis-range coverage, not correctness probability;
+- pitch-class entropy is distribution concentration, not musical quality/confidence;
+- tonal-center candidates are major/minor template correlations, not ground-truth key labels or probabilities;
+- `top2_margin` is separation within the tested candidate set, not calibrated confidence;
+- `single_f0_harmonic_energy_ratio` is a single-harmonic-series spectral alignment heuristic, not probability of harmonic content, source separation, HNR, pitch confidence, or quality;
+- `harmonic_f0_candidate_hz` may octave/subharmonic-jump and must not be reported as a detected musical note without stronger evidence;
+- when exact notes, chords, key, or tuning metadata are available through DAW/MIDI/project tooling, prefer that exact symbolic source for exact symbolic claims.
+
+V0.9 remains measurement evidence. It does not prescribe transposition, tuning, chord replacement, arrangement, harmony editing, or processing actions.
 
 ## 4. Current roadmap
-
-### 0.9 — music-semantic measurements
-
-Evaluate useful audio-domain evidence such as:
-
-- chroma / pitch-class distribution;
-- tonal-center evidence;
-- harmonic vs non-harmonic distribution where technically defensible.
-
-Do not duplicate information available more reliably from DAW/MIDI/project data through another MCP. Any semantic inference must expose uncertainty/validity and remain measurement evidence rather than an artistic prescription.
 
 ### 1.0 — reliable closed-loop measurement system
 
@@ -260,7 +305,9 @@ project discovery
 → controlled Before/After comparison
 ```
 
-1.0 does not mean encoding one mixing aesthetic.
+1.0 should consolidate reliability, compatibility, diagnostics, automated regression coverage, and beginner Release behavior. It does not mean encoding one mixing aesthetic or turning heuristic evidence into automatic artistic decisions.
+
+Do not invent a post-1.0 roadmap item merely to advance numbering; add future stages only when a real scoped need exists.
 
 ## 5. MCP / measurement rules
 
@@ -284,19 +331,27 @@ Use window/project tools for observations requiring temporal stability. `audio_s
 
 ### Evidence quality must be visible
 
-Expose enough context to judge reliability: window length, active coverage, valid frame count, aligned pair count when applicable, frequency/ERB/stereo region, alignment tolerance/offset, and usable temporal pairs.
+Expose enough context to judge reliability: window length, active coverage, valid frame count, aligned pair count when applicable, frequency/ERB/stereo/pitch-class region, alignment tolerance/offset, usable temporal pairs, chroma coverage, tonal candidate separation, and other relevant validity fields.
 
 ### Heuristics must be labeled
 
-Spectral overlap, onset/change candidates, temporal overlap, ERB-rebinned evidence, negative-cross evidence, decorrelation proxies, and candidate rankings are measurement/heuristic evidence unless replaced by a validated stronger model.
+Spectral overlap, onset/change candidates, temporal overlap, ERB-rebinned evidence, negative-cross evidence, decorrelation proxies, tonal-center rankings, single-F0 harmonic alignment, and candidate rankings are measurement/heuristic evidence unless replaced by a validated stronger model.
+
+### Prefer exact symbolic project data for exact symbolic facts
+
+If MIDI/DAW/project tooling exposes exact notes, chords, key metadata, tuning, or other symbolic state, use that source for exact symbolic claims. Analyzer audio inference may complement it but must not silently override exact project data.
 
 ### Keep independent stereo concepts independent
 
 Do not collapse correlation, Side/Mid energy, decorrelation proxy, and negative-cross evidence into one opaque “stereo quality” score.
 
+### Keep independent semantic concepts independent
+
+Do not collapse chroma coverage, entropy, tonal profile correlation, top-2 margin, harmonic ratio, and candidate F0 into one opaque “music confidence” or “correctness” score.
+
 ### A/B is measurement-oriented
 
-Snapshot/stereo comparisons return measurements and deltas, not subjective claims such as “better”, “warmer”, “wider”, or “professional”.
+Snapshot/stereo/tonal comparisons return measurements and deltas, not subjective claims such as “better”, “warmer”, “wider”, “more musical”, “in key”, or “professional”.
 
 ## 6. Release and platform rules
 
@@ -379,7 +434,7 @@ Release MCP uses:
 -F / --onefile
 ```
 
-The native packaged runtime must pass its self-test before package assembly.
+The native packaged runtime must pass self-test before package assembly. If `_internal/` appears in staging/final user content, treat the package as invalid.
 
 ### Single-compression policy
 
@@ -446,6 +501,7 @@ skills/ai-analyzer-flstudio/references/analyzer-mcp.md
 skills/ai-analyzer-flstudio/references/parameters.md
 skills/ai-analyzer-flstudio/references/masking-evidence.md
 skills/ai-analyzer-flstudio/references/stereo-evidence.md
+skills/ai-analyzer-flstudio/references/tonal-evidence.md
 bridge/cherry-studio.example.json
 bridge/requirements.txt
 .github/workflows/build.yml
@@ -458,7 +514,9 @@ For every change ask:
 Did public version change?
 Did MCP entrypoint/tool count/arguments/defaults/output change?
 Did OSC schema/indexes or metric semantics change?
-Did signal/temporal/masking/stereo validity change?
+Did signal/temporal/masking/stereo/semantic validity change?
+Did tonal/chroma/harmonic evidence semantics change?
+Did exact-symbolic-data preference or evidence limitations change?
 Did Identify/binding/selectors change?
 Did supported OS/architecture change?
 Did Release contents/layout change?
@@ -518,19 +576,5 @@ One succeeding does not prove the others succeeded.
 - Keep user Releases understandable without programming knowledge.
 - Do not guess FL Studio MCP tool names; inspect actual exposed tools.
 - Do not guess Analyzer ↔ Mixer mapping when Identify is available.
-- Do not treat `null` as zero.
-- Do not present masking/temporal/stereo heuristic evidence as ground truth.
-- Do not call low correlation anti-correlation without checking sign.
-- Do not treat Side/Mid energy as proof of phase opposition.
-- Do not describe negative-cross evidence as a mono-cancellation percentage.
-- Do not encode one mixing aesthetic into MCP or Skill.
-- Keep LLM-facing Skill content in English.
-- Do not re-add Intel macOS Release support unless explicitly requested.
-- Do not claim macOS notarization when it is not notarized.
-- Do not trigger VST3 builds for unrelated changes.
-
-## 10. Maintaining this file
-
-`AGENT.md` is living project memory. Update it when architecture, supported platforms, Release strategy, MCP entrypoint/tools, protocol/identity model, measurement/evidence semantics, Skill scope/language, milestones, roadmap, or CI/build policy materially change.
-
-Keep it decision-focused rather than turning it into a raw commit log.
+- Do not turn V0.9 tonal evidence into automatic key/harmony/tuning/arrangement instructions.
+- Prefer exact DAW/MIDI/project symbolic data for exact symbolic facts when available.

@@ -4,9 +4,9 @@
 
 **AI Audio Analyzer** is a JUCE VST3 machine-readable audio measurement layer for AI/LLM-assisted music-production workflows.
 
-The plugin measures audio inside the DAW, emits compact OSC data to the Analyzer MCP Bridge, and exposes structured level, loudness, spectrum, stereo, temporal, project, A/B, and masking-related evidence to Cherry Studio or another MCP client.
+The plugin measures audio inside the DAW, emits compact OSC data to the Analyzer MCP Bridge, and exposes structured level, loudness, spectrum, stereo, temporal, project, A/B, masking-related, and audio-domain tonal evidence to Cherry Studio or another MCP client.
 
-Current product version: **0.8.0**.
+Current product version: **0.9.0**.
 
 ## Project components
 
@@ -17,7 +17,7 @@ AI Audio Analyzer
 └─ Skill   English LLM-facing instructions for correct MCP use and parameter semantics
 ```
 
-The Skill is intentionally **not** a style-specific mixing guide. It does not encode fixed LUFS targets, EQ/compression/sidechain recipes, stereo recipes, or mastering chains.
+The Skill is intentionally **not** a style-specific mixing/harmony guide. It does not encode fixed LUFS targets, EQ/compression/sidechain recipes, stereo recipes, key-change rules, harmony edits, or mastering chains.
 
 ## Companion FL Studio MCP
 
@@ -53,7 +53,8 @@ FL Studio / DAW
                  ├─ project overview / Snapshot A-B
                  ├─ V0.6 temporal evidence
                  ├─ V0.7 masking evidence
-                 └─ V0.8 Mid/Side + stereo evidence
+                 ├─ V0.8 Mid/Side + stereo evidence
+                 └─ V0.9 tonal / music-semantic evidence
                          │
                          ▼
                   Cherry Studio / LLM
@@ -73,7 +74,8 @@ Core measurements include:
 - full-band L/R Correlation and legacy Mid/Side width ratio;
 - 8-band L/R Correlation;
 - V0.6 Spectral Flux, RMS Rise and 40–160 Hz temporal energy;
-- V0.8 Mid RMS, Side RMS, Side/Mid dB, Side spectrum, frequency-dependent Side/Mid ratio, low-band stereo relation, and negative cross-spectrum evidence.
+- V0.8 Mid RMS, Side RMS, Side/Mid dB, Side spectrum, frequency-dependent Side/Mid ratio, low-band stereo relation, and negative cross-spectrum evidence;
+- V0.9 12-bin Mid-spectrum chroma, chroma analysis coverage, tonal-center profile ranking, and single-F0 harmonic-alignment evidence.
 
 ### V0.3 signal validity
 
@@ -155,16 +157,53 @@ audio_stereo_profile(track, seconds=5)
 audio_stereo_compare(track_a, track_b, seconds=5)
 ```
 
-Important distinctions:
+No universal width, correlation, Side/Mid, or low-frequency stereo target is defined.
 
-- low correlation is not the same as anti-correlation;
-- high Side energy does not by itself prove phase opposition;
-- negative-cross evidence is not a mono-cancellation percentage or audibility probability;
-- no universal width, correlation, Side/Mid, or low-frequency stereo target is defined.
+### V0.9 audio-domain tonal / music-semantic evidence
+
+V0.9 adds an append-only semantic measurement layer without pretending audio inference is exact symbolic project data.
+
+VST3 measurements:
+
+```text
+12-bin normalized chroma: C..B
+chroma_energy_ratio
+single_f0_harmonic_energy_ratio
+harmonic_f0_candidate_hz
+```
+
+Chroma is derived from Mid-spectrum power approximately over `80 Hz–5 kHz`, mapped to the nearest 12-TET pitch class and octave-collapsed.
+
+MCP tools:
+
+```text
+audio_tonal_profile(track, seconds=8)
+audio_tonal_compare(track_a, track_b, seconds=8)
+```
+
+`audio_tonal_profile()` adds transparent derived evidence:
+
+```text
+pitch-class entropy
+24 major/minor Krumhansl-Kessler profile correlations
+top tonal-center candidates
+top-2 correlation margin
+windowed chroma coverage
+single-F0 candidate stability
+```
+
+Important limitations:
+
+- chroma is pitch-class power, not note probability or MIDI transcription;
+- tonal-center candidates are template correlations, not ground-truth key labels or probabilities;
+- `top2_margin` is candidate separation, not calibrated confidence;
+- `single_f0_harmonic_energy_ratio` is a spectral alignment heuristic, not harmonic-content probability or source separation;
+- `harmonic_f0_candidate_hz` can octave/subharmonic-jump and is not a detected note;
+- exact MIDI/DAW note, key, chord, or tuning metadata should be preferred when the request asks for exact symbolic facts.
 
 ## MCP tools
 
-MCP 0.8 exposes **22 tools**:
+MCP 0.9 exposes **24 tools**:
 
 ```text
 audio_bridge_status()
@@ -189,9 +228,11 @@ audio_masking_evidence(...)
 audio_project_masking_scan(...)
 audio_stereo_profile(track, seconds=5)
 audio_stereo_compare(track_a, track_b, seconds=5)
+audio_tonal_profile(track, seconds=8)
+audio_tonal_compare(track_a, track_b, seconds=8)
 ```
 
-Do not mechanically call every tool. Start at project level and drill down only when needed.
+Do not mechanically call every tool. Start at project level and choose only the evidence family required by the question.
 
 ## User installation
 
@@ -213,7 +254,7 @@ Extracted package:
 ```text
 AI Audio Analyzer.vst3
 mcp/
-└─ ai-audio-analyzer-mcp[.exe]   standalone one-file executable
+└─ ai-audio-analyzer-mcp[.exe]   standalone PyInstaller -F executable
 skill/
 START-HERE.md
 INSTALL.en.md
@@ -222,7 +263,7 @@ VERSION.txt
 platform installer file(s)
 ```
 
-User Releases deliberately contain **no MCP Python source**, `requirements.txt`, venv, PyInstaller `_internal`, or developer configuration examples.
+User Releases deliberately contain **no MCP Python source**, `requirements.txt`, venv, PyInstaller `_internal`, developer configuration examples, or nested ZIP.
 
 ### Windows
 
@@ -255,9 +296,9 @@ bridge/server.py
 Versions are metadata, not startup filenames:
 
 ```text
-Product version       0.8.0
-MCP version           0.8
-OSC protocol version  0.8
+Product version       0.9.0
+MCP version           0.9
+OSC protocol version  0.9
 ```
 
 Internal modules:
@@ -269,6 +310,7 @@ bridge/project_tools.py   project overview / Snapshot A-B
 bridge/temporal_tools.py  V0.6 temporal layer
 bridge/masking_tools.py   V0.7 masking-evidence layer
 bridge/stereo_tools.py    V0.8 Mid/Side and stereo layer
+bridge/semantic_tools.py  V0.9 chroma / tonal-center / harmonic evidence
 ```
 
 Repository/source development may use Python 3.12 and `bridge/requirements.txt`; that developer workflow is **not shipped in the user Release**.
@@ -284,15 +326,16 @@ skills/ai-analyzer-flstudio/references/analyzer-mcp.md
 skills/ai-analyzer-flstudio/references/parameters.md
 skills/ai-analyzer-flstudio/references/masking-evidence.md
 skills/ai-analyzer-flstudio/references/stereo-evidence.md
+skills/ai-analyzer-flstudio/references/tonal-evidence.md
 ```
 
-The Skill teaches tool use, selector/mapping rules, validity, and parameter/evidence semantics. It does not prescribe a mixing aesthetic.
+The Skill teaches tool use, selector/mapping rules, validity, and parameter/evidence semantics. It does not prescribe a mixing aesthetic, key change, harmony edit, or processing action.
 
 ## OSC protocol
 
 Analysis address: `/aianalyzer/frame`.
 
-The frame remains append-only. Existing indexes `0..64` are unchanged; V0.8 appends:
+The frame remains append-only. Existing indexes `0..111` are unchanged; V0.9 appends:
 
 ```text
 0..58    V0.1–V0.4-compatible fields
@@ -311,6 +354,11 @@ The frame remains append-only. Existing indexes `0..64` are unchanged; V0.8 appe
 71..102  32 Side-spectrum bands
 103..110 8 Side/Mid band ratios
 111      V0.8 schema marker = "0.8"
+112..123 12 chroma bins: C..B
+124      chroma_energy_ratio
+125      single_f0_harmonic_energy_ratio
+126      harmonic_f0_candidate_hz
+127      V0.9 schema marker = "0.9"
 ```
 
 Historical indexes `11..42` remain the 32-band **Mid spectrum**.
@@ -319,7 +367,7 @@ Identify address remains `/aianalyzer/identify`.
 
 ## Realtime design
 
-The audio callback does not perform FFT, loudness, OSC, MCP, allocation-heavy work, or file/network I/O. Samples are pushed into a preallocated SPSC FIFO and analyzed on a background worker thread.
+The audio callback does not perform FFT, loudness, semantic analysis, OSC, MCP, allocation-heavy work, or file/network I/O. Samples are pushed into a preallocated SPSC FIFO and analyzed on a background worker thread.
 
 ## Current limitations
 
@@ -327,6 +375,9 @@ The audio callback does not perform FFT, loudness, OSC, MCP, allocation-heavy wo
 - Masking evidence remains heuristic.
 - V0.8 negative-cross evidence is not a phase-angle histogram or mono-cancellation percentage.
 - V0.8 Side/Mid and correlation metrics are measurements, not stereo-quality scores.
+- V0.9 chroma is FFT-derived 12-TET pitch-class evidence, not transcription.
+- V0.9 tonal-center ranking is profile correlation, not exact key detection.
+- V0.9 single-F0 harmonic evidence is a heuristic and can be unstable on polyphonic/noisy/inharmonic material.
 - Temporal stream alignment is limited by independent OSC timing/update resolution.
 - LUFS-I and session max True Peak are cumulative session measurements.
 - FL Mixer bindings are session-scoped and may require rediscovery after reopening/reinstantiating plugins.
