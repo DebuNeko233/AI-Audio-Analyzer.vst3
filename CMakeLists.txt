@@ -1,5 +1,14 @@
 cmake_minimum_required(VERSION 3.22)
 
+# GitHub's macOS runner currently uses a very new SDK. Without an explicit
+# deployment target, the produced Mach-O inherits that runner OS as its minimum
+# supported macOS version and older Macs/hosts silently refuse to load it.
+# Keep this before project()/enable_language(). Callers can still override it
+# with -DCMAKE_OSX_DEPLOYMENT_TARGET=...
+if(APPLE AND NOT CMAKE_OSX_DEPLOYMENT_TARGET)
+    set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Minimum supported macOS version")
+endif()
+
 project(AIAnalyzer VERSION 0.2.0 LANGUAGES C CXX)
 
 include(FetchContent)
