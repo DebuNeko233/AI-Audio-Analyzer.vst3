@@ -9,6 +9,7 @@ namespace aianalyzer
 {
 inline constexpr int kMaxWorkerIdleWaitMs = 20;
 inline constexpr double kLoudnessMetricsIntervalSeconds = 0.1;
+inline constexpr double kLoudnessMetricsIntervalMs = 100.0;
 
 // The audio callback deliberately does not notify the worker. Estimate when the
 // missing samples for one analysis hop should have arrived, but cap the sleep so
@@ -38,9 +39,15 @@ inline std::uint64_t loudnessMetricsIntervalSamples(double sampleRate) noexcept
             safeRate * kLoudnessMetricsIntervalSeconds)));
 }
 
+// Realtime playback normally reaches the wall-clock threshold at roughly the
+// same point as the sample threshold. The sample threshold is also required so
+// accelerated/offline rendering cannot process a long section of audio while
+// less than 100 ms of wall-clock time passes and leave LUFS aggregates stale.
 inline bool loudnessMetricsDue(std::uint64_t samplesSinceMetrics,
-                               double sampleRate) noexcept
+                               double sampleRate,
+                               double wallClockElapsedMs) noexcept
 {
-    return samplesSinceMetrics >= loudnessMetricsIntervalSamples(sampleRate);
+    return samplesSinceMetrics >= loudnessMetricsIntervalSamples(sampleRate)
+        || wallClockElapsedMs >= kLoudnessMetricsIntervalMs;
 }
 } // namespace aianalyzer
