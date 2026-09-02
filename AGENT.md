@@ -40,26 +40,34 @@ Do not casually change host/plugin identity fields. Existing DAW projects may de
 
 ### MCP
 
-Stable core parser/server:
+There is exactly **one supported source/PyInstaller entrypoint**:
 
 ```text
 bridge/server.py
 ```
 
-Feature layers:
+Do not create version-named entrypoints such as `server_v08.py`, `server_v09.py`, etc. Product/MCP/protocol versions are metadata, not filenames.
+
+Current internal layout:
 
 ```text
-bridge/server_v05.py       project-level compatibility layer
-bridge/project_tools.py    project overview / Snapshot A-B
-bridge/server_v06.py       temporal-analysis entry layer
-bridge/temporal_tools.py   V0.6 temporal parsing/tools
-bridge/server_v07.py       CURRENT MCP ENTRY POINT
-bridge/masking_tools.py    V0.7 auditory-band masking evidence
+bridge/server.py          startup, self-test, version metadata, tool registration
+bridge/analyzer_core.py   stable OSC/runtime state, identity/binding, base tools
+bridge/project_tools.py   project overview / Snapshot A-B
+bridge/temporal_tools.py  V0.6 temporal frame parsing/tools
+bridge/masking_tools.py   V0.7 auditory-band masking evidence
 ```
 
 Current MCP tool count: **20**.
 
-Release builds package `server_v07.py` with PyInstaller. Normal users should not need Python, pip, a venv, or PyPI. Python source remains in Release packages as developer/manual fallback.
+Current version metadata:
+
+```text
+MCP_VERSION = "0.7"
+OSC_PROTOCOL_VERSION = "0.6"
+```
+
+Release builds package `bridge/server.py` with PyInstaller. Normal users should not need Python, pip, a venv, or PyPI. Python source remains in Release packages as developer/manual fallback.
 
 ### Skill
 
@@ -77,17 +85,7 @@ references/*.md
 
 Human-facing public documentation remains bilingual where appropriate (`README.md` + `README.zh-CN.md`, `INSTALL.en.md` + `INSTALL.zh-CN.md`).
 
-Skill scope is intentionally limited to:
-
-```text
-MCP calling strategy
-parameter semantics
-measurement validity
-multi-instance identity / mapping
-project overview / Snapshot A-B usage
-temporal evidence usage
-masking-evidence usage and limitations
-```
+Skill scope is intentionally limited to MCP calling strategy, parameter semantics, measurement validity, multi-instance identity/mapping, project overview/A-B usage, temporal evidence, and masking-evidence usage/limitations.
 
 The Skill must **not** become a style-specific mixing guide. Do not add fixed genre EQ recipes, LUFS targets, mandatory sidechain rules, mastering chains, or “metric X means always apply processor Y” behavior.
 
@@ -161,22 +159,11 @@ VST3 appends temporal descriptors to the existing OSC frame:
 
 Indexes `0..58` remain unchanged.
 
-MCP adds:
-
-```text
-audio_temporal_profile()
-audio_temporal_compare()
-```
-
-Temporal results expose spectral flux, RMS-rise evidence, selected-band envelope correlation/overlap, alignment quality, and threshold-based onset/change candidates.
-
-These are measurement/heuristic evidence, not processing instructions or masking probabilities.
+MCP adds `audio_temporal_profile()` and `audio_temporal_compare()`. Temporal results expose spectral flux, RMS-rise evidence, selected-band envelope correlation/overlap, alignment quality, and threshold-based onset/change candidates. These are measurement/heuristic evidence, not processing instructions or masking probabilities.
 
 ### 0.7 — stronger masking evidence
 
-V0.7 is primarily a Bridge/MCP evidence layer. It does **not** add OSC fields beyond the V0.6 frame.
-
-Current model:
+V0.7 is primarily a Bridge/MCP evidence layer and does **not** add OSC fields beyond the V0.6 frame.
 
 ```text
 existing 32 Analyzer spectrum features
@@ -187,7 +174,7 @@ existing 32 Analyzer spectrum features
 → region-level masking evidence
 ```
 
-Implemented tools:
+Implemented:
 
 ```text
 audio_masking_evidence()
@@ -196,17 +183,34 @@ audio_project_masking_scan()
 
 Important semantics:
 
-- ERB is used for **feature re-binning**, not as a gammatone/cochlear filterbank.
-- `auditory_band_model.filterbank=false` is intentional.
-- Direction weights are bounded functions of relative regional level, not calibrated masking thresholds.
-- Combined evidence mixes spectral/level evidence with V0.6 temporal overlap using a documented formula.
+- ERB is used for feature re-binning, not as a gammatone/cochlear filterbank.
+- Direction weights are bounded relative-level functions, not calibrated masking thresholds.
 - Scores are transparent heuristic evidence for ranking/querying, not probabilities of audible masking.
 - No universal pass/fail threshold is defined.
 - V0.7 does not prescribe EQ, sidechain, compression, gain, panning, or other mix actions.
 
-## 4. Current roadmap
+### 0.7 — MCP entrypoint consolidation
 
-Roadmap describes measurement capability, not artistic policy.
+The historical layered startup files `server_v05.py`, `server_v06.py`, and `server_v07.py` were removed. Their feature modules remain, but startup is consolidated into `bridge/server.py`.
+
+Reason:
+
+```text
+versioned entrypoint filenames
+→ unclear current entrypoint
+→ repeated CI/Release/PyInstaller edits
+→ growing maintenance burden
+```
+
+The stable rule going forward is:
+
+```text
+server.py = entrypoint
+version metadata = code/constants/docs
+feature evolution = *_tools.py / internal modules
+```
+
+## 4. Current roadmap
 
 ### 0.8 — deeper Mid/Side and stereo measurement
 
@@ -226,8 +230,6 @@ Only add audio-domain inference where useful, such as chroma, pitch-class distri
 
 ### 1.0 — reliable closed-loop measurement system
 
-Target system:
-
 ```text
 project discovery
 → deterministic Analyzer mapping
@@ -244,14 +246,13 @@ project discovery
 
 ### Preserve semantics and compatibility
 
-Metrics must not silently change meaning. If semantics must change:
-
-1. document the reason;
-2. update tests/docs/Skill;
-3. preserve compatibility when practical;
-4. explicitly call out compatibility breaks.
+Metrics must not silently change meaning. If semantics must change, document the reason, update tests/docs/Skill, preserve compatibility when practical, and explicitly call out compatibility breaks.
 
 OSC evolution should be append-only when practical. Existing frame indexes must not be silently repurposed.
+
+### One entrypoint only
+
+`bridge/server.py` is the only source/PyInstaller entrypoint. Do not encode MCP or protocol versions in startup filenames. Internal modules may be split by responsibility, but user/CI/Release configuration must always point to `server.py`.
 
 ### `null` is not zero
 
@@ -263,19 +264,7 @@ Use window/project tools for observations requiring temporal stability. `audio_s
 
 ### Evidence quality must be visible
 
-Temporal/masking evidence should expose enough context to judge reliability:
-
-```text
-window length
-active coverage
-aligned pair count
-frequency/ERB region
-alignment tolerance
-actual alignment offset
-temporal usable-pair count
-```
-
-Do not overinterpret sparse, stale, mostly silent, or poorly aligned data.
+Temporal/masking evidence should expose enough context to judge reliability: window length, active coverage, aligned pair count, frequency/ERB region, alignment tolerance, actual alignment offset, and temporal usable-pair count.
 
 ### Heuristics must be labeled
 
@@ -314,8 +303,6 @@ README/docs only
 → no VST3 rebuild
 ```
 
-Do not waste VST3 builds on unrelated docs/Skill/Python changes.
-
 ### User Release workflow
 
 ```text
@@ -332,17 +319,17 @@ SHA256SUMS.txt
 
 Current targets: Windows x64 and macOS arm64 only.
 
-A packaged MCP runtime must pass its built-in self-test before it is accepted. Current PyInstaller entry point is:
+A packaged MCP runtime must pass its built-in self-test before it is accepted. Current and future PyInstaller entrypoint is always:
 
 ```text
-bridge/server_v07.py
+bridge/server.py
 ```
 
 The executable name remains `ai-audio-analyzer-mcp` / `.exe`.
 
 ### macOS
 
-Current builds are ad-hoc signed, not Apple Developer ID notarized. Installation scripts/docs must stay truthful about quarantine/Gatekeeper behavior. Never claim notarization until the workflow actually performs and verifies it.
+Current builds are ad-hoc signed, not Apple Developer ID notarized. Installation scripts/docs must stay truthful about quarantine/Gatekeeper behavior.
 
 ## 7. Documentation synchronization — mandatory
 
@@ -354,21 +341,17 @@ At minimum inspect as relevant:
 README.md
 README.zh-CN.md
 AGENT.md
-
 release/README.md
 release/common/START-HERE.md
 release/common/INSTALL.en.md
 release/common/INSTALL.zh-CN.md
-
 skills/ai-analyzer-flstudio/README-CHERRY-STUDIO.md
 skills/ai-analyzer-flstudio/SKILL.md
 skills/ai-analyzer-flstudio/references/analyzer-mcp.md
 skills/ai-analyzer-flstudio/references/parameters.md
 skills/ai-analyzer-flstudio/references/masking-evidence.md
-
 bridge/cherry-studio.example.json
 bridge/requirements.txt
-
 .github/workflows/build.yml
 .github/workflows/release.yml
 ```
@@ -395,7 +378,7 @@ If yes, update every affected document in the same change whenever practical.
 
 ### English / Chinese parity
 
-`README.md` and `README.zh-CN.md` must describe the same current facts. `INSTALL.en.md` and `INSTALL.zh-CN.md` must describe the same installation behavior. They need not be literal translations, but versions, platforms, paths, entry points, tool counts, and limitations must not contradict each other.
+`README.md` and `README.zh-CN.md` must describe the same current facts. `INSTALL.en.md` and `INSTALL.zh-CN.md` must describe the same installation behavior.
 
 ### English-only LLM Skill
 
@@ -438,24 +421,14 @@ One succeeding does not prove the others succeeded.
 
 A public product release may bump the CMake version even when the new user-facing capability is Bridge/MCP-heavy, so GitHub Release tags and package versions remain coherent.
 
-For a public version change review at least:
-
-```text
-CMakeLists.txt
-README.md / README.zh-CN.md
-AGENT.md
-release docs/workflow
-Cherry Studio example
-Skill compatibility text
-VERSION.txt generation
-```
-
-Do not change host identity fields merely because the product version changes.
+Do not create a new startup filename for a version bump. Keep `server.py` stable and update version metadata/docs/tests instead.
 
 ## 10. Guardrails
 
 - Visible product name is `AI Audio Analyzer`; repository naming does not require host identity changes.
 - Do not rename Bundle ID / plugin IDs casually.
+- Keep `bridge/server.py` as the only MCP entrypoint.
+- Do not reintroduce `server_vXX.py` startup files.
 - Do not guess FL Studio MCP tool names; inspect what it actually exposes.
 - Do not guess Analyzer ↔ Mixer mapping when Identify is available.
 - Do not treat `null` as zero.
