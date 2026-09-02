@@ -1,4 +1,4 @@
-# AI Audio Analyzer 0.9 — Installation Guide
+# AI Audio Analyzer 1.0 — Installation Guide
 
 [中文教程](INSTALL.zh-CN.md)
 
@@ -28,7 +28,7 @@ VERSION.txt
 platform installer files
 ```
 
-The user Release deliberately does **not** include MCP Python source, `requirements.txt`, developer configuration examples, PyInstaller `_internal`, or another ZIP inside the ZIP.
+The user Release deliberately does **not** include MCP Python source, repository regression/test code, `requirements.txt`, developer configuration examples, a PyInstaller `_internal` tree, or another ZIP inside the ZIP.
 
 ## Windows
 
@@ -89,9 +89,17 @@ After the installer finishes, it shows two paths:
 1. `cherry-studio-mcp.json` — use this to add the Analyzer MCP server;
 2. `skill` — import this folder as the AI Audio Analyzer Skill.
 
-The Skill is written in English for LLM compatibility. It teaches the model how to call Analyzer tools and understand measurements. It does not impose a mixing style, stereo recipe, key change, harmony edit, tuning edit, or mastering chain.
+The Skill is written in English for LLM compatibility. It teaches the model how to call Analyzer tools, understand measurements, and use V1.0 verification correctly; it does not impose a specific mixing, mastering, harmony, or stereo-processing style.
 
-AI Audio Analyzer 0.9 adds audio-domain chroma, tonal-center candidate evidence, and single-F0 harmonic-alignment evidence internally. No additional installation step is required.
+AI Audio Analyzer 1.0 adds controlled Before/After verification around changes performed by an external DAW-control MCP. There is **no additional installation step** for this feature.
+
+## What V1.0 verification means
+
+For an AI workflow that changes FL Studio, Analyzer MCP can now keep a Before baseline, accept the external control MCP's actual host-state readback, capture an After window, and report whether the two measurement windows satisfy transparent comparability checks.
+
+This does not mean Analyzer itself controls FL Studio, and a technically controlled comparison does not mean the artistic change is better.
+
+Normal users do not need to configure this manually; the LLM-facing Skill explains how the agent should call the tools.
 
 ## FL Studio cannot find the plugin
 
