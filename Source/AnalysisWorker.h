@@ -9,6 +9,7 @@
 
 #include "AnalysisFrame.h"
 #include "SpscStereoFifo.h"
+#include "WorkerScheduling.h"
 
 namespace aianalyzer
 {
@@ -64,6 +65,27 @@ private:
     void applyProfileChangeIfNeeded();
     void updateSignalState();
     void processLoudnessHop();
+    bool loudnessMetricsDue(double lastMetricsMs, double nowMs) noexcept
+    {
+        if (lastMetricsMs <= 0.0)
+        {
+            loudnessSamplesSinceMetrics = 0;
+            return true;
+        }
+
+        loudnessSamplesSinceMetrics += static_cast<std::uint64_t>(kHopSize);
+        const auto elapsedMs = std::max(0.0, nowMs - lastMetricsMs);
+        if (!aianalyzer::loudnessMetricsDue(
+                loudnessSamplesSinceMetrics,
+                sampleRate.load(std::memory_order_acquire),
+                elapsedMs))
+        {
+            return false;
+        }
+
+        loudnessSamplesSinceMetrics = 0;
+        return true;
+    }
     void processCoreWindow();
     void processWindow();
     void publishFrame(AnalysisFrame frame, bool temporalEnabled);
@@ -131,6 +153,8 @@ private:
     float latestLufsIntegrated = -120.0f;
     float latestTruePeakDbtp = -120.0f;
     float maxTruePeakDbtp = -120.0f;
+    double lastLoudnessMetricsMs = 0.0;
+    std::uint64_t loudnessSamplesSinceMetrics = 0;
 
     bool signalPresent = false;
     float detectorPeakDb = -120.0f;
