@@ -8,6 +8,12 @@ Companion FL Studio control MCP:
 
 https://github.com/rosasynthesiz/flstudio-mcp
 
+## Supported platforms
+
+- Windows: x64
+- macOS: **Apple Silicon / arm64 only**
+- Intel/x86_64 macOS: not included in current Releases
+
 ## Package layout
 
 Windows:
@@ -30,21 +36,18 @@ Install.cmd
 Install.ps1
 ```
 
-macOS:
+macOS Apple Silicon:
 
 ```text
 AI Audio Analyzer.vst3
 mcp/
 ├─ runtime/
-│  ├─ arm64/ai-audio-analyzer-mcp/...
-│  └─ x86_64/ai-audio-analyzer-mcp/...
+│  └─ ai-audio-analyzer-mcp/...
 └─ source/...
 skill/
 Install.command
 install.sh
 ```
-
-The macOS archive contains native MCP runtimes for both Apple Silicon and Intel. The installer selects the correct runtime automatically; Rosetta is not required for the MCP.
 
 ## Recommended automatic installation
 
@@ -65,6 +68,8 @@ UAC is requested only for copying the VST3 into the standard `Program Files` loc
 The installer copies the standalone MCP runtime, runs its built-in self-test, copies the Skill, and creates `cherry-studio-mcp.json` with an absolute executable path.
 
 ### macOS
+
+Current macOS packages support Apple Silicon only. The installer exits with an unsupported-architecture message on non-arm64 systems.
 
 Double-click:
 
@@ -90,7 +95,7 @@ MCP and Skill files are installed to:
 ~/Library/Application Support/AI Audio Analyzer/
 ```
 
-The installer selects `arm64` or `x86_64`, removes quarantine metadata, runs the MCP self-test, and generates the Cherry Studio configuration.
+The installer installs the arm64 standalone MCP runtime, removes quarantine metadata, runs the MCP self-test, and generates the Cherry Studio configuration.
 
 ## Why normal users do not need Python
 
@@ -169,9 +174,21 @@ Remove-Item Env:AI_ANALYZER_SELF_TEST
 
 5. Import the `skill/` directory.
 
-## Manual installation — macOS, no Python
+## Manual installation — macOS Apple Silicon, no Python
 
-1. Copy the VST3:
+1. Confirm the machine architecture:
+
+```bash
+uname -m
+```
+
+Expected output:
+
+```text
+arm64
+```
+
+2. Copy the VST3:
 
 ```bash
 mkdir -p "$HOME/Library/Audio/Plug-Ins/VST3"
@@ -179,7 +196,7 @@ ditto "./AI Audio Analyzer.vst3" \
   "$HOME/Library/Audio/Plug-Ins/VST3/AI Audio Analyzer.vst3"
 ```
 
-2. Current GitHub builds are ad-hoc signed and are **not Apple Developer ID notarized**. Remove quarantine from the installed plugin:
+3. Current GitHub builds are ad-hoc signed and are **not Apple Developer ID notarized**. Remove quarantine from the installed plugin:
 
 ```bash
 xattr -dr com.apple.quarantine \
@@ -200,20 +217,19 @@ codesign --force --deep --sign - --timestamp=none \
   "$HOME/Library/Audio/Plug-Ins/VST3/AI Audio Analyzer.vst3"
 ```
 
-3. Select the native MCP runtime using `uname -m`:
+4. The packaged MCP executable is:
 
 ```text
-mcp/runtime/arm64/...       Apple Silicon
-mcp/runtime/x86_64/...      Intel
+mcp/runtime/ai-audio-analyzer-mcp/ai-audio-analyzer-mcp
 ```
 
-4. Remove MCP quarantine and self-test:
+Remove MCP quarantine and self-test:
 
 ```bash
 xattr -dr com.apple.quarantine ./mcp
-chmod +x ./mcp/runtime/$(uname -m)/ai-audio-analyzer-mcp/ai-audio-analyzer-mcp
+chmod +x ./mcp/runtime/ai-audio-analyzer-mcp/ai-audio-analyzer-mcp
 AI_ANALYZER_SELF_TEST=1 \
-  ./mcp/runtime/$(uname -m)/ai-audio-analyzer-mcp/ai-audio-analyzer-mcp
+  ./mcp/runtime/ai-audio-analyzer-mcp/ai-audio-analyzer-mcp
 ```
 
 5. Point Cherry Studio `command` at that executable and leave `args` empty.
@@ -281,6 +297,10 @@ Fully quit FL Studio, reopen it, and force a plugin rescan.
 ### macOS blocks the plugin
 
 Use the bundled installer first. For manual installation, remove `com.apple.quarantine` as shown above. The current Release is not notarized.
+
+### Intel Mac support
+
+Current Releases do not build or package Intel/x86_64 macOS binaries. The macOS installer intentionally requires arm64.
 
 ### Cherry Studio reports `Connection closed`
 
