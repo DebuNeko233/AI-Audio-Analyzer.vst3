@@ -103,14 +103,15 @@ void AIAnalyzerAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer,
     if (numInputChannels <= 0 || buffer.getNumSamples() <= 0)
         return;
 
-    // Profile reads are cheap; notify the background worker only when the host
-    // parameter actually changes. Normal realtime blocks do not signal/wake it.
+    // Profile reads are cheap; hand the change to the worker only when the host
+    // parameter actually changes. The realtime-safe setter is atomic-only and
+    // never signals a condition variable from the audio callback.
     const auto currentProfileIndex = getAnalysisProfileIndex();
     if (currentProfileIndex
         != lastWorkerProfileIndex.load(std::memory_order_relaxed))
     {
         lastWorkerProfileIndex.store(currentProfileIndex, std::memory_order_relaxed);
-        analysisWorker.setAnalysisProfile(
+        analysisWorker.setAnalysisProfileRealtimeSafe(
             static_cast<aianalyzer::AnalysisProfile>(currentProfileIndex));
     }
 
