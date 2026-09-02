@@ -1,4 +1,4 @@
-# AI Audio Analyzer 0.7 — Installation Guide
+# AI Audio Analyzer 0.8 — Installation Guide
 
 [中文教程](INSTALL.zh-CN.md)
 
@@ -89,7 +89,9 @@ After the installer finishes, it shows two paths:
 1. `cherry-studio-mcp.json` — use this to add the Analyzer MCP server;
 2. `skill` — import this folder as the AI Audio Analyzer Skill.
 
-The Skill is written in English for LLM compatibility. It teaches the model how to call Analyzer tools and understand measurements; it does not impose a specific mixing style.
+The Skill is written in English for LLM compatibility. It teaches the model how to call Analyzer tools and understand measurements; it does not impose a specific mixing style or stereo-processing recipe.
+
+AI Audio Analyzer 0.8 adds deeper Mid/Side and stereo measurement internally. No additional installation step is required.
 
 ## FL Studio cannot find the plugin
 
