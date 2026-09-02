@@ -31,9 +31,65 @@ jobs:
       - name: Check Python bridge syntax
         run: python -m py_compile bridge/server.py
 
-      - name: Upload VST3 artifact
+      - name: Package macOS
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf dist
+          mkdir -p dist
+
+          VST3_PATH="$(find build/AIAnalyzer_artefacts -type d -name 'AI Analyzer.vst3' -print -quit)"
+          if [ -z "$VST3_PATH" ]; then
+            echo "AI Analyzer.vst3 bundle not found" >&2
+            exit 1
+          fi
+
+          # Keep the installable macOS VST3 bundle as a top-level item.
+          ditto "$VST3_PATH" "dist/AI Analyzer.vst3"
+
+          # The bridge is a separate archive so users can place it anywhere.
+          (
+            cd bridge
+            zip -9 -r ../dist/bridge.zip \
+              server.py \
+              requirements.txt \
+              cherry-studio.example.json
+          )
+
+          echo "Package contents:"
+          find dist -maxdepth 3 -print
+
+      - name: Package Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (Test-Path dist) { Remove-Item dist -Recurse -Force }
+          New-Item -ItemType Directory -Path dist | Out-Null
+
+          $vst3 = Get-ChildItem -Path build/AIAnalyzer_artefacts -Recurse -Directory -Filter 'AI Analyzer.vst3' | Select-Object -First 1
+          if (-not $vst3) {
+            throw 'AI Analyzer.vst3 bundle not found'
+          }
+
+          # Keep the complete installable VST3 package, including Contents/resources.
+          Copy-Item -Path $vst3.FullName -Destination 'dist/AI Analyzer.vst3' -Recurse
+
+          Compress-Archive -Path \
+            'bridge/server.py', \
+            'bridge/requirements.txt', \
+            'bridge/cherry-studio.example.json' \
+            -DestinationPath 'dist/bridge.zip' \
+            -CompressionLevel Optimal
+
+          Write-Host 'Package contents:'
+          Get-ChildItem -Path dist -Recurse | Select-Object FullName
+
+      - name: Upload install package
         uses: actions/upload-artifact@v4
         with:
           name: AI-Analyzer-${{ runner.os }}
-          path: build/AIAnalyzer_artefacts/**/VST3/**
+          path: dist/
           if-no-files-found: error
+          include-hidden-files: true
