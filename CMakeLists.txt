@@ -36,6 +36,8 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(libebur128)
 
+# Keep the internal target, manufacturer code and plugin code stable so existing
+# DAW projects are less likely to lose the plugin after this user-facing rename.
 juce_add_plugin(AIAnalyzer
     COMPANY_NAME "DebuNeko233"
     BUNDLE_ID "com.debuneko.aianalyzer"
@@ -48,7 +50,7 @@ juce_add_plugin(AIAnalyzer
     PLUGIN_MANUFACTURER_CODE Dbnk
     PLUGIN_CODE Aian
     FORMATS VST3
-    PRODUCT_NAME "AI Analyzer"
+    PRODUCT_NAME "AI Audio Analyzer"
 )
 
 juce_generate_juce_header(AIAnalyzer)
