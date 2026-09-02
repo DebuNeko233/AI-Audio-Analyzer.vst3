@@ -100,6 +100,7 @@ void AnalysisWorker::setOscConfig(juce::String instanceId, juce::String host, in
     }
 
     configDirty.store(true, std::memory_order_release);
+    notify();
 }
 
 bool AnalysisWorker::getLatestFrame(AnalysisFrame& destination) const
@@ -182,7 +183,7 @@ void AnalysisWorker::updateSignalState()
     for (int i = 0; i < kHopSize; ++i)
     {
         peak = std::max(peak, std::max(std::abs(hopLeft[static_cast<std::size_t>(i)]),
-                                      std::abs(hopRight[static_cast<std::size_t>(i)])));
+                                      std::abs(hopRight[static_cast<std::size_t>(i)]))));
     }
 
     detectorPeakDb = amplitudeToDb(peak);
@@ -513,6 +514,16 @@ void AnalysisWorker::sendFrame(const AnalysisFrame& frame)
     oscSender.send(message);
 }
 
+void AnalysisWorker::sendIdentify()
+{
+    juce::OSCMessage message("/aianalyzer/identify");
+    message.addString(runtimeUuid);
+    message.addString(activeConfig.instanceId);
+    message.addFloat32(static_cast<float>(juce::Time::getMillisecondCounterHiRes() / 1000.0));
+    message.addString("0.4");
+    oscSender.send(message);
+}
+
 void AnalysisWorker::run()
 {
     resetAnalysisState();
@@ -522,6 +533,15 @@ void AnalysisWorker::run()
     {
         if (resetRequested.exchange(false, std::memory_order_acq_rel))
             resetAnalysisState();
+
+        // Identify must work even while the transport is stopped and no audio
+        // is reaching the plugin. Keep the request pending until OSC is ready.
+        refreshOscConnectionIfNeeded();
+        if (identifyRequested.load(std::memory_order_acquire) && oscConnected)
+        {
+            if (identifyRequested.exchange(false, std::memory_order_acq_rel))
+                sendIdentify();
+        }
 
         if (fifo.available() < static_cast<std::size_t>(kHopSize))
         {
