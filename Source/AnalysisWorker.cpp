@@ -15,6 +15,12 @@ constexpr double kOscIntervalMs = 100.0; // 10 Hz network update rate
 constexpr float kTemporalLowBandMinHz = 40.0f;
 constexpr float kTemporalLowBandMaxHz = 160.0f;
 constexpr float kStereoLowBandMaxHz = 120.0f;
+constexpr float kChromaMinFrequencyHz = 80.0f;
+constexpr float kChromaMaxFrequencyHz = 5000.0f;
+constexpr float kHarmonicFundamentalMinHz = 55.0f;
+constexpr float kHarmonicFundamentalMaxHz = 1000.0f;
+constexpr int kMaxSemanticHarmonics = 8;
+constexpr int kHarmonicToleranceBins = 1;
 
 // Treat material below -50 dBFS as absent, but use hysteresis and a short hold
 // to avoid chattering when a tail hovers around the threshold.
@@ -39,6 +45,18 @@ int stereoBandForFrequency(float frequencyHz)
             return band;
     }
     return -1;
+}
+
+int pitchClassForFrequency(double frequencyHz) noexcept
+{
+    if (!(frequencyHz > 0.0) || !std::isfinite(frequencyHz))
+        return 0;
+
+    const auto midi = 69.0 + 12.0 * std::log2(frequencyHz / 440.0);
+    auto pitchClass = static_cast<int>(std::lround(midi)) % kNumChromaBins;
+    if (pitchClass < 0)
+        pitchClass += kNumChromaBins;
+    return pitchClass;
 }
 
 float amplitudeRatioToDb(double numerator, double denominator) noexcept
@@ -382,6 +400,7 @@ void AnalysisWorker::processWindow()
     std::array<double, kNumStereoCorrelationBands> bandRightPower {};
     std::array<double, kNumStereoCorrelationBands> bandMidPower {};
     std::array<double, kNumStereoCorrelationBands> bandSidePower {};
+    std::array<double, kNumChromaBins> chromaPower {};
 
     double negativeCrossWeight = 0.0;
     double totalCrossWeight = 0.0;
@@ -390,6 +409,7 @@ void AnalysisWorker::processWindow()
     double lowBandRightPower = 0.0;
     double lowBandMidPower = 0.0;
     double lowBandSidePower = 0.0;
+    double chromaPowerTotal = 0.0;
 
     const int firstBin = std::max(1, static_cast<int>(std::ceil(kMinFrequencyHz * kFftSize / currentSampleRate)));
     const int lastBin = std::min(numBins - 1,
@@ -513,6 +533,13 @@ void AnalysisWorker::processWindow()
         logMagnitude += std::log(static_cast<double>(magnitude));
         ++flatnessBins;
 
+        if (frequency >= kChromaMinFrequencyHz && frequency <= kChromaMaxFrequencyHz)
+        {
+            const auto pitchClass = pitchClassForFrequency(frequency);
+            chromaPower[static_cast<std::size_t>(pitchClass)] += power;
+            chromaPowerTotal += power;
+        }
+
         totalCrossWeight += bilateralWeight;
         if (cross < 0.0)
             negativeCrossWeight += bilateralWeight;
@@ -536,6 +563,104 @@ void AnalysisWorker::processWindow()
             bandMidPower[b] += midPower;
             bandSidePower[b] += sidePower;
         }
+    }
+
+    if (chromaPowerTotal > 1.0e-18)
+    {
+        for (int pitchClass = 0; pitchClass < kNumChromaBins; ++pitchClass)
+        {
+            frame.chroma[static_cast<std::size_t>(pitchClass)] = juce::jlimit(
+                0.0f,
+                1.0f,
+                static_cast<float>(chromaPower[static_cast<std::size_t>(pitchClass)] / chromaPowerTotal));
+        }
+    }
+    frame.chromaEnergyRatio = totalPower > 1.0e-18
+        ? juce::jlimit(0.0f, 1.0f, static_cast<float>(chromaPowerTotal / totalPower))
+        : 0.0f;
+
+    const auto semanticMaxHz = std::min(
+        static_cast<double>(kChromaMaxFrequencyHz),
+        currentSampleRate * 0.5);
+    const int firstF0Bin = std::max(
+        1,
+        static_cast<int>(std::ceil(kHarmonicFundamentalMinHz * kFftSize / currentSampleRate)));
+    const int lastF0Bin = std::min(
+        numBins - 1,
+        static_cast<int>(std::floor(std::min(
+            static_cast<double>(kHarmonicFundamentalMaxHz),
+            semanticMaxHz * 0.5) * kFftSize / currentSampleRate)));
+
+    double bestHarmonicScore = 0.0;
+    int bestF0Bin = 0;
+    for (int candidateBin = firstF0Bin; candidateBin <= lastF0Bin; ++candidateBin)
+    {
+        const auto f0Hz = static_cast<double>(candidateBin) * currentSampleRate / kFftSize;
+        double weightedPeakPower = 0.0;
+        double totalWeight = 0.0;
+        int harmonicCount = 0;
+
+        for (int harmonic = 1; harmonic <= kMaxSemanticHarmonics; ++harmonic)
+        {
+            const auto targetHz = f0Hz * harmonic;
+            if (targetHz > semanticMaxHz)
+                break;
+
+            const auto targetBin = static_cast<int>(std::lround(targetHz * kFftSize / currentSampleRate));
+            double localPeakPower = 0.0;
+            for (int delta = -kHarmonicToleranceBins; delta <= kHarmonicToleranceBins; ++delta)
+            {
+                const auto bin = targetBin + delta;
+                if (bin < firstBin || bin > lastBin)
+                    continue;
+                const auto value = static_cast<double>(midMagnitudes[static_cast<std::size_t>(bin)]);
+                localPeakPower = std::max(localPeakPower, value * value);
+            }
+
+            const auto weight = 1.0 / static_cast<double>(harmonic);
+            weightedPeakPower += localPeakPower * weight;
+            totalWeight += weight;
+            ++harmonicCount;
+        }
+
+        if (harmonicCount < 2 || totalWeight <= 0.0)
+            continue;
+
+        const auto score = weightedPeakPower / totalWeight;
+        if (score > bestHarmonicScore)
+        {
+            bestHarmonicScore = score;
+            bestF0Bin = candidateBin;
+        }
+    }
+
+    if (bestF0Bin > 0 && chromaPowerTotal > 1.0e-18)
+    {
+        const auto f0Hz = static_cast<double>(bestF0Bin) * currentSampleRate / kFftSize;
+        double matchedHarmonicPower = 0.0;
+
+        for (int harmonic = 1; harmonic <= kMaxSemanticHarmonics; ++harmonic)
+        {
+            const auto targetHz = f0Hz * harmonic;
+            if (targetHz > semanticMaxHz)
+                break;
+
+            const auto targetBin = static_cast<int>(std::lround(targetHz * kFftSize / currentSampleRate));
+            for (int delta = -kHarmonicToleranceBins; delta <= kHarmonicToleranceBins; ++delta)
+            {
+                const auto bin = targetBin + delta;
+                if (bin < firstBin || bin > lastBin)
+                    continue;
+                const auto value = static_cast<double>(midMagnitudes[static_cast<std::size_t>(bin)]);
+                matchedHarmonicPower += value * value;
+            }
+        }
+
+        frame.singleF0HarmonicEnergyRatio = juce::jlimit(
+            0.0f,
+            1.0f,
+            static_cast<float>(matchedHarmonicPower / chromaPowerTotal));
+        frame.harmonicF0CandidateHz = static_cast<float>(f0Hz);
     }
 
     frame.negativeCrossEnergyRatio = totalCrossWeight > 1.0e-18
@@ -602,10 +727,10 @@ void AnalysisWorker::processWindow()
         frame.bandSideToMidDb[b] = powerRatioToDb(bandSidePower[b], bandMidPower[b]);
     }
 
-    // Once the signal gate has closed, spectral/stereo/temporal values are
-    // explicitly treated as invalid machine features instead of leaving random
-    // near-noise values in the stream. Peak/RMS, LUFS-I and session max TP are
-    // retained because they still describe detector/session state.
+    // Once the signal gate has closed, spectral/stereo/temporal/semantic values
+    // are explicitly treated as invalid machine features instead of leaving
+    // random near-noise values in the stream. Peak/RMS, LUFS-I and session max
+    // TP are retained because they still describe detector/session state.
     if (!signalPresent)
     {
         frame.spectralCentroidHz = 0.0f;
@@ -624,6 +749,10 @@ void AnalysisWorker::processWindow()
         frame.negativeCrossEnergyRatio = 0.0f;
         frame.lowBandCorrelation = 0.0f;
         frame.lowBandSideToMidDb = 0.0f;
+        frame.chroma.fill(0.0f);
+        frame.chromaEnergyRatio = 0.0f;
+        frame.singleF0HarmonicEnergyRatio = 0.0f;
+        frame.harmonicF0CandidateHz = 0.0f;
         frame.bandsDb.fill(kFloorDb);
         frame.bandStereoCorrelation.fill(0.0f);
         frame.sideBandsDb.fill(kFloorDb);
@@ -748,6 +877,17 @@ void AnalysisWorker::sendFrame(const AnalysisFrame& frame)
     for (const auto sideToMidDb : frame.bandSideToMidDb)
         message.addFloat32(sideToMidDb);
     message.addString("0.8");
+
+    // V0.9 music-semantic evidence. Existing indices 0..111 remain unchanged.
+    // Chroma is normalized pitch-class power from the 80 Hz-5 kHz Mid spectrum;
+    // the single-F0 harmonic ratio/candidate are explicit heuristics rather than
+    // note/key ground truth.
+    for (const auto chromaValue : frame.chroma)
+        message.addFloat32(chromaValue);
+    message.addFloat32(frame.chromaEnergyRatio);
+    message.addFloat32(frame.singleF0HarmonicEnergyRatio);
+    message.addFloat32(frame.harmonicF0CandidateHz);
+    message.addString("0.9");
 
     oscSender.send(message);
 }
