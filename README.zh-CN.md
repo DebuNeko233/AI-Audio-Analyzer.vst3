@@ -176,89 +176,42 @@ audio_project_masking_scan()
 
 ## MCP 工具
 
-MCP 0.7 共 **20 个工具**：
+MCP 0.7 共 **20 个工具**，其中历史的 `audio_detect_masking()` 仍是频谱重叠 heuristic；更完整的两轨证据优先用 `audio_masking_evidence()`。
 
-```text
-audio_bridge_status()
-audio_list_tracks()
-audio_last_identify()
-audio_bind_last_identified(...)
-audio_instance_map()
-audio_snapshot(track)
-audio_average(track, seconds)
-audio_stereo_bands(track)
-audio_compare_tracks(track_a, track_b)
-audio_detect_masking(track_a, track_b)
-audio_master_status(track="Master")
-audio_project_status()
-audio_mix_overview(seconds=10, max_tracks=32)
-audio_capture_snapshot(name, seconds=5)
-audio_list_snapshots()
-audio_compare_snapshots(before, after)
-audio_temporal_profile(track, seconds=5)
-audio_temporal_compare(...)
-audio_masking_evidence(...)
-audio_project_masking_scan(...)
-```
-
-历史的 `audio_detect_masking()` 仍是频谱重叠 heuristic。更完整的当前两轨证据优先用 `audio_masking_evidence()`。
-
-## 推荐调用路径
+推荐调用路径：
 
 ```text
 audio_project_status()
     ↓
 audio_mix_overview()
     ↓
-audio_project_masking_scan()      # 需要工程级 interaction candidates 时
+audio_project_masking_scan()
     ↓
-audio_masking_evidence(a, b)      # 两轨详细 ERB region evidence
+audio_masking_evidence(a, b)
     ↓
-audio_temporal_compare(a, b, ...) # 需要自定义频段时间下钻时
+audio_temporal_compare(a, b, ...)
 ```
 
 不要为了“完整”而机械调用所有工具。
 
 ## 用户安装
 
-推荐使用 GitHub **Release 懒人包**，普通用户无需手动搭 Python 环境。
-
-当前 Release 平台：
+推荐使用 GitHub **Release 懒人包**。当前 Release 平台：
 
 ```text
 Windows x64
 macOS Apple Silicon arm64
 ```
 
-不提供 Intel/x86_64 macOS 包。
+不提供 Intel/x86_64 macOS 包。正常安装**不需要 Python、pip、venv 或 PyPI**。
 
-懒人包大致包含：
-
-```text
-AI Audio Analyzer.vst3
-mcp/
-├─ runtime/    PyInstaller standalone MCP
-└─ source/     Python 源码 fallback
-skill/
-START-HERE.md
-INSTALL.en.md
-INSTALL.zh-CN.md
-平台安装脚本
-```
-
-正常安装**不需要 Python、pip、venv 或 PyPI**。
-
-### Windows
-
-运行：
+Windows 运行：
 
 ```text
 Install.cmd
 ```
 
-### macOS Apple Silicon
-
-运行：
+macOS Apple Silicon 运行：
 
 ```text
 Install.command
@@ -270,42 +223,47 @@ Install.command
 bash ./install.sh
 ```
 
-当前 macOS 包是 ad-hoc 签名，**不是 Apple Developer ID Notarization**；安装器负责处理现有 Quarantine / Gatekeeper 问题。
+当前 macOS 包是 ad-hoc 签名，**不是 Apple Developer ID Notarization**。
 
-完整说明位于 Release 包内。
+## MCP 源码结构与唯一入口
 
-## 开发者 / 源码 MCP
+以后不再使用 `server_v05.py / server_v06.py / server_v07.py` 这种版本化启动文件。
 
-当前源码入口：
+唯一支持的源码 / PyInstaller 入口始终是：
 
 ```text
-bridge/server_v07.py
+bridge/server.py
 ```
 
-建议 Python 3.12：
+版本号作为元数据存在：
+
+```text
+MCP version          0.7
+OSC protocol version 0.6
+```
+
+内部按职责拆分：
+
+```text
+bridge/server.py          唯一启动 / self-test / tool registry 入口
+bridge/analyzer_core.py   稳定 OSC 状态、身份映射、基础测量和基础工具
+bridge/project_tools.py   工程 Overview / Snapshot A-B
+bridge/temporal_tools.py  V0.6 Temporal 解析与比较
+bridge/masking_tools.py   V0.7 Masking Evidence
+```
+
+源码模式建议 Python 3.12：
 
 ```bash
 python3.12 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r bridge/requirements.txt
-AI_ANALYZER_SELF_TEST=1 python bridge/server_v07.py
+AI_ANALYZER_SELF_TEST=1 python bridge/server.py
 ```
 
 Windows 使用对应 `.venv\Scripts\Activate.ps1`。
 
-源码模式只用于开发、调试和特殊 fallback。普通用户优先使用 PyInstaller Runtime。
-
-## Cherry Studio
-
-源码示例：
-
-```text
-bridge/cherry-studio.example.json
-```
-
-现在指向 `server_v07.py`。Release 自动安装器生成的配置则直接指向 standalone MCP executable。
-
-不要同时手动运行一个 Bridge，再让 Cherry Studio 启动第二个 Bridge 占用同一 UDP 端口。
+`bridge/cherry-studio.example.json` 也统一指向 `bridge/server.py`。Release 自动安装器生成的配置则直接指向 standalone MCP executable。
 
 ## Skill
 
@@ -328,12 +286,6 @@ references/masking-evidence.md
 Skill 只负责工具调用、selector/mapping、有效性、参数语义、Temporal/Masking Evidence 限制；不预设混音审美。
 
 ## OSC 协议
-
-Analysis 地址：
-
-```text
-/aianalyzer/frame
-```
 
 V0.7 不增加新字段，继续沿用 V0.6 append-only frame：
 
@@ -367,16 +319,6 @@ V0.7 不增加新字段，继续沿用 V0.6 append-only frame：
 64     frame_schema_version = "0.6"
 ```
 
-Identify 地址：
-
-```text
-/aianalyzer/identify
-```
-
-## 实时线程原则
-
-Audio Callback 不做 FFT、响度、OSC、MCP、文件或网络 I/O，也不做重量级分配。Audio 只写入预分配 SPSC FIFO，其余分析在后台线程完成。
-
 ## 当前限制
 
 - V0.7 ERB 只是基于已有 32-band feature 的 re-binning，不是真正 auditory filterbank；
@@ -390,7 +332,9 @@ Audio Callback 不做 FFT、响度、OSC、MCP、文件或网络 I/O，也不做
 
 ```text
 Source/                         JUCE VST3
-bridge/                         MCP 源码层
+bridge/server.py                唯一 MCP 入口
+bridge/analyzer_core.py         稳定内部 Core
+bridge/*_tools.py               功能模块
 skills/ai-analyzer-flstudio/    英文 LLM-facing Skill
 release/                        懒人包安装器 / 文档
 .github/workflows/build.yml     开发 CI
