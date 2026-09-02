@@ -12,6 +12,7 @@ PLUGIN_DEST="$PLUGIN_ROOT/AI Audio Analyzer.vst3"
 INSTALL_ROOT="$HOME/Library/Application Support/AI Audio Analyzer"
 VENV_ROOT="$INSTALL_ROOT/venv"
 PYPI_MODE="${AI_ANALYZER_PYPI:-auto}"
+PYTHON=""
 
 find_python() {
   local c
@@ -37,7 +38,7 @@ setup_brew_path() {
 install_python_if_needed() {
   local python_path
   if python_path="$(find_python)"; then
-    printf '%s\n' "$python_path"
+    PYTHON="$python_path"
     return 0
   fi
 
@@ -47,7 +48,7 @@ install_python_if_needed() {
     brew install python@3.12
     setup_brew_path
     if python_path="$(find_python)"; then
-      printf '%s\n' "$python_path"
+      PYTHON="$python_path"
       return 0
     fi
   fi
@@ -61,7 +62,7 @@ install_python_if_needed() {
         setup_brew_path
         brew install python@3.12
         if python_path="$(find_python)"; then
-          printf '%s\n' "$python_path"
+          PYTHON="$python_path"
           return 0
         fi
         ;;
@@ -133,7 +134,7 @@ for doc in START-HERE.md INSTALL.en.md INSTALL.zh-CN.md; do
 done
 
 step 'Checking Python'
-PYTHON="$(install_python_if_needed)"
+install_python_if_needed
 echo "Python: $PYTHON"
 "$PYTHON" -c "import sys; print('Python', sys.version)"
 
