@@ -2,141 +2,181 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-**AI Audio Analyzer** is a JUCE VST3 + MCP measurement layer for AI/LLM-assisted music-production workflows. The VST3 measures audio inside the DAW, the MCP exposes structured measurements to a model, and the bundled Skill teaches correct tool usage and parameter semantics without imposing a mixing style.
+**AI Audio Analyzer** is a JUCE VST3 designed as a machine-readable audio measurement layer for AI/LLM-assisted music-production workflows.
 
-Current product version: **0.6.0**.
+Instead of asking an LLM to visually inspect an analyzer UI, the plugin measures audio inside the DAW, sends compact OSC frames to a Python MCP Bridge, and exposes structured level, loudness, spectrum, stereo, temporal, project, A/B, and masking-evidence data to Cherry Studio or another MCP client.
 
-## Project structure
+Current product version: **0.7.0**.
+
+## Project components
 
 ```text
 AI Audio Analyzer
-├─ VST3    realtime-safe audio measurement inside the DAW
-├─ MCP     machine-readable measurement / comparison tools
-└─ Skill   MCP calling strategy + parameter semantics
+├─ VST3    real-time-safe measurement probe inside the DAW
+├─ MCP     structured access to Analyzer measurements
+└─ Skill   English LLM-facing instructions for correct MCP use and parameter semantics
 ```
 
-For FL Studio control, use a separate control MCP. The workflow is designed to pair with:
+The Skill is intentionally **not** a style-specific mixing guide. It does not encode fixed LUFS targets, EQ/compression/sidechain recipes, or mastering chains.
+
+## Companion FL Studio MCP
+
+For DAW topology/control, the current workflow pairs Analyzer MCP with:
 
 **[rosasynthesiz/flstudio-mcp](https://github.com/rosasynthesiz/flstudio-mcp)**
+
+Responsibilities remain separate:
 
 ```text
 AI Audio Analyzer MCP   → observe / measure / compare / verify
 FL Studio MCP           → inspect / control / modify FL Studio
 ```
 
-The Analyzer itself intentionally stays measurement-oriented. Its Skill does not encode fixed LUFS targets, EQ recipes, mandatory sidechain rules, or other style-specific mixing policies.
+A typical closed loop is:
+
+```text
+OBSERVE → REASON → CHANGE → READBACK → COMPARE
+```
 
 ## Architecture
 
 ```text
 FL Studio / DAW
 │
-├─ Mixer Track A ─ AI Audio Analyzer.vst3
-├─ Mixer Track B ─ AI Audio Analyzer.vst3
-└─ Master        ─ AI Audio Analyzer.vst3
-                      │
-                      │ OSC UDP 127.0.0.1:9855
-                      ▼
-              AI Audio Analyzer MCP
-              ├─ live-instance registry
-              ├─ signal validity
-              ├─ deterministic FL Track/Slot bindings
-              ├─ recent-history windows
-              ├─ project overview / A-B snapshots
-              └─ temporal comparison
-                      │
-                      ▼
-               Cherry Studio / LLM
+├─ Mixer Track A
+│   └─ AI Audio Analyzer.vst3
+├─ Mixer Track B
+│   └─ AI Audio Analyzer.vst3
+└─ Master
+    └─ AI Audio Analyzer.vst3
+             │
+             │ OSC UDP, default 127.0.0.1:9855
+             ▼
+        Analyzer MCP Bridge
+        ├─ live instance registry
+        ├─ recent history
+        ├─ signal validity
+        ├─ deterministic FL Track/Slot bindings
+        ├─ project overview / Snapshot A-B
+        ├─ V0.6 temporal evidence
+        └─ V0.7 masking evidence
+             │
+             ▼
+      Cherry Studio / LLM
 ```
 
-The audio callback only copies samples into a preallocated SPSC FIFO. FFT, loudness analysis, temporal analysis, OSC and MCP work stay off the realtime audio thread.
+All Analyzer instances may send to the same UDP port. Only one MCP Bridge process should bind UDP `9855`.
 
-## Current capabilities
+## Measurement capabilities
 
-### Core measurements
+### Core spectrum / dynamics / loudness
 
-- 4096-point FFT, Hann window, 1024-sample hop
-- 32 logarithmic spectrum bands from 20 Hz to 20 kHz
-- Sample Peak dBFS / RMS dBFS / Crest Factor
-- LUFS-S / LUFS-I through `libebur128`
-- current and session-max True Peak dBTP
-- Spectral Centroid / 85% Rolloff / Flatness
+- 4096-point FFT, Hann window
+- 1024-sample analysis hop
+- 32 log-spaced 20 Hz–20 kHz spectrum features
+- Sample Peak dBFS
+- RMS dBFS
+- Crest Factor
+- LUFS-S
+- LUFS-I with EBU R128 gating
+- current True Peak dBTP
+- session maximum True Peak
+- Spectral Centroid
+- ~85% Spectral Rolloff
+- Spectral Flatness
 - full-band Stereo Correlation
 - Mid/Side width ratio
-- 8 band-limited stereo-correlation values
+- 8-band Stereo Correlation
 
-### V0.3 signal validity
+Loudness and True Peak use `libebur128`.
+
+### V0.3 Signal State
+
+Approximate gate behavior:
 
 ```text
-gate close   below about -50 dBFS for ~0.4 s
-gate reopen  above about -48 dBFS
+close   below -50 dBFS for ~0.4 s
+reopen  above -48 dBFS
 ```
 
-When `signal_present=false`, content-dependent spectrum/stereo measurements are returned as unavailable instead of misleading zeroes. `null` means unavailable, not numeric zero.
+When `signal_present=false`, content-dependent spectrum/stereo measurements become unavailable instead of returning misleading zeroes.
 
-### V0.4 deterministic multi-instance mapping
+`null` means **unavailable**, not numeric zero.
 
-Each live VST3 instance has a session-scoped runtime UUID. The plugin also exposes a host-visible Boolean parameter:
+### V0.4 deterministic Analyzer ↔ FL Mixer mapping
+
+Each live Analyzer has a session runtime UUID and exposes a host-visible Boolean parameter:
 
 ```text
 Parameter ID: identify
 Display name: Identify
 ```
 
-Every state transition sends `/aianalyzer/identify`. An agent that knows which FL Mixer Track/Slot it just operated can bind that host location to the emitted runtime UUID:
+Every Identify transition emits `/aianalyzer/identify`, including while transport is stopped.
 
-```text
-FL Mixer Track / Slot
-        ↕
-Analyzer runtime UUID
-```
-
-After discovery, prefer selectors such as:
+A controller can bind the emitted runtime UUID to a known FL Mixer Track/Slot and then use selectors such as:
 
 ```text
 mixer:7/slot:9
 ```
 
-instead of guessing from duplicate display names or audio content.
+This avoids guessing from duplicate display names or audio content.
 
-### V0.5 project intelligence and A/B
+### V0.5 project intelligence / Snapshot A-B
 
-The MCP adds project-level readiness, recent-window overview and session-memory snapshots so an agent does not need a long chain of low-level calls for every task.
+Project-level tools provide readiness, recent mix overview, and session-scoped Before/After snapshots.
 
 ### V0.6 temporal analysis
 
-VST3 0.6 computes temporal descriptors at the internal FFT-hop rate and aggregates them into the ~10 Hz OSC stream:
+The VST3 computes temporal descriptors at the internal analysis hop and aggregates them into the ~10 Hz OSC stream:
 
 ```text
 temporal_window_seconds
 spectral_flux_mean
 spectral_flux_peak
 rms_rise_peak_db
-low_band_energy_db   # FFT-derived 40–160 Hz energy
+low_band_energy_db   # FFT-derived 40–160 Hz feature
 ```
 
-The MCP adds:
+MCP can summarize one track with `audio_temporal_profile()` or align two Analyzer streams with `audio_temporal_compare()`.
+
+Temporal overlap/correlation is evidence of time co-occurrence/co-variation, not a masking probability or processing instruction.
+
+### V0.7 stronger masking evidence
+
+V0.7 is primarily a Bridge/MCP evidence layer. It reuses the V0.6 VST3 measurements and does **not** add new OSC fields.
+
+Current model:
 
 ```text
-audio_temporal_profile(track, seconds=5)
-audio_temporal_compare(track_a, track_b, seconds=5,
-                       low_hz=40, high_hz=160,
-                       alignment_tolerance_ms=80)
+existing 32 Analyzer spectrum features
+→ 16 equal ERB-rate regions
+→ relative spectral occupancy
+→ directional relative-level weighting
+→ V0.6 temporal overlap
+→ region-level masking evidence
 ```
 
-`audio_temporal_profile()` summarizes spectral change, rapid RMS rise, 40–160 Hz energy movement, and threshold-based onset/change candidates.
+Important limitation: this is **equal-ERB-rate re-binning**, not a gammatone/cochlear filterbank and not a calibrated psychoacoustic hearing-threshold model.
 
-`audio_temporal_compare()` time-aligns two Analyzer streams and reports selected-band envelope correlation, co-active ratio and normalized temporal overlap. These are measurement/heuristic evidence, not automatic mixing instructions or a complete psychoacoustic masking probability.
+V0.7 adds:
+
+```text
+audio_masking_evidence()
+audio_project_masking_scan()
+```
+
+Scores are transparent heuristic evidence for ranking/querying candidates. They are **not** probabilities of audible masking and do not prescribe EQ, sidechain, compression, or any other mix action.
 
 ## MCP tools
 
-MCP 0.6 exposes **18 tools**:
+MCP 0.7 exposes **20 tools**:
 
 ```text
 audio_bridge_status()
 audio_list_tracks()
 audio_last_identify()
-audio_bind_last_identified(fl_track_index, fl_track_name, slot)
+audio_bind_last_identified(...)
 audio_instance_map()
 audio_snapshot(track)
 audio_average(track, seconds)
@@ -150,133 +190,159 @@ audio_capture_snapshot(name, seconds=5)
 audio_list_snapshots()
 audio_compare_snapshots(before, after)
 audio_temporal_profile(track, seconds=5)
-audio_temporal_compare(track_a, track_b, seconds=5,
-                       low_hz=40, high_hz=160,
-                       alignment_tolerance_ms=80)
+audio_temporal_compare(...)
+audio_masking_evidence(...)
+audio_project_masking_scan(...)
 ```
 
-`audio_detect_masking()` remains heuristic spectral-overlap evidence. V0.6 temporal tools add timing evidence but still do not turn the Analyzer into a full psychoacoustic masking model.
+The historical `audio_detect_masking()` remains a spectrum-only heuristic. Prefer `audio_masking_evidence()` for the stronger current pairwise evidence model.
 
-## Recommended user installation
+## Recommended query progression
 
-User-facing Releases are separate from development artifacts.
+```text
+audio_project_status()
+    ↓
+audio_mix_overview()
+    ↓
+audio_project_masking_scan()      # when interaction candidates matter
+    ↓
+audio_masking_evidence(a, b)      # detailed pair evidence
+    ↓
+audio_temporal_compare(a, b, ...) # custom-band time drill-down when needed
+```
 
-Current supported Release platforms:
+Do not mechanically call every tool if a higher-level result already answers the question.
+
+## User installation
+
+The recommended user path is the GitHub **Release lazy package**, not manual Python setup.
+
+Current Release targets:
 
 ```text
 Windows x64
 macOS Apple Silicon arm64
 ```
 
-**Intel macOS / x86_64 is not packaged.**
+Intel/x86_64 macOS is not packaged.
 
-A Release contains:
+Each Release contains roughly:
 
 ```text
 AI Audio Analyzer.vst3
 mcp/
-├─ runtime/   standalone PyInstaller MCP
-└─ source/    Python source fallback
+├─ runtime/    PyInstaller standalone MCP
+└─ source/     Python source fallback
 skill/
 START-HERE.md
 INSTALL.en.md
 INSTALL.zh-CN.md
-platform installer scripts
+platform installer script(s)
 ```
 
-Normal users do **not** need to install Python, pip, a virtual environment, MCP SDK, or access PyPI.
+Normal users do **not** need to install Python, pip, a virtual environment, or access PyPI. The standalone MCP runtime is built with PyInstaller.
 
 ### Windows
 
-Extract the Release and double-click:
+Run:
 
 ```text
 Install.cmd
 ```
 
-The installer copies the VST3 to the standard VST3 location, installs the standalone MCP under the current user, runs its self-test, copies the Skill, and generates `cherry-studio-mcp.json`.
+The VST3 is installed to the standard VST3 location and MCP/Skill files remain under the current user's application-data directory.
 
 ### macOS Apple Silicon
 
-Extract the Release and double-click:
+Run:
 
 ```text
 Install.command
 ```
 
-If Gatekeeper blocks the script itself, right-click it and choose **Open**, or run:
+If Gatekeeper blocks the downloaded script, right-click → **Open**, or run:
 
 ```bash
 bash ./install.sh
 ```
 
-The installer copies the arm64 VST3, removes quarantine metadata where possible, verifies/repairs the local ad-hoc signature, installs the standalone arm64 MCP, runs its self-test, copies the Skill, and generates `cherry-studio-mcp.json`.
+Current macOS builds are ad-hoc signed, **not Apple Developer ID notarized**. The installer handles current quarantine/Gatekeeper requirements.
 
-Current GitHub builds are ad-hoc signed and are **not Apple Developer ID notarized**.
+Full instructions are inside each Release package.
 
-Full instructions are included in every Release package under `INSTALL.en.md` and `INSTALL.zh-CN.md`.
+## MCP source layout and entrypoint
 
-## Developer / source MCP fallback
+There is exactly one supported MCP source/PyInstaller entrypoint:
 
-The normal Release path uses the PyInstaller executable. Source mode is for development or unusual fallback cases.
+```text
+bridge/server.py
+```
 
-Requirements:
+Version numbers are metadata, not entrypoint filenames:
 
-- Python 3.10+; Python 3.12 recommended
-- dependencies from `bridge/requirements.txt`
+```text
+MCP version          0.7
+OSC protocol version 0.6
+```
+
+Internal implementation is split by responsibility:
+
+```text
+bridge/server.py          single startup / self-test / tool registry entrypoint
+bridge/analyzer_core.py   stable OSC state, identity, base measurements and base tools
+bridge/project_tools.py   project overview and Snapshot A-B
+bridge/temporal_tools.py  V0.6 temporal parsing and comparison
+bridge/masking_tools.py   V0.7 masking-evidence layer
+```
+
+Python 3.12 is recommended for source mode:
 
 ```bash
 python3.12 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r bridge/requirements.txt
-AI_ANALYZER_SELF_TEST=1 python bridge/server_v06.py
+AI_ANALYZER_SELF_TEST=1 python bridge/server.py
 ```
 
-Windows PowerShell activation differs, but the entry point is still:
+Windows uses the equivalent `.venv\Scripts\Activate.ps1` flow.
+
+Source mode is a developer/debug fallback. Normal users should use the packaged runtime.
+
+## Cherry Studio source example
+
+`bridge/cherry-studio.example.json` points to `bridge/server.py`. The packaged installer instead generates a configuration whose `command` points directly to the standalone MCP executable.
+
+Do not run a manual Bridge process while Cherry Studio starts another copy on the same UDP port.
+
+## Skill
+
+The bundled Skill lives in:
 
 ```text
-bridge/server_v06.py
+skills/ai-analyzer-flstudio/
 ```
 
-`bridge/cherry-studio.example.json` contains a source-mode example.
-
-## Cherry Studio + FL Studio workflow
-
-For a new project/session:
+LLM-facing Skill files are English-only by project policy:
 
 ```text
-audio_project_status()
-↓
-if needed: Identify each Analyzer and bind Track/Slot
-↓
-audio_instance_map()
-↓
-use overview / average / temporal tools as needed
+SKILL.md
+README-CHERRY-STUDIO.md
+references/analyzer-mcp.md
+references/parameters.md
+references/masking-evidence.md
 ```
 
-When a model needs to compare before/after measurements:
-
-```text
-audio_capture_snapshot("before", 5)
-↓
-external DAW change through FL Studio MCP
-↓
-audio_capture_snapshot("after", 5)
-↓
-audio_compare_snapshots("before", "after")
-```
-
-The Analyzer Skill explains tool usage and measurement semantics; artistic decisions remain driven by user intent, musical context and the model's own reasoning.
+The Skill teaches tool use, selector/mapping rules, validity, parameter semantics, temporal evidence, and masking-evidence limitations. It does not prescribe a mixing aesthetic.
 
 ## OSC protocol
 
-Analysis frames use:
+Analysis address:
 
 ```text
 /aianalyzer/frame
 ```
 
-The protocol is append-only.
+The frame remains append-compatible. V0.7 adds no new OSC fields.
 
 ```text
 0      analyzer_name
@@ -308,123 +374,37 @@ The protocol is append-only.
 64     frame_schema_version = "0.6"
 ```
 
-Identify events remain:
+Identify address:
 
 ```text
 /aianalyzer/identify
 ```
 
-with the V0.4 identify schema. The Identify schema did not need to change for V0.6 temporal measurement.
+## Realtime design
 
-## Temporal semantics in brief
-
-- `spectral_flux_*`: normalized positive change in spectral distribution, intentionally less sensitive to simple overall gain scaling.
-- `rms_rise_peak_db`: largest positive adjacent-window RMS rise within the emitted temporal aggregate.
-- `low_band_energy_db`: FFT-derived 40–160 Hz energy feature, not calibrated SPL.
-- `band_envelope_correlation`: Pearson correlation of two time-aligned selected-band energy envelopes.
-- `normalized_band_temporal_overlap`: relative simultaneous selected-band occupancy after each track is normalized to its own window peak.
-- onset/change candidates are explicit heuristics with thresholds returned by the tool; they are not ground-truth annotated onsets.
-
-## Build from source
-
-Requirements:
-
-- CMake 3.22+
-- C++20 compiler
-- JUCE 8.0.8 fetched by CMake
-- libebur128 1.2.6 fetched by CMake
-
-macOS development/release policy is arm64:
-
-```bash
-cmake -S . -B build \
-  -DCMAKE_BUILD_TYPE=Release \
-  -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 \
-  -DCMAKE_OSX_ARCHITECTURES=arm64
-cmake --build build --config Release --parallel
-```
-
-Windows:
-
-```powershell
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build --config Release --parallel
-```
-
-## CI and Release
-
-Development CI is path-aware:
-
-```text
-Source/** / CMakeLists.txt
-→ rebuild VST3 on Windows + macOS arm64
-
-bridge/**
-→ validate/package MCP + Skill
-
-skills/**
-→ validate/package MCP + Skill
-
-release/** / release workflow
-→ installer/release validation
-
-docs only
-→ no VST3 rebuild
-```
-
-The manual user-facing Release workflow is:
-
-```text
-.github/workflows/release.yml
-```
-
-It builds standalone MCP runtimes, self-tests them, rebuilds platform VST3s, assembles lazy packages, generates SHA256 checksums and publishes/updates a GitHub Release.
+The audio callback does not perform FFT, loudness, OSC, MCP, allocation-heavy work, or file/network I/O. Audio samples are pushed into a preallocated SPSC FIFO and analyzed on a background worker thread.
 
 ## Current limitations
 
-- no LUFS-M output yet;
-- no Mid/Side spectra yet;
-- no chroma/key/pitch-class analysis yet;
-- masking remains heuristic evidence, not a complete Bark/ERB psychoacoustic model;
-- V0.6 temporal comparison is limited by the Analyzer OSC update cadence and alignment tolerance;
-- onset candidates are heuristic frame-level change candidates, not sample-accurate annotated onset events;
-- runtime UUIDs and FL bindings are session-scoped;
-- macOS Release is arm64 only and not notarized;
-- the plugin observes audio and does not intentionally alter the signal.
+- V0.7 ERB handling is feature re-binning, not a true auditory filterbank.
+- Masking evidence is heuristic and should not be presented as psychoacoustic ground truth.
+- Temporal stream alignment is limited by independent OSC timing/update resolution.
+- LUFS-I and session max True Peak are cumulative session measurements.
+- FL Mixer bindings are session-scoped and may need rediscovery after reopening/reinstantiating plugins.
+- macOS Release support is Apple Silicon only and currently not notarized.
 
 ## Repository layout
 
 ```text
-.
-├─ Source/                          VST3 source
-├─ bridge/
-│  ├─ server.py                     stable core bridge
-│  ├─ server_v05.py                 project-intelligence layer
-│  ├─ project_tools.py
-│  ├─ server_v06.py                 current MCP entry point
-│  └─ temporal_tools.py
-├─ skills/ai-analyzer-flstudio/     neutral MCP usage Skill
-├─ release/                         lazy-package installers/docs
-├─ .github/workflows/build.yml      development CI
-├─ .github/workflows/release.yml    manual Release workflow
-├─ CMakeLists.txt
-├─ AGENT.md                         agent/maintainer contract + roadmap
-├─ README.md
-└─ README.zh-CN.md
+Source/                         JUCE VST3
+bridge/server.py                single MCP entrypoint
+bridge/analyzer_core.py         stable internal MCP/OSC core
+bridge/*_tools.py               feature modules
+skills/ai-analyzer-flstudio/    English LLM-facing Skill
+release/                        lazy-package installers/docs
+.github/workflows/build.yml     development CI
+.github/workflows/release.yml   manual Release packaging
+AGENT.md                        agent/maintainer roadmap and rules
 ```
 
-## Version history / roadmap
-
-```text
-0.2   LUFS / True Peak / 8-band stereo correlation
-0.3   signal validity + runtime UUID
-0.4   Identify + deterministic FL Mixer Track/Slot mapping
-0.4.1 packaging / installer foundation
-0.5   project overview + snapshot A/B
-0.6   temporal descriptors + time-aligned band-envelope comparison
-
-next: 0.7 stronger masking evidence (Bark/ERB + level + temporal weighting)
-      0.8 deeper Mid/Side analysis
-      0.9 music-semantic measurements where audio inference is useful
-      1.0 reliable closed-loop measurement system
-```
+Before modifying the repository, read `AGENT.md`.

@@ -31,7 +31,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Validate shell/docs
+      - name: Validate scripts, docs and MCP source
         shell: bash
         run: |
           set -euo pipefail
@@ -44,10 +44,10 @@ jobs:
           test -s release/common/INSTALL.zh-CN.md
           python -m py_compile \
             bridge/server.py \
+            bridge/analyzer_core.py \
             bridge/project_tools.py \
-            bridge/server_v05.py \
             bridge/temporal_tools.py \
-            bridge/server_v06.py
+            bridge/masking_tools.py
 
   mcp-runtime:
     name: MCP runtime (${{ matrix.label }})
@@ -65,7 +65,6 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -79,16 +78,10 @@ jobs:
           python -m pip install -r bridge/requirements.txt
           python -m pip install 'pyinstaller>=6.10,<7'
 
-      - name: Validate source MCP 0.6
+      - name: Validate source MCP 0.7
         shell: bash
         run: |
-          python -m py_compile \
-            bridge/server.py \
-            bridge/project_tools.py \
-            bridge/server_v05.py \
-            bridge/temporal_tools.py \
-            bridge/server_v06.py
-          AI_ANALYZER_SELF_TEST=1 python bridge/server_v06.py
+          AI_ANALYZER_SELF_TEST=1 python bridge/server.py
 
       - name: Build standalone MCP runtime
         shell: bash
@@ -101,9 +94,9 @@ jobs:
             --paths bridge \
             --collect-all mcp \
             --collect-all pythonosc \
-            bridge/server_v06.py
+            bridge/server.py
 
-      - name: Smoke-test packaged runtime (macOS)
+      - name: Smoke-test packaged runtime on macOS
         if: runner.os == 'macOS'
         shell: bash
         run: |
@@ -112,7 +105,7 @@ jobs:
           AI_ANALYZER_SELF_TEST=1 dist/ai-audio-analyzer-mcp/ai-audio-analyzer-mcp
           file dist/ai-audio-analyzer-mcp/ai-audio-analyzer-mcp
 
-      - name: Smoke-test packaged runtime (Windows)
+      - name: Smoke-test packaged runtime on Windows
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
@@ -122,10 +115,9 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Packaged MCP self-test failed: $LASTEXITCODE" }
           Remove-Item Env:AI_ANALYZER_SELF_TEST -ErrorAction SilentlyContinue
 
-      - name: Stage MCP runtime artifact
+      - name: Stage runtime
         shell: bash
         run: |
-          set -euo pipefail
           rm -rf runtime-artifact
           mkdir -p runtime-artifact
           cp -R dist/ai-audio-analyzer-mcp runtime-artifact/
@@ -144,14 +136,11 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-
       - name: Configure and build VST3
         shell: pwsh
         run: |
-          $ErrorActionPreference = 'Stop'
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
           cmake --build build --config Release --parallel 2
-
       - uses: actions/download-artifact@v4
         with:
           name: mcp-runtime-windows-x64
@@ -165,8 +154,7 @@ jobs:
           $match = [regex]::Match($cmake, 'project\(AIAnalyzer VERSION ([0-9.]+)')
           if (-not $match.Success) { throw 'Could not parse project version' }
           $version = $match.Groups[1].Value
-
-          $vst3 = Get-ChildItem -Path build/AIAnalyzer_artefacts -Recurse -Directory -Filter 'AI Audio Analyzer.vst3' | Select-Object -First 1
+          $vst3 = Get-ChildItem build/AIAnalyzer_artefacts -Recurse -Directory -Filter 'AI Audio Analyzer.vst3' | Select-Object -First 1
           if (-not $vst3) { throw 'AI Audio Analyzer.vst3 not found' }
 
           if (Test-Path dist) { Remove-Item dist -Recurse -Force }
@@ -178,19 +166,8 @@ jobs:
           New-Item -ItemType Directory -Path (Join-Path $root 'mcp/runtime') -Force | Out-Null
           Copy-Item 'input/mcp-runtime/ai-audio-analyzer-mcp' (Join-Path $root 'mcp/runtime/ai-audio-analyzer-mcp') -Recurse -Force
           New-Item -ItemType Directory -Path (Join-Path $root 'mcp/source') -Force | Out-Null
-
-          $sourceFiles = @(
-            'bridge/server.py'
-            'bridge/server_v05.py'
-            'bridge/server_v06.py'
-            'bridge/project_tools.py'
-            'bridge/temporal_tools.py'
-            'bridge/requirements.txt'
-            'bridge/cherry-studio.example.json'
-          )
-          Copy-Item -Path $sourceFiles -Destination (Join-Path $root 'mcp/source/') -Force
+          Copy-Item bridge/server.py,bridge/analyzer_core.py,bridge/project_tools.py,bridge/temporal_tools.py,bridge/masking_tools.py,bridge/requirements.txt,bridge/cherry-studio.example.json (Join-Path $root 'mcp/source/') -Force
           Copy-Item 'skills/ai-analyzer-flstudio' (Join-Path $root 'skill') -Recurse -Force
-
           Copy-Item release/common/START-HERE.md (Join-Path $root 'START-HERE.md')
           Copy-Item release/common/INSTALL.en.md (Join-Path $root 'INSTALL.en.md')
           Copy-Item release/common/INSTALL.zh-CN.md (Join-Path $root 'INSTALL.zh-CN.md')
@@ -200,11 +177,13 @@ jobs:
           @"
           AI Audio Analyzer $version
           Platform: Windows x64
-          VST3: Windows x64
-          MCP: PyInstaller standalone x64 runtime, MCP entrypoint 0.6
+          VST3 protocol/measurements: 0.6-compatible temporal frame
+          MCP feature layer: 0.7 masking evidence
+          MCP source entrypoint: server.py
+          MCP: PyInstaller standalone x64 runtime
           Python required for normal install: No
           Release commit: $env:GITHUB_SHA
-          "@ | Set-Content -Path (Join-Path $root 'VERSION.txt') -Encoding UTF8
+          "@ | Set-Content (Join-Path $root 'VERSION.txt') -Encoding UTF8
 
           $null = [scriptblock]::Create((Get-Content (Join-Path $root 'Install.ps1') -Raw))
           $env:AI_ANALYZER_SELF_TEST = '1'
@@ -229,7 +208,6 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-
       - name: Configure and build arm64 VST3
         shell: bash
         run: |
@@ -239,7 +217,6 @@ jobs:
             -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 \
             -DCMAKE_OSX_ARCHITECTURES=arm64
           cmake --build build --config Release --parallel 2
-
       - uses: actions/download-artifact@v4
         with:
           name: mcp-runtime-macos-arm64
@@ -251,35 +228,21 @@ jobs:
           set -euo pipefail
           VERSION="$(sed -nE 's/.*project\(AIAnalyzer VERSION ([0-9.]+).*/\1/p' CMakeLists.txt | head -1)"
           test -n "$VERSION"
-
           VST3_PATH="$(find build/AIAnalyzer_artefacts -type d -name 'AI Audio Analyzer.vst3' -print -quit)"
           test -n "$VST3_PATH"
           BINARY="$VST3_PATH/Contents/MacOS/AI Audio Analyzer"
-          echo "VST3 architectures: $(lipo -archs "$BINARY")"
           test "$(lipo -archs "$BINARY")" = "arm64"
-
           xattr -cr "$VST3_PATH" || true
           codesign --force --deep --sign - --timestamp=none "$VST3_PATH"
           codesign --verify --deep --strict --verbose=4 "$VST3_PATH"
 
           rm -rf dist
-          mkdir -p dist
           ROOT="dist/AI-Audio-Analyzer-v${VERSION}-macOS"
           mkdir -p "$ROOT/mcp/runtime" "$ROOT/mcp/source"
-
           ditto "$VST3_PATH" "$ROOT/AI Audio Analyzer.vst3"
           ditto input/mcp-arm64/ai-audio-analyzer-mcp "$ROOT/mcp/runtime/ai-audio-analyzer-mcp"
-          cp \
-            bridge/server.py \
-            bridge/server_v05.py \
-            bridge/server_v06.py \
-            bridge/project_tools.py \
-            bridge/temporal_tools.py \
-            bridge/requirements.txt \
-            bridge/cherry-studio.example.json \
-            "$ROOT/mcp/source/"
+          cp bridge/server.py bridge/analyzer_core.py bridge/project_tools.py bridge/temporal_tools.py bridge/masking_tools.py bridge/requirements.txt bridge/cherry-studio.example.json "$ROOT/mcp/source/"
           ditto skills/ai-analyzer-flstudio "$ROOT/skill"
-
           cp release/common/START-HERE.md "$ROOT/START-HERE.md"
           cp release/common/INSTALL.en.md "$ROOT/INSTALL.en.md"
           cp release/common/INSTALL.zh-CN.md "$ROOT/INSTALL.zh-CN.md"
@@ -287,15 +250,15 @@ jobs:
           cp release/macos/Install.command "$ROOT/Install.command"
           chmod +x "$ROOT/install.sh" "$ROOT/Install.command"
           chmod +x "$ROOT/mcp/runtime/ai-audio-analyzer-mcp/ai-audio-analyzer-mcp"
-
-          file "$ROOT/mcp/runtime/ai-audio-analyzer-mcp/ai-audio-analyzer-mcp"
           AI_ANALYZER_SELF_TEST=1 "$ROOT/mcp/runtime/ai-audio-analyzer-mcp/ai-audio-analyzer-mcp"
 
           cat > "$ROOT/VERSION.txt" <<EOF
           AI Audio Analyzer ${VERSION}
-          Platform: macOS Apple Silicon
-          VST3: arm64, minimum target macOS 11.0
-          MCP: PyInstaller standalone arm64 runtime, MCP entrypoint 0.6
+          Platform: macOS Apple Silicon arm64
+          VST3 protocol/measurements: 0.6-compatible temporal frame
+          MCP feature layer: 0.7 masking evidence
+          MCP source entrypoint: server.py
+          MCP: PyInstaller standalone arm64 runtime
           Python required for normal install: No
           Release commit: ${GITHUB_SHA}
           EOF
@@ -319,14 +282,13 @@ jobs:
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/download-artifact@v4
         with:
           pattern: AI-Audio-Analyzer-Release-*
           path: release-assets
           merge-multiple: true
 
-      - name: Resolve release metadata
+      - name: Resolve metadata and checksums
         id: meta
         shell: bash
         run: |
@@ -348,22 +310,17 @@ jobs:
           cat > release-assets/RELEASE-NOTES.md <<EOF
           # AI Audio Analyzer ${TAG}
 
-          Separate Windows and macOS lazy packages are provided.
+          - Windows x64 and macOS Apple Silicon arm64 lazy packages.
+          - Standalone PyInstaller MCP runtime; normal users do not need Python or PyPI.
+          - MCP uses one stable source/PyInstaller entrypoint: bridge/server.py.
+          - MCP 0.7 adds equal-ERB-rate re-binned spectral/relative-level/temporal masking evidence and a project masking scan.
+          - The 0.7 evidence model is transparent heuristic evidence, not a calibrated cochlear/gammatone filterbank and not a probability of audible masking.
+          - VST3 OSC measurement schema remains compatible with 0.6; indexes 0..64 are unchanged.
+          - Skill remains English-only and measurement/tool oriented; it does not prescribe a mixing style.
 
-          - **Windows**: x64 VST3 + standalone PyInstaller MCP runtime + Skill + automatic installer.
-          - **macOS**: Apple Silicon arm64 VST3 + native arm64 standalone MCP runtime + Skill + automatic installer.
-          - **MCP 0.6**: project tools plus temporal profile / time-aligned band-envelope comparison.
-          - **VST3 0.6**: append-only spectral-flux, RMS-rise and 40-160 Hz temporal descriptors.
-
-          **Intel macOS / x86_64 is not included in current releases.**
-
-          **Normal users do not need to install Python, pip, MCP SDK, or access PyPI.** Python source remains under `mcp/source/` as a developer/manual fallback.
-
-          macOS builds are currently ad-hoc signed rather than Apple-notarized; the bundled installer removes quarantine metadata and verifies/repairs the VST3 local signature.
+          macOS builds are ad-hoc signed rather than Apple-notarized. The bundled installer handles current quarantine/Gatekeeper requirements.
 
           Companion FL Studio control MCP: https://github.com/rosasynthesiz/flstudio-mcp
-
-          Verify downloads using `SHA256SUMS.txt`.
           EOF
 
       - name: Create or update GitHub Release
@@ -377,14 +334,12 @@ jobs:
           shopt -s nullglob
           files=(release-assets/*.zip release-assets/SHA256SUMS.txt)
           if [ "${#files[@]}" -lt 3 ]; then
-            echo 'Expected Windows zip, macOS zip, and SHA256SUMS.txt' >&2
+            echo 'Expected Windows zip, macOS zip and SHA256SUMS.txt' >&2
             exit 1
           fi
-
           flags=()
           if [ "$PRERELEASE" = 'true' ]; then flags+=(--prerelease); fi
           if [ "$DRAFT" = 'true' ]; then flags+=(--draft); fi
-
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" "${files[@]}" --clobber
             gh release edit "$TAG" --title "AI Audio Analyzer $TAG" --notes-file release-assets/RELEASE-NOTES.md

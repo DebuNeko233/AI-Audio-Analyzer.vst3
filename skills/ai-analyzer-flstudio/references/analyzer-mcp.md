@@ -1,8 +1,8 @@
 # AI Audio Analyzer MCP Reference
 
-This document describes MCP tools, selectors, calling order, and data-validity rules. See `parameters.md` for technical parameter semantics.
+This file describes MCP tools, selector rules, call order, and validity checks. Measurement semantics are documented in `parameters.md`; V0.7 masking-evidence details are documented in `masking-evidence.md`.
 
-AI Audio Analyzer MCP 0.6 currently exposes 18 tools:
+Current MCP 0.7 exposes **20 tools**:
 
 ```text
 audio_bridge_status()
@@ -23,38 +23,48 @@ audio_list_snapshots()
 audio_compare_snapshots(before, after)
 audio_temporal_profile(track, seconds=5)
 audio_temporal_compare(track_a, track_b, seconds=5, low_hz=40, high_hz=160, alignment_tolerance_ms=80)
+audio_masking_evidence(track_a, track_b, seconds=5, alignment_tolerance_ms=80, max_regions=8)
+audio_project_masking_scan(seconds=5, max_pairs=8, alignment_tolerance_ms=80)
 ```
 
-## Recommended call hierarchy
+## Recommended hierarchy
 
-Do not call all 18 tools automatically. Use the highest-level tool that already contains enough information, then drill down only when needed.
+Do not call all 20 tools by default.
 
 ```text
-Project readiness
+project readiness
 → audio_project_status()
 
-Project recent window
+project recent overview
 → audio_mix_overview()
 
-Stable single-track window
+project masking-evidence ranking
+→ audio_project_masking_scan()
+
+stable single track
 → audio_average()
 
-Single-track temporal behavior
+single-track temporal change
 → audio_temporal_profile()
 
-Two-track spectral relationship
+two-track basic spectrum
 → audio_compare_tracks()
 
-Two-track temporal relationship
+two-track detailed masking evidence
+→ audio_masking_evidence()
+
+custom-band temporal relation
 → audio_temporal_compare()
 
-Before/After measurement
+Before/After verification
 → audio_capture_snapshot() / audio_compare_snapshots()
 ```
 
-## V0.4 FL Studio ↔ Analyzer Identify
+Use the highest-level tool that answers the request, then drill down only when more detail is useful.
 
-AI Audio Analyzer exposes this host parameter:
+## V0.4 Identify: FL Studio ↔ Analyzer mapping
+
+AI Audio Analyzer exposes a host-visible parameter:
 
 ```text
 Parameter ID: identify
@@ -62,34 +72,34 @@ Display name: Identify
 Type: Boolean
 ```
 
-Every boolean transition emits `/aianalyzer/identify`. Recommended flow:
+Every Boolean transition emits `/aianalyzer/identify`. Recommended flow:
 
-1. use the FL Studio control MCP to find the real Mixer Track and Plugin Slot;
+1. use the FL Studio control MCP to locate the real Mixer Track / Plugin Slot;
 2. inspect the plugin's real exposed parameters and locate `Identify`;
 3. read its current value;
-4. set it to the opposite value;
+4. set the opposite value;
 5. immediately call `audio_last_identify()`;
-6. verify the event is fresh and unconsumed;
+6. verify the event is fresh and not consumed;
 7. immediately call `audio_bind_last_identified(fl_track_index, fl_track_name, slot)`;
 8. repeat for the next instance;
-9. finish with `audio_instance_map()` and inspect `discovery_complete`.
+9. call `audio_instance_map()` and verify `discovery_complete`.
 
-Do not invent FL Studio MCP tool names. Use the tools and parameters that the connected control MCP actually exposes.
+Do not assume FL Studio MCP tool names. Use the tools and parameter names it actually exposes.
 
-Each Identify event may be consumed only once. Bindings and runtime UUIDs are session-scoped.
+Identify events, runtime UUIDs, and bindings are session-scoped.
 
-## Selectors
+## Selector rules
 
 Preferred order:
 
 ```text
 mixer:<track_index>/slot:<slot>
-→ unique FL Mixer Track name
+→ unique FL Mixer track name
 → runtime UUID
-→ unique human-readable Analyzer name
+→ unique Analyzer display name
 ```
 
-Supported selector forms include:
+Supported selector forms:
 
 ```text
 mixer:7
@@ -98,11 +108,11 @@ fl:7
 fl:7/slot:9
 ```
 
-If one Mixer Track contains multiple Analyzer instances, the selector must include `slot`.
+If multiple Analyzer instances exist on one Mixer Track, include `slot`.
 
 ## Signal / validity
 
-V0.3 signal gate:
+V0.3 gate semantics:
 
 ```text
 close threshold   ≈ -50 dBFS
@@ -112,14 +122,24 @@ hold              ≈ 0.4 s
 
 Rules:
 
-- do not infer spectral/stereo content when `signal_present=false`;
+- do not infer spectrum/stereo content from `signal_present=false` frames;
 - `null` means unavailable, not zero;
-- interpret `audio_average()` together with `active_frames`, `active_ratio`, and `analysis_valid`;
-- do not describe stale streams as current real-time state.
+- inspect `active_frames`, `active_ratio`, and `analysis_valid` for window tools;
+- stale streams are not current real-time state.
+
+For temporal tools also inspect:
+
+```text
+temporal_supported
+temporal_valid
+temporal_window_seconds
+```
 
 ## `audio_project_status()`
 
-Use this first for project-level readiness. Important fields include:
+Use first for project readiness.
+
+Important fields:
 
 ```text
 project_ready
@@ -133,58 +153,79 @@ instances
 warnings
 ```
 
-If instances are unbound, run deterministic Identify mapping instead of guessing from names or musical content.
+If instances are unbound, perform Identify before project-wide interpretation.
 
 ## `audio_mix_overview()`
 
-Use this to read recent-window state across multiple Analyzer instances. It returns project tracks, Master candidates, and `potential_spectral_conflicts`.
+Returns recent project-level track summaries and:
 
-`potential_spectral_conflicts` is heuristic relative spectral overlap intended to identify areas worth further inspection. It does not prove audible masking.
+```text
+potential_spectral_conflicts
+```
 
-If the question is whether two tracks occupy a region **at the same time**, continue with `audio_temporal_compare()` rather than relying on overview overlap alone.
+These are coarse relative-spectrum candidates, not proof of audible masking.
 
-## `audio_snapshot()` and `audio_average()`
+## `audio_project_masking_scan()` — V0.7
+
+```text
+audio_project_masking_scan(
+  seconds=5,
+  max_pairs=8,
+  alignment_tolerance_ms=80
+)
+```
+
+It starts from project spectral-conflict candidates and evaluates them with the V0.7 ERB-rebinned spectral/relative-level/temporal evidence model.
+
+Use it for project-level ranking, not as a universal list of problems.
+
+Important fields:
+
+```text
+candidate_pair_count
+pairs[].masking_evidence_score
+pairs[].top_region
+pairs[].alignment
+```
+
+## `audio_snapshot()` / `audio_average()`
 
 ```text
 audio_snapshot(track)
 ```
 
-Reads the latest frame. Use it for current-state inspection or connection troubleshooting.
+Latest frame; useful for current-state/connection checks.
 
 ```text
 audio_average(track, seconds)
 ```
 
-Reads a stable recent window. Spectrum, stereo, and other content-related statistics use active frames only.
+Stable recent window; preferred when describing several seconds of content. Content-dependent averages use active frames only.
 
 ## `audio_compare_tracks()` / `audio_detect_masking()`
 
-`audio_compare_tracks()` compares relative spectral shapes between two active Analyzer instances.
+These are older spectrum-only comparison paths.
 
-`audio_detect_masking()` currently remains a spectral-overlap candidate tool, not a complete Bark/ERB psychoacoustic masking model. Do not describe its output as proof that audible masking has occurred.
+`audio_detect_masking()` should still be understood as a heuristic spectral-overlap candidate tool. It is not a Bark/ERB psychoacoustic proof of masking.
 
-## V0.6 `audio_temporal_profile()`
+For stronger current evidence use `audio_masking_evidence()`.
 
-Summarizes recent temporal behavior for one Analyzer:
+## `audio_temporal_profile()` — V0.6
+
+Returns recent temporal descriptors such as:
 
 ```text
 spectral_flux_mean
 spectral_flux_peak
 rms_rise_peak_db
 low_band_40_160_energy_db
-low_band_40_160_min_db
-low_band_40_160_max_db
 onset_candidate_frames
 onset_candidate_density_hz
 ```
 
-Requirements: the VST3 must support the V0.6 temporal tail, and the requested window must contain temporally valid active frames.
+Onset/change candidates are threshold-based heuristics. The active thresholds are returned explicitly in `onset_candidate_thresholds`.
 
-`onset_candidate_*` fields are thresholded change candidates, not ground-truth onset labels. Actual thresholds are returned under `onset_candidate_thresholds`.
-
-## V0.6 `audio_temporal_compare()`
-
-Compares time-aligned band envelopes from two Analyzer instances:
+## `audio_temporal_compare()` — V0.6
 
 ```text
 audio_temporal_compare(
@@ -206,29 +247,66 @@ mean_abs_alignment_offset_ms
 coactive_ratio
 band_envelope_correlation
 normalized_band_temporal_overlap
-temporal_descriptor_pairs
-onset_candidate_frames_a
-onset_candidate_frames_b
-coincident_onset_candidate_frames
 candidate_coincidence_ratio
 ```
 
-Interpretation:
+Use it when a user asks whether two sources actually co-occupy or co-vary in a custom frequency range over time.
+
+## `audio_masking_evidence()` — V0.7
 
 ```text
-band_envelope_correlation
-→ whether the selected-band envelopes tend to vary in the same direction
-
-normalized_band_temporal_overlap
-→ how often both tracks are simultaneously strong relative to their own selected-band peaks
-
-candidate_coincidence_ratio
-→ how often V0.6 change/onset candidates occur in the same aligned OSC frames
+audio_masking_evidence(
+  track_a,
+  track_b,
+  seconds=5,
+  alignment_tolerance_ms=80,
+  max_regions=8
+)
 ```
 
-These are timing-relationship measurements/heuristics. They are not processing instructions and not a complete masking probability.
+The current model:
 
-If `mean_abs_alignment_offset_ms` approaches the allowed alignment tolerance, reduce confidence in correlation/overlap interpretation.
+```text
+32 Analyzer spectrum features
+→ 16 equal ERB-rate regions
+→ local relative spectral overlap
+→ directional relative-level weighting
+→ V0.6 temporal overlap when available
+```
+
+Important output:
+
+```text
+auditory_band_model
+alignment
+masking_evidence_score
+strongest_regions[]
+evidence_formula
+```
+
+Per-region fields include:
+
+```text
+low_hz / high_hz / center_hz
+a_db / b_db
+level_delta_a_minus_b_db
+relative_spectral_overlap
+level_direction_weight_a_over_b
+level_direction_weight_b_over_a
+spectral_level_evidence_a_over_b
+spectral_level_evidence_b_over_a
+temporal_usable_pairs
+coactive_ratio
+band_envelope_correlation
+normalized_band_temporal_overlap
+combined_evidence_a_over_b
+combined_evidence_b_over_a
+dominant_direction
+```
+
+The model is deliberately transparent. `auditory_band_model.filterbank=false` because the implementation re-bins existing 32-band features rather than running a gammatone/cochlear filterbank.
+
+Do not report `masking_evidence_score` as an audible-masking probability.
 
 ## Snapshot / A-B
 
@@ -238,37 +316,36 @@ audio_capture_snapshot("after", seconds=5)
 audio_compare_snapshots("before", "after")
 ```
 
-Snapshots exist only in the current Bridge session.
-
 For comparability:
 
-- use the same musical passage when practical;
+- use the same musical passage when possible;
 - use similar window lengths;
-- compare `active_ratio`;
-- delta is defined as `After - Before`;
-- LUFS-I is session-integrated and should not be treated as two independently reset short-window measurements.
+- inspect `active_ratio`;
+- remember delta = `After - Before`;
+- LUFS-I is session cumulative, not independently reset for each snapshot.
 
 ## Multiple instances and OSC
 
-All VST3 instances send OSC to the same default destination:
+All VST3 instances normally send to:
 
 ```text
 127.0.0.1:9855
 ```
 
-Only the Bridge binds UDP 9855. VST3 instances are senders, so each Analyzer does not need a separate port.
+Only the Bridge binds UDP port 9855. VST3 instances are senders, so multiple Analyzer instances do not need separate ports.
 
-## V0.6 append-only OSC tail
+## OSC compatibility
 
-`/aianalyzer/frame` preserves fields `0..58` unchanged and appends these after the runtime UUID:
+MCP 0.7 does **not** add new OSC fields. It reuses the V0.6 append-only frame:
 
 ```text
-59  temporal_window_seconds
-60  spectral_flux_mean
-61  spectral_flux_peak
-62  rms_rise_peak_db
-63  low_band_energy_db      # FFT-derived 40-160 Hz
-64  frame_schema_version    # "0.6"
+0..58   V0.1–V0.4-compatible prefix
+59      temporal_window_seconds
+60      spectral_flux_mean
+61      spectral_flux_peak
+62      rms_rise_peak_db
+63      low_band_energy_db
+64      frame_schema_version = "0.6"
 ```
 
-Older Bridges may ignore these trailing fields. The 0.6 compatibility layer first runs the stable parser and then attaches the V0.6 tail.
+The 0.7 masking-evidence model is computed in the Bridge from existing 0.6 measurements.
