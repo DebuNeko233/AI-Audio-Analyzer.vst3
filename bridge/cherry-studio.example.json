@@ -3,7 +3,7 @@
     "ai-audio-analyzer": {
       "command": "/ABSOLUTE/PATH/TO/AI-Audio-Analyzer/.venv/bin/python",
       "args": [
-        "/ABSOLUTE/PATH/TO/AI-Audio-Analyzer/bridge/server_v06.py"
+        "/ABSOLUTE/PATH/TO/AI-Audio-Analyzer/bridge/server_v07.py"
       ],
       "env": {
         "AI_ANALYZER_OSC_HOST": "127.0.0.1",
