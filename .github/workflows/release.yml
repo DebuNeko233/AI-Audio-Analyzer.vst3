@@ -48,7 +48,8 @@ jobs:
             bridge/project_tools.py \
             bridge/temporal_tools.py \
             bridge/masking_tools.py \
-            bridge/stereo_tools.py
+            bridge/stereo_tools.py \
+            bridge/semantic_tools.py
 
   mcp-runtime:
     name: MCP runtime (${{ matrix.label }})
@@ -84,7 +85,7 @@ jobs:
           python -m pip install -r bridge/requirements.txt
           python -m pip install 'pyinstaller>=6.10,<7'
 
-      - name: Validate source MCP 0.8
+      - name: Validate source MCP 0.9
         shell: bash
         run: AI_ANALYZER_SELF_TEST=1 python bridge/server.py
 
@@ -132,6 +133,7 @@ jobs:
             cp dist/ai-audio-analyzer-mcp runtime-artifact/
             chmod +x runtime-artifact/ai-audio-analyzer-mcp
           fi
+          test ! -d runtime-artifact/_internal
 
       - uses: actions/upload-artifact@v4
         with:
@@ -184,8 +186,8 @@ jobs:
           @"
           AI Audio Analyzer $version
           Platform: Windows x64
-          MCP: 0.8 standalone one-file executable
-          OSC protocol: 0.8 append-only
+          MCP: 0.9 standalone one-file executable
+          OSC protocol: 0.9 append-only
           Release commit: $env:GITHUB_SHA
           "@ | Set-Content 'package/VERSION.txt' -Encoding UTF8
 
@@ -200,6 +202,7 @@ jobs:
           }
           if ($forbidden) { throw "Forbidden developer/nested archive files in user package: $($forbidden.FullName -join ', ')" }
           if (Test-Path 'package/mcp/source') { throw 'mcp/source must never be present in a user Release.' }
+          if (Test-Path 'package/mcp/_internal') { throw '_internal must never be present in a PyInstaller one-file user Release.' }
 
       - uses: actions/upload-artifact@v4
         with:
@@ -262,8 +265,8 @@ jobs:
           cat > package/VERSION.txt <<EOF
           AI Audio Analyzer ${VERSION}
           Platform: macOS Apple Silicon arm64
-          MCP: 0.8 standalone one-file executable
-          OSC protocol: 0.8 append-only
+          MCP: 0.9 standalone one-file executable
+          OSC protocol: 0.9 append-only
           Release commit: ${GITHUB_SHA}
           EOF
 
@@ -273,6 +276,7 @@ jobs:
             exit 1
           fi
           test ! -d package/mcp/source
+          test ! -d package/mcp/_internal
 
       - uses: actions/upload-artifact@v4
         with:
@@ -341,6 +345,8 @@ jobs:
           fi
           test ! -d "$WIN_ROOT/mcp/source"
           test ! -d "$MAC_ROOT/mcp/source"
+          test ! -d "$WIN_ROOT/mcp/_internal"
+          test ! -d "$MAC_ROOT/mcp/_internal"
 
           pushd release-assets >/dev/null
           zip -qry "AI-Audio-Analyzer-v${VERSION}-Windows.zip" "AI-Audio-Analyzer-v${VERSION}-Windows"
@@ -373,9 +379,10 @@ jobs:
           - Windows: download AI-Audio-Analyzer-*-Windows.zip, unzip it, then double-click Install.cmd.
           - macOS Apple Silicon: download AI-Audio-Analyzer-*-macOS.zip, unzip it, then double-click Install.command.
           - No Python, source code, package manager, or programming setup is included or required.
-          - V0.8 adds deeper Mid/Side and stereo measurement: explicit Side spectrum, Side/Mid energy, low-frequency stereo relation, and negative cross-spectrum evidence.
-          - MCP 0.8 exposes 22 measurement tools, including audio_stereo_profile and audio_stereo_compare.
-          - The Skill remains measurement/tool oriented and does not prescribe a mixing style or automatic stereo action.
+          - V0.9 adds audio-domain music-semantic evidence: 12-bin chroma, tonal-center candidate ranking, and transparent single-F0 harmonic-alignment evidence.
+          - MCP 0.9 exposes 24 measurement tools, including audio_tonal_profile and audio_tonal_compare.
+          - Tonal-center candidates expose ranking margin/evidence quality and are not ground-truth key labels; exact DAW/MIDI note/key data should be preferred when available.
+          - The Skill remains measurement/tool oriented and does not prescribe a mixing style, key change, harmonic edit, or automatic processing action.
           - macOS Release is Apple Silicon arm64 only and is currently ad-hoc signed rather than Apple-notarized.
 
           See START-HERE.md inside the downloaded package for the shortest setup path.
