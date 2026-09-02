@@ -26,79 +26,222 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  validate-installers:
-    name: Validate installer sources
+  validate:
+    name: Validate release sources
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Validate macOS shell scripts
+      - name: Validate shell/docs
         shell: bash
         run: |
           set -euo pipefail
           bash -n release/macos/install.sh
           bash -n release/macos/Install.command
-
-      - name: Validate release documentation
-        shell: bash
-        run: |
-          set -euo pipefail
+          test -s release/windows/Install.ps1
+          test -s release/windows/Install.cmd
           test -s release/common/START-HERE.md
           test -s release/common/INSTALL.en.md
           test -s release/common/INSTALL.zh-CN.md
-          test -s release/windows/Install.ps1
-          test -s release/windows/Install.cmd
+          python -m py_compile bridge/server.py bridge/project_tools.py bridge/server_v05.py
 
-  build:
-    name: Build lazy package (${{ matrix.label }})
-    needs: validate-installers
+  mcp-runtime:
+    name: MCP runtime (${{ matrix.label }})
+    needs: validate
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: macos-latest
-            label: macOS
           - os: windows-latest
-            label: Windows
+            label: windows-x64
+            artifact: mcp-runtime-windows-x64
+          - os: macos-latest
+            label: macos-arm64
+            artifact: mcp-runtime-macos-arm64
+          - os: macos-15-intel
+            label: macos-x86_64
+            artifact: mcp-runtime-macos-x86_64
     runs-on: ${{ matrix.os }}
-
     steps:
       - uses: actions/checkout@v4
 
-      - name: Configure macOS universal
-        if: runner.os == 'macOS'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: bridge/requirements.txt
+
+      - name: Install MCP build dependencies
         shell: bash
         run: |
-          cmake -S . -B build \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 \
-            "-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64"
+          python -m pip install --upgrade pip
+          python -m pip install -r bridge/requirements.txt
+          python -m pip install 'pyinstaller>=6.10,<7'
 
-      - name: Configure Windows
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+      - name: Validate source MCP 0.5
+        shell: bash
+        run: |
+          python -m py_compile bridge/server.py bridge/project_tools.py bridge/server_v05.py
+          AI_ANALYZER_SELF_TEST=1 python bridge/server_v05.py
 
-      - name: Build VST3
-        run: cmake --build build --config Release --parallel 2
+      - name: Build standalone MCP runtime
+        shell: bash
+        run: |
+          python -m PyInstaller \
+            --noconfirm \
+            --clean \
+            --onedir \
+            --name ai-audio-analyzer-mcp \
+            --paths bridge \
+            --collect-all mcp \
+            --collect-all pythonosc \
+            bridge/server_v05.py
 
-      - name: Package macOS lazy bundle
+      - name: Smoke-test packaged runtime (Unix)
         if: runner.os == 'macOS'
         shell: bash
         run: |
           set -euo pipefail
+          chmod +x dist/ai-audio-analyzer-mcp/ai-audio-analyzer-mcp
+          AI_ANALYZER_SELF_TEST=1 dist/ai-audio-analyzer-mcp/ai-audio-analyzer-mcp
+          file dist/ai-audio-analyzer-mcp/ai-audio-analyzer-mcp
 
+      - name: Smoke-test packaged runtime (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $env:AI_ANALYZER_SELF_TEST = '1'
+          & 'dist/ai-audio-analyzer-mcp/ai-audio-analyzer-mcp.exe'
+          if ($LASTEXITCODE -ne 0) { throw "Packaged MCP self-test failed: $LASTEXITCODE" }
+          Remove-Item Env:AI_ANALYZER_SELF_TEST -ErrorAction SilentlyContinue
+
+      - name: Stage MCP runtime artifact
+        shell: bash
+        run: |
+          rm -rf runtime-artifact
+          mkdir -p runtime-artifact
+          cp -R dist/ai-audio-analyzer-mcp runtime-artifact/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: runtime-artifact/
+          if-no-files-found: error
+          retention-days: 7
+          include-hidden-files: true
+
+  package-windows:
+    name: Build Windows lazy package
+    needs: mcp-runtime
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure and build VST3
+        shell: pwsh
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --config Release --parallel 2
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: mcp-runtime-windows-x64
+          path: input/mcp-runtime
+
+      - name: Assemble Windows package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $cmake = Get-Content CMakeLists.txt -Raw
+          $match = [regex]::Match($cmake, 'project\(AIAnalyzer VERSION ([0-9.]+)')
+          if (-not $match.Success) { throw 'Could not parse project version' }
+          $version = $match.Groups[1].Value
+
+          $vst3 = Get-ChildItem -Path build/AIAnalyzer_artefacts -Recurse -Directory -Filter 'AI Audio Analyzer.vst3' | Select-Object -First 1
+          if (-not $vst3) { throw 'AI Audio Analyzer.vst3 not found' }
+
+          if (Test-Path dist) { Remove-Item dist -Recurse -Force }
+          New-Item -ItemType Directory -Path dist | Out-Null
+          $root = Join-Path dist "AI-Audio-Analyzer-v$version-Windows"
+          New-Item -ItemType Directory -Path $root | Out-Null
+
+          Copy-Item $vst3.FullName (Join-Path $root 'AI Audio Analyzer.vst3') -Recurse -Force
+          New-Item -ItemType Directory -Path (Join-Path $root 'mcp/runtime') -Force | Out-Null
+          Copy-Item 'input/mcp-runtime/ai-audio-analyzer-mcp' (Join-Path $root 'mcp/runtime/ai-audio-analyzer-mcp') -Recurse -Force
+          New-Item -ItemType Directory -Path (Join-Path $root 'mcp/source') -Force | Out-Null
+          Copy-Item 'bridge/server.py','bridge/server_v05.py','bridge/project_tools.py','bridge/requirements.txt','bridge/cherry-studio.example.json' (Join-Path $root 'mcp/source/') -Force
+          Copy-Item 'skills/ai-analyzer-flstudio' (Join-Path $root 'skill') -Recurse -Force
+
+          Copy-Item release/common/START-HERE.md (Join-Path $root 'START-HERE.md')
+          Copy-Item release/common/INSTALL.en.md (Join-Path $root 'INSTALL.en.md')
+          Copy-Item release/common/INSTALL.zh-CN.md (Join-Path $root 'INSTALL.zh-CN.md')
+          Copy-Item release/windows/Install.ps1 (Join-Path $root 'Install.ps1')
+          Copy-Item release/windows/Install.cmd (Join-Path $root 'Install.cmd')
+
+          @"
+          AI Audio Analyzer $version
+          Platform: Windows x64
+          VST3: Windows x64
+          MCP: PyInstaller standalone x64 runtime
+          Python required for normal install: No
+          Release commit: $env:GITHUB_SHA
+          "@ | Set-Content -Path (Join-Path $root 'VERSION.txt') -Encoding UTF8
+
+          $null = [scriptblock]::Create((Get-Content (Join-Path $root 'Install.ps1') -Raw))
+          $env:AI_ANALYZER_SELF_TEST = '1'
+          & (Join-Path $root 'mcp/runtime/ai-audio-analyzer-mcp/ai-audio-analyzer-mcp.exe')
+          if ($LASTEXITCODE -ne 0) { throw 'Packaged Windows MCP failed final self-test' }
+          Remove-Item Env:AI_ANALYZER_SELF_TEST -ErrorAction SilentlyContinue
+
+          $zip = Join-Path dist "AI-Audio-Analyzer-v$version-Windows.zip"
+          Compress-Archive -Path $root -DestinationPath $zip -CompressionLevel Optimal
+          Get-FileHash -Algorithm SHA256 $zip | Format-List
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AI-Audio-Analyzer-Release-Windows
+          path: dist/*.zip
+          if-no-files-found: error
+          retention-days: 30
+
+  package-macos:
+    name: Build macOS lazy package
+    needs: mcp-runtime
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure and build universal VST3
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 \
+            "-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64"
+          cmake --build build --config Release --parallel 2
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: mcp-runtime-macos-arm64
+          path: input/mcp-arm64
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: mcp-runtime-macos-x86_64
+          path: input/mcp-x86_64
+
+      - name: Assemble macOS package
+        shell: bash
+        run: |
+          set -euo pipefail
           VERSION="$(sed -nE 's/.*project\(AIAnalyzer VERSION ([0-9.]+).*/\1/p' CMakeLists.txt | head -1)"
           test -n "$VERSION"
 
           VST3_PATH="$(find build/AIAnalyzer_artefacts -type d -name 'AI Audio Analyzer.vst3' -print -quit)"
-          if [ -z "$VST3_PATH" ]; then
-            echo 'AI Audio Analyzer.vst3 bundle not found' >&2
-            exit 1
-          fi
-
+          test -n "$VST3_PATH"
           BINARY="$VST3_PATH/Contents/MacOS/AI Audio Analyzer"
-          echo "Architectures: $(lipo -archs "$BINARY")"
+          echo "VST3 architectures: $(lipo -archs "$BINARY")"
 
           xattr -cr "$VST3_PATH" || true
           codesign --force --deep --sign - --timestamp=none "$VST3_PATH"
@@ -106,119 +249,73 @@ jobs:
 
           rm -rf dist
           mkdir -p dist
-          PACKAGE_ROOT="dist/AI-Audio-Analyzer-v${VERSION}-macOS"
-          mkdir -p "$PACKAGE_ROOT"
+          ROOT="dist/AI-Audio-Analyzer-v${VERSION}-macOS"
+          mkdir -p "$ROOT/mcp/runtime/arm64" "$ROOT/mcp/runtime/x86_64" "$ROOT/mcp/source"
 
-          ditto "$VST3_PATH" "$PACKAGE_ROOT/AI Audio Analyzer.vst3"
-          ditto bridge "$PACKAGE_ROOT/mcp"
-          ditto skills/ai-analyzer-flstudio "$PACKAGE_ROOT/skill"
+          ditto "$VST3_PATH" "$ROOT/AI Audio Analyzer.vst3"
+          ditto input/mcp-arm64/ai-audio-analyzer-mcp "$ROOT/mcp/runtime/arm64/ai-audio-analyzer-mcp"
+          ditto input/mcp-x86_64/ai-audio-analyzer-mcp "$ROOT/mcp/runtime/x86_64/ai-audio-analyzer-mcp"
+          cp bridge/server.py bridge/server_v05.py bridge/project_tools.py bridge/requirements.txt bridge/cherry-studio.example.json "$ROOT/mcp/source/"
+          ditto skills/ai-analyzer-flstudio "$ROOT/skill"
 
-          cp release/common/START-HERE.md "$PACKAGE_ROOT/START-HERE.md"
-          cp release/common/INSTALL.en.md "$PACKAGE_ROOT/INSTALL.en.md"
-          cp release/common/INSTALL.zh-CN.md "$PACKAGE_ROOT/INSTALL.zh-CN.md"
-          cp release/macos/install.sh "$PACKAGE_ROOT/install.sh"
-          cp release/macos/Install.command "$PACKAGE_ROOT/Install.command"
-          chmod +x "$PACKAGE_ROOT/install.sh" "$PACKAGE_ROOT/Install.command"
+          cp release/common/START-HERE.md "$ROOT/START-HERE.md"
+          cp release/common/INSTALL.en.md "$ROOT/INSTALL.en.md"
+          cp release/common/INSTALL.zh-CN.md "$ROOT/INSTALL.zh-CN.md"
+          cp release/macos/install.sh "$ROOT/install.sh"
+          cp release/macos/Install.command "$ROOT/Install.command"
+          chmod +x "$ROOT/install.sh" "$ROOT/Install.command"
+          chmod +x "$ROOT/mcp/runtime/arm64/ai-audio-analyzer-mcp/ai-audio-analyzer-mcp"
+          chmod +x "$ROOT/mcp/runtime/x86_64/ai-audio-analyzer-mcp/ai-audio-analyzer-mcp"
 
-          cat > "$PACKAGE_ROOT/VERSION.txt" <<EOF
+          file "$ROOT/mcp/runtime/arm64/ai-audio-analyzer-mcp/ai-audio-analyzer-mcp"
+          file "$ROOT/mcp/runtime/x86_64/ai-audio-analyzer-mcp/ai-audio-analyzer-mcp"
+          AI_ANALYZER_SELF_TEST=1 "$ROOT/mcp/runtime/arm64/ai-audio-analyzer-mcp/ai-audio-analyzer-mcp"
+
+          cat > "$ROOT/VERSION.txt" <<EOF
           AI Audio Analyzer ${VERSION}
-          Platform: macOS universal arm64+x86_64
-          Minimum macOS target: 11.0
+          Platform: macOS
+          VST3: universal arm64+x86_64, minimum target macOS 11.0
+          MCP: PyInstaller standalone arm64 + x86_64 runtimes
+          Python required for normal install: No
           Release commit: ${GITHUB_SHA}
           EOF
 
-          echo 'Package layout:'
-          find "$PACKAGE_ROOT" -maxdepth 2 -print
-
           ZIP="dist/AI-Audio-Analyzer-v${VERSION}-macOS.zip"
-          ditto -c -k --sequesterRsrc --keepParent "$PACKAGE_ROOT" "$ZIP"
+          ditto -c -k --sequesterRsrc --keepParent "$ROOT" "$ZIP"
           shasum -a 256 "$ZIP"
 
-      - name: Package Windows lazy bundle
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-
-          $cmake = Get-Content CMakeLists.txt -Raw
-          $match = [regex]::Match($cmake, 'project\(AIAnalyzer VERSION ([0-9.]+)')
-          if (-not $match.Success) { throw 'Could not parse project version from CMakeLists.txt' }
-          $version = $match.Groups[1].Value
-
-          $vst3 = Get-ChildItem -Path build/AIAnalyzer_artefacts -Recurse -Directory -Filter 'AI Audio Analyzer.vst3' | Select-Object -First 1
-          if (-not $vst3) { throw 'AI Audio Analyzer.vst3 bundle not found' }
-
-          if (Test-Path dist) { Remove-Item dist -Recurse -Force }
-          New-Item -ItemType Directory -Path dist | Out-Null
-          $packageRoot = Join-Path dist "AI-Audio-Analyzer-v$version-Windows"
-          New-Item -ItemType Directory -Path $packageRoot | Out-Null
-
-          Copy-Item $vst3.FullName (Join-Path $packageRoot 'AI Audio Analyzer.vst3') -Recurse -Force
-          Copy-Item bridge (Join-Path $packageRoot 'mcp') -Recurse -Force
-          Copy-Item skills/ai-analyzer-flstudio (Join-Path $packageRoot 'skill') -Recurse -Force
-
-          Copy-Item release/common/START-HERE.md (Join-Path $packageRoot 'START-HERE.md')
-          Copy-Item release/common/INSTALL.en.md (Join-Path $packageRoot 'INSTALL.en.md')
-          Copy-Item release/common/INSTALL.zh-CN.md (Join-Path $packageRoot 'INSTALL.zh-CN.md')
-          Copy-Item release/windows/Install.ps1 (Join-Path $packageRoot 'Install.ps1')
-          Copy-Item release/windows/Install.cmd (Join-Path $packageRoot 'Install.cmd')
-
-          @"
-          AI Audio Analyzer $version
-          Platform: Windows x64
-          Release commit: $env:GITHUB_SHA
-          "@ | Set-Content -Path (Join-Path $packageRoot 'VERSION.txt') -Encoding UTF8
-
-          # Parse the PowerShell installer without running it.
-          $null = [scriptblock]::Create((Get-Content (Join-Path $packageRoot 'Install.ps1') -Raw))
-
-          Write-Host 'Package layout:'
-          Get-ChildItem $packageRoot -Recurse | Select-Object FullName
-
-          $zip = Join-Path dist "AI-Audio-Analyzer-v$version-Windows.zip"
-          Compress-Archive -Path $packageRoot -DestinationPath $zip -CompressionLevel Optimal
-          Get-FileHash -Algorithm SHA256 $zip | Format-List
-
-      - name: Upload release package
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
-          name: AI-Audio-Analyzer-Release-${{ matrix.label }}
+          name: AI-Audio-Analyzer-Release-macOS
           path: dist/*.zip
           if-no-files-found: error
           retention-days: 30
 
   publish:
     name: Publish GitHub Release
-    needs: build
+    needs: [package-windows, package-macos]
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download platform packages
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
           pattern: AI-Audio-Analyzer-Release-*
           path: release-assets
           merge-multiple: true
 
-      - name: Resolve release tag and checksums
+      - name: Resolve release metadata
         id: meta
         shell: bash
         run: |
           set -euo pipefail
           VERSION="$(sed -nE 's/.*project\(AIAnalyzer VERSION ([0-9.]+).*/\1/p' CMakeLists.txt | head -1)"
-          test -n "$VERSION"
-
           TAG='${{ inputs.tag }}'
-          if [ -z "$TAG" ]; then
-            TAG="v${VERSION}"
-          fi
-
+          if [ -z "$TAG" ]; then TAG="v${VERSION}"; fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-
           cd release-assets
           sha256sum *.zip > SHA256SUMS.txt
           cat SHA256SUMS.txt
@@ -227,27 +324,20 @@ jobs:
         shell: bash
         env:
           TAG: ${{ steps.meta.outputs.tag }}
-          VERSION: ${{ steps.meta.outputs.version }}
         run: |
           cat > release-assets/RELEASE-NOTES.md <<EOF
           # AI Audio Analyzer ${TAG}
 
-          User-facing lazy packages are provided separately for Windows and macOS.
+          Separate Windows and macOS lazy packages are provided.
 
-          ## Downloads
+          - **Windows**: VST3 + standalone PyInstaller MCP runtime + Skill + automatic installer.
+          - **macOS**: universal VST3 + separate native arm64/x86_64 standalone MCP runtimes + Skill + automatic installer.
 
-          - **Windows** — VST3 + Analyzer MCP + Cherry Studio Skill + `Install.cmd` / `Install.ps1`
-          - **macOS** — universal arm64+x86_64 VST3 + Analyzer MCP + Cherry Studio Skill + `Install.command` / `install.sh`
+          **Normal users do not need to install Python, pip, MCP SDK, or access PyPI.** The packaged MCP runtime contains the required Python runtime and dependencies. Python source installation remains available under `mcp/source/` for developers and manual fallback.
 
-          Both packages include English and Simplified Chinese installation manuals, manual-install instructions, Python setup guidance, PyPI mirror troubleshooting, Cherry Studio MCP setup, and plugin-install troubleshooting.
+          macOS builds are currently ad-hoc signed rather than Apple-notarized; the bundled installer removes quarantine metadata and verifies/repairs the VST3 local signature.
 
-          ### macOS Gatekeeper
-
-          The current macOS build is ad-hoc signed and not Apple-notarized. The included installer removes quarantine metadata from the installed VST3 and verifies/repairs the local ad-hoc signature. See the bundled manual for details.
-
-          ### Companion FL Studio control MCP
-
-          https://github.com/rosasynthesiz/flstudio-mcp
+          Companion FL Studio control MCP: https://github.com/rosasynthesiz/flstudio-mcp
 
           Verify downloads using `SHA256SUMS.txt`.
           EOF
@@ -272,13 +362,9 @@ jobs:
           if [ "$DRAFT" = 'true' ]; then flags+=(--draft); fi
 
           if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "Updating existing release $TAG"
             gh release upload "$TAG" "${files[@]}" --clobber
-            gh release edit "$TAG" \
-              --title "AI Audio Analyzer $TAG" \
-              --notes-file release-assets/RELEASE-NOTES.md
+            gh release edit "$TAG" --title "AI Audio Analyzer $TAG" --notes-file release-assets/RELEASE-NOTES.md
           else
-            echo "Creating release $TAG"
             gh release create "$TAG" "${files[@]}" \
               --target "$GITHUB_SHA" \
               --title "AI Audio Analyzer $TAG" \
