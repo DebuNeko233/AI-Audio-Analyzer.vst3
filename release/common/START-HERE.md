@@ -2,16 +2,20 @@
 
 [English manual](INSTALL.en.md) | [中文安装教程](INSTALL.zh-CN.md)
 
-This release package contains:
+This Release package contains:
 
 ```text
 AI Audio Analyzer.vst3
 mcp/
+├─ runtime/     standalone PyInstaller MCP runtime
+└─ source/      Python source fallback for developers
 skill/
 Install script(s)
 INSTALL.en.md
 INSTALL.zh-CN.md
 ```
+
+**Normal installation does not require Python, pip, a virtual environment, or PyPI access.**
 
 ## Fastest path / 最快安装
 
@@ -23,16 +27,7 @@ Double-click:
 Install.cmd
 ```
 
-The installer will:
-
-1. request Administrator permission only when installing the VST3;
-2. install `AI Audio Analyzer.vst3` to the standard VST3 directory;
-3. find a usable Python 3.10+ installation, preferring Python 3.12;
-4. install Python 3.12 with `winget` if Python is missing and winget is available;
-5. create an isolated virtual environment for the Analyzer MCP;
-6. install MCP dependencies, with automatic PyPI mirror fallback;
-7. generate a ready-to-copy `cherry-studio-mcp.json`;
-8. copy the Cherry Studio Skill to the local AI Audio Analyzer application folder.
+The installer will request Administrator permission only for the VST3 copy, install the standalone MCP runtime for the current user, run its built-in self-test, generate `cherry-studio-mcp.json`, and copy the Cherry Studio Skill.
 
 ### macOS
 
@@ -42,44 +37,43 @@ Double-click:
 Install.command
 ```
 
-If macOS blocks the downloaded `Install.command` itself, right-click it and choose **Open**, or open Terminal in the package folder and run:
+If macOS blocks the downloaded script itself, right-click it and choose **Open**, or run:
 
 ```bash
 bash ./install.sh
 ```
 
-The installer will:
+The macOS package contains both native MCP architectures:
 
-1. install the VST3 to `~/Library/Audio/Plug-Ins/VST3/`;
-2. remove quarantine metadata from the plugin to handle the current non-notarized development build;
-3. verify or repair the ad-hoc code signature;
-4. find Python 3.10+, preferring Python 3.12;
-5. use Homebrew to install Python 3.12 when available;
-6. optionally offer to install Homebrew when neither Python nor Homebrew is available;
-7. create an isolated MCP virtual environment;
-8. install MCP dependencies with PyPI mirror fallback;
-9. generate `cherry-studio-mcp.json`.
+```text
+arm64   Apple Silicon
+x86_64  Intel
+```
 
-> macOS note: current GitHub builds are ad-hoc signed, not Apple Developer ID notarized. The installer removes the download quarantine attribute for this plugin. Read the manual for details.
+The installer selects the correct one automatically. It also installs the universal VST3, removes quarantine metadata, validates the packaged MCP runtime, and generates `cherry-studio-mcp.json`.
+
+> Current macOS builds are ad-hoc signed and are not Apple Developer ID notarized. The installer handles the current quarantine/Gatekeeper development-distribution issue; see the full manual for details.
 
 ---
 
 ## 中文快速说明
 
-Windows 用户直接双击 `Install.cmd`。macOS 用户直接双击 `Install.command`。
+Windows 用户直接双击 `Install.cmd`，macOS 用户直接双击 `Install.command`。
 
-如果 macOS 连 `Install.command` 本身都阻止打开，可以**右键 → 打开**，或者在该目录打开终端执行：
+**普通用户不再需要自己安装 Python、pip、MCP SDK，也不依赖 PyPI / 清华 / 阿里云镜像。** Release 已经把 Python Runtime 和 MCP 依赖打包进 `mcp/runtime/`。
+
+macOS 同一个懒人包同时包含 Apple Silicon 和 Intel 两套原生 MCP Runtime，脚本自动选择。
+
+如果 macOS 连 `Install.command` 本身都阻止打开，可以**右键 → 打开**，或者执行：
 
 ```bash
 bash ./install.sh
 ```
 
-自动安装脚本会处理 VST3 安装、Python 检测、MCP 虚拟环境、依赖安装、PyPI 镜像回退，以及 Cherry Studio MCP 配置文件生成。
+如果自动安装失败，或你希望完全手动控制安装，请阅读：
 
-如果自动安装失败，或你希望完全手动控制安装过程，请阅读：
-
-- `INSTALL.zh-CN.md`：完整中文教程；
-- `INSTALL.en.md`：English manual。
+- `INSTALL.zh-CN.md`：完整中文教程，包括 Gatekeeper、手动 standalone 安装，以及 Python/PyPI 源码 fallback；
+- `INSTALL.en.md`：English manual.
 
 配套 FL Studio 控制 MCP：
 
