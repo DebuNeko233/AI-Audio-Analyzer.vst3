@@ -255,6 +255,7 @@ def audio_temporal_profile(track: str, seconds: float = DEFAULT_SECONDS) -> dict
     flux_peaks = [float(frame["spectral_flux_peak"]) for frame in valid if frame.get("spectral_flux_peak") is not None]
     rms_rises = [float(frame["rms_rise_peak_db"]) for frame in valid if frame.get("rms_rise_peak_db") is not None]
     low_band_values = [float(frame["low_band_energy_db"]) for frame in valid if frame.get("low_band_energy_db") is not None]
+    low_band_mean = _mean_db(low_band_values)
 
     return {
         "available": True,
@@ -269,7 +270,7 @@ def audio_temporal_profile(track: str, seconds: float = DEFAULT_SECONDS) -> dict
         "spectral_flux_mean": None if flux_mean is None else round(flux_mean, 6),
         "spectral_flux_peak": None if not flux_peaks else round(max(flux_peaks), 6),
         "rms_rise_peak_db": None if not rms_rises else round(max(rms_rises), 4),
-        "low_band_40_160_energy_db": None if not low_band_values else round(_mean_db(low_band_values) or -120.0, 4),
+        "low_band_40_160_energy_db": None if low_band_mean is None else round(low_band_mean, 4),
         "low_band_40_160_min_db": None if not low_band_values else round(min(low_band_values), 4),
         "low_band_40_160_max_db": None if not low_band_values else round(max(low_band_values), 4),
         "onset_candidate_frames": len(candidates),
