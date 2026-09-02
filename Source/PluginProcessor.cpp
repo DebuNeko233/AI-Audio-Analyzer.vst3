@@ -35,17 +35,20 @@ AIAnalyzerAudioProcessor::AIAnalyzerAudioProcessor()
                          .withInput("Input", juce::AudioChannelSet::stereo(), true)
                          .withOutput("Output", juce::AudioChannelSet::stereo(), true))
 {
+    // Keep Identify first: it was historically the only host-visible parameter.
+    // Stable IDs remain authoritative, but preserving its index reduces risk in
+    // hosts that also retain parameter order/index information.
+    addParameter(new IdentifyParameter([this]
+    {
+        analysisWorker.requestIdentify();
+    }));
+
     analysisProfileParameter = new juce::AudioParameterChoice(
         juce::ParameterID { "analysis_profile", 1 },
         "Analysis Profile",
         juce::StringArray { "Eco", "Balanced", "Mix", "Full" },
         static_cast<int>(aianalyzer::AnalysisProfile::Full));
     addParameter(analysisProfileParameter);
-
-    addParameter(new IdentifyParameter([this]
-    {
-        analysisWorker.requestIdentify();
-    }));
 
     analysisWorker.setAnalysisProfile(aianalyzer::AnalysisProfile::Full);
     analysisWorker.setOscConfig(instanceId, oscHost, oscPort);
