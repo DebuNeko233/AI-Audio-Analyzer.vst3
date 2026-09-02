@@ -126,7 +126,12 @@ jobs:
           set -euo pipefail
           python -m pip install --upgrade pip
           python -m pip install -r bridge/requirements.txt
-          python -m py_compile bridge/server.py bridge/project_tools.py bridge/server_v05.py
+          python -m py_compile \
+            bridge/server.py \
+            bridge/project_tools.py \
+            bridge/server_v05.py \
+            bridge/temporal_tools.py \
+            bridge/server_v06.py
           python - <<'PY'
           import asyncio
           import sys
@@ -134,8 +139,9 @@ jobs:
 
           sys.path.insert(0, "bridge")
           import server as core
-          import server_v05 as entry
+          import server_v06 as entry
           import project_tools as project
+          import temporal_tools as temporal
           from mcp.server import MCPServer
 
           mcp_version = version("mcp")
@@ -162,6 +168,8 @@ jobs:
               "audio_capture_snapshot",
               "audio_list_snapshots",
               "audio_compare_snapshots",
+              "audio_temporal_profile",
+              "audio_temporal_compare",
           }
           missing = expected - names
           assert not missing, f"Missing MCP tools: {sorted(missing)}"
@@ -170,6 +178,16 @@ jobs:
               "Bass", 48000.0, 1.0, -20.0, -30.0, 10.0,
               500.0, 5000.0, 0.1, 0.8, 0.2,
           ] + [-40.0] * 32 + [-18.0, -14.0, -1.0, -0.5] + [0.9] * 8
+
+          def make_v06(runtime_id, timestamp, bands_db=None, flux_mean=0.04, flux_peak=0.12, rise_db=2.0, low_db=-35.0):
+              frame = list(base)
+              frame[2] = float(timestamp)
+              if bands_db is not None:
+                  frame[11:43] = list(bands_db)
+              return frame + [
+                  1, -20.0, 0.0, runtime_id,
+                  0.1, flux_mean, flux_peak, rise_db, low_db, "0.6",
+              ]
 
           with core._lock:
               core._tracks.clear()
@@ -180,9 +198,12 @@ jobs:
           with project._snapshot_lock:
               project._project_snapshots.clear()
 
-          core._on_frame("/aianalyzer/frame", *(base + [1, -20.0, 0.0, "uuid-a"]))
-          core._on_frame("/aianalyzer/frame", *(base + [1, -20.0, 0.0, "uuid-b"]))
+          core._on_frame("/aianalyzer/frame", *make_v06("uuid-a", 1.0))
+          core._on_frame("/aianalyzer/frame", *make_v06("uuid-b", 1.0))
           assert len(core._tracks) == 2
+          assert core._tracks["uuid-a"]["schema_version"] == "0.6"
+          assert core._tracks["uuid-a"]["temporal_supported"] is True
+          assert core._tracks["uuid-a"]["spectral_flux_mean"] == 0.04
 
           try:
               core._resolve_track("Bass")
@@ -214,7 +235,10 @@ jobs:
 
           silent = list(base)
           silent[3] = -80.0
-          core._on_frame("/aianalyzer/frame", *(silent + [0, -80.0, 4.0, "uuid-a"]))
+          core._on_frame(
+              "/aianalyzer/frame",
+              *(silent + [0, -80.0, 4.0, "uuid-a", 0.0, 0.0, 0.0, 0.0, -120.0, "0.6"]),
+          )
           safe = core._snapshot("mixer:7/slot:9")
           assert safe["signal_present"] is False
           assert safe["bands_db"] is None
@@ -222,9 +246,11 @@ jobs:
           assert safe["lufs_s"] is None
           assert safe["lufs_i"] == -14.0
           assert safe["binding"]["fl_track_name"] == "Bass Sub"
+          assert safe["temporal_valid"] is False
+          assert safe["spectral_flux_mean"] is None
 
-          # V0.5 project intelligence.
-          core._on_frame("/aianalyzer/frame", *(base + [1, -20.0, 0.0, "uuid-a"]))
+          # V0.5 project intelligence remains available on V0.6 frames.
+          core._on_frame("/aianalyzer/frame", *make_v06("uuid-a", 3.0))
           status = project.audio_project_status()
           assert status["live_count"] == 2
           assert status["bound_count"] == 1
@@ -243,7 +269,10 @@ jobs:
           changed[11:43] = [-30.0] * 32
           with core._lock:
               core._history["uuid-a"].clear()
-          core._on_frame("/aianalyzer/frame", *(changed + [1, -10.0, 0.0, "uuid-a"]))
+          core._on_frame(
+              "/aianalyzer/frame",
+              *(changed + [1, -10.0, 0.0, "uuid-a", 0.1, 0.05, 0.2, 4.0, -28.0, "0.6"]),
+          )
 
           after = project.audio_capture_snapshot("after", 10.0)
           assert after["track_count"] == 2
@@ -256,9 +285,43 @@ jobs:
           assert bass["delta"]["rms_db"] is not None
           assert bass["delta"]["rms_db"] > 0.0
 
+          # V0.6 temporal descriptors and two-track envelope alignment.
+          with core._lock:
+              core._history["uuid-a"].clear()
+              core._history["uuid-b"].clear()
+
+          series = [-52.0, -44.0, -34.0, -42.0, -50.0]
+          for index, db in enumerate(series):
+              timestamp = 10.0 + index * 0.1
+              rise = 5.0 if index in (1, 2) else 0.5
+              flux = 0.22 if index == 2 else 0.05
+              core._on_frame(
+                  "/aianalyzer/frame",
+                  *make_v06("uuid-a", timestamp, [db] * 32, 0.06, flux, rise, db - 2.0),
+              )
+              core._on_frame(
+                  "/aianalyzer/frame",
+                  *make_v06("uuid-b", timestamp + 0.01, [db + 2.0] * 32, 0.05, flux * 0.9, rise * 0.9, db),
+              )
+
+          profile = temporal.audio_temporal_profile("mixer:7/slot:9", 10.0)
+          assert profile["available"] is True
+          assert profile["temporal_frames"] == 5
+          assert profile["spectral_flux_peak"] >= 0.2
+          assert profile["rms_rise_peak_db"] >= 4.0
+          assert profile["onset_candidate_frames"] >= 1
+
+          pair = temporal.audio_temporal_compare("uuid-a", "uuid-b", 10.0, 40.0, 160.0, 80.0)
+          assert pair["available"] is True
+          assert pair["aligned_pairs"] == 5
+          assert pair["usable_band_pairs"] == 5
+          assert pair["band_envelope_correlation"] is not None
+          assert pair["band_envelope_correlation"] > 0.95
+          assert pair["normalized_band_temporal_overlap"] is not None
+
           print(
               f"AI Audio Analyzer MCP v{mcp_version}: {len(names)} tools registered; "
-              "V0.4 mapping + V0.5 project intelligence/A-B protocol OK"
+              "V0.4 mapping + V0.5 project A/B + V0.6 temporal protocol OK"
           )
           PY
 
@@ -271,7 +334,9 @@ jobs:
 
           cp bridge/server.py dist/mcp/
           cp bridge/server_v05.py dist/mcp/
+          cp bridge/server_v06.py dist/mcp/
           cp bridge/project_tools.py dist/mcp/
+          cp bridge/temporal_tools.py dist/mcp/
           cp bridge/requirements.txt dist/mcp/
           cp bridge/cherry-studio.example.json dist/mcp/
           cp -R skills/ai-analyzer-flstudio/. dist/skill/
@@ -300,9 +365,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Configure (macOS universal)
+      - name: Configure (macOS arm64)
         if: runner.os == 'macOS'
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 "-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64"
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 -DCMAKE_OSX_ARCHITECTURES=arm64
 
       - name: Configure (Windows)
         if: runner.os == 'Windows'
@@ -328,6 +393,7 @@ jobs:
           BINARY="$VST3_PATH/Contents/MacOS/AI Audio Analyzer"
 
           echo "Architectures: $(lipo -archs "$BINARY")"
+          test "$(lipo -archs "$BINARY")" = "arm64"
           echo "Mach-O deployment info:"
           otool -l "$BINARY" | awk '
             /LC_BUILD_VERSION/ { show=1; count=0 }
@@ -343,7 +409,9 @@ jobs:
 
           cp bridge/server.py dist/mcp/
           cp bridge/server_v05.py dist/mcp/
+          cp bridge/server_v06.py dist/mcp/
           cp bridge/project_tools.py dist/mcp/
+          cp bridge/temporal_tools.py dist/mcp/
           cp bridge/requirements.txt dist/mcp/
           cp bridge/cherry-studio.example.json dist/mcp/
           cp -R skills/ai-analyzer-flstudio/. dist/skill/
@@ -369,7 +437,9 @@ jobs:
 
           Copy-Item 'bridge/server.py' 'dist/mcp/server.py'
           Copy-Item 'bridge/server_v05.py' 'dist/mcp/server_v05.py'
+          Copy-Item 'bridge/server_v06.py' 'dist/mcp/server_v06.py'
           Copy-Item 'bridge/project_tools.py' 'dist/mcp/project_tools.py'
+          Copy-Item 'bridge/temporal_tools.py' 'dist/mcp/temporal_tools.py'
           Copy-Item 'bridge/requirements.txt' 'dist/mcp/requirements.txt'
           Copy-Item 'bridge/cherry-studio.example.json' 'dist/mcp/cherry-studio.example.json'
           Copy-Item 'skills/ai-analyzer-flstudio/*' 'dist/skill/' -Recurse -Force
