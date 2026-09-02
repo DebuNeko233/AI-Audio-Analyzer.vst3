@@ -44,13 +44,16 @@ AIAnalyzerAudioProcessorEditor::AIAnalyzerAudioProcessorEditor(AIAnalyzerAudioPr
     instanceLabel.setText("Instance", juce::dontSendNotification);
     hostLabel.setText("OSC Host", juce::dontSendNotification);
     portLabel.setText("Port", juce::dontSendNotification);
+    profileLabel.setText("Profile", juce::dontSendNotification);
 
     addAndMakeVisible(instanceLabel);
     addAndMakeVisible(hostLabel);
     addAndMakeVisible(portLabel);
+    addAndMakeVisible(profileLabel);
     addAndMakeVisible(instanceEditor);
     addAndMakeVisible(hostEditor);
     addAndMakeVisible(portEditor);
+    addAndMakeVisible(profileBox);
     addAndMakeVisible(applyButton);
 
     juce::String instance;
@@ -62,6 +65,19 @@ AIAnalyzerAudioProcessorEditor::AIAnalyzerAudioProcessorEditor(AIAnalyzerAudioPr
     hostEditor.setText(host, false);
     portEditor.setText(juce::String(port), false);
     portEditor.setInputRestrictions(5, "0123456789");
+
+    profileBox.addItem("Eco", 1);
+    profileBox.addItem("Balanced", 2);
+    profileBox.addItem("Mix", 3);
+    profileBox.addItem("Full", 4);
+    profileBox.setSelectedId(ownerProcessor.getAnalysisProfileIndex() + 1,
+                             juce::dontSendNotification);
+    profileBox.onChange = [this]
+    {
+        const auto selected = profileBox.getSelectedId();
+        if (selected >= 1 && selected <= 4)
+            ownerProcessor.setAnalysisProfileIndex(selected - 1, true);
+    };
 
     applyButton.onClick = [this] { applyConfig(); };
     instanceEditor.onReturnKey = [this] { applyConfig(); };
@@ -92,6 +108,13 @@ void AIAnalyzerAudioProcessorEditor::applyConfig()
 void AIAnalyzerAudioProcessorEditor::timerCallback()
 {
     hasFrame = ownerProcessor.getLatestAnalysis(latestFrame);
+
+    // Follow host automation/state restoration without feeding the change back
+    // into the host from the editor timer.
+    const auto actualProfileId = ownerProcessor.getAnalysisProfileIndex() + 1;
+    if (profileBox.getSelectedId() != actualProfileId)
+        profileBox.setSelectedId(actualProfileId, juce::dontSendNotification);
+
     repaint();
 }
 
@@ -272,17 +295,21 @@ void AIAnalyzerAudioProcessorEditor::resized()
 
     auto row = area.removeFromTop(34);
 
-    auto label = row.removeFromLeft(58);
+    auto label = row.removeFromLeft(54);
     instanceLabel.setBounds(label);
-    instanceEditor.setBounds(row.removeFromLeft(170).reduced(2));
+    instanceEditor.setBounds(row.removeFromLeft(120).reduced(2));
 
-    label = row.removeFromLeft(72);
+    label = row.removeFromLeft(62);
     hostLabel.setBounds(label);
-    hostEditor.setBounds(row.removeFromLeft(160).reduced(2));
+    hostEditor.setBounds(row.removeFromLeft(120).reduced(2));
 
-    label = row.removeFromLeft(42);
+    label = row.removeFromLeft(34);
     portLabel.setBounds(label);
-    portEditor.setBounds(row.removeFromLeft(72).reduced(2));
+    portEditor.setBounds(row.removeFromLeft(60).reduced(2));
 
-    applyButton.setBounds(row.removeFromLeft(74).reduced(2));
+    label = row.removeFromLeft(48);
+    profileLabel.setBounds(label);
+    profileBox.setBounds(row.removeFromLeft(112).reduced(2));
+
+    applyButton.setBounds(row.removeFromLeft(84).reduced(2));
 }
