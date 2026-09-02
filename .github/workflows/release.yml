@@ -44,11 +44,9 @@ jobs:
           test -s release/common/INSTALL.zh-CN.md
           python -m py_compile \
             bridge/server.py \
-            bridge/server_v05.py \
+            bridge/analyzer_core.py \
             bridge/project_tools.py \
-            bridge/server_v06.py \
             bridge/temporal_tools.py \
-            bridge/server_v07.py \
             bridge/masking_tools.py
 
   mcp-runtime:
@@ -83,7 +81,7 @@ jobs:
       - name: Validate source MCP 0.7
         shell: bash
         run: |
-          AI_ANALYZER_SELF_TEST=1 python bridge/server_v07.py
+          AI_ANALYZER_SELF_TEST=1 python bridge/server.py
 
       - name: Build standalone MCP runtime
         shell: bash
@@ -96,7 +94,7 @@ jobs:
             --paths bridge \
             --collect-all mcp \
             --collect-all pythonosc \
-            bridge/server_v07.py
+            bridge/server.py
 
       - name: Smoke-test packaged runtime on macOS
         if: runner.os == 'macOS'
@@ -168,7 +166,7 @@ jobs:
           New-Item -ItemType Directory -Path (Join-Path $root 'mcp/runtime') -Force | Out-Null
           Copy-Item 'input/mcp-runtime/ai-audio-analyzer-mcp' (Join-Path $root 'mcp/runtime/ai-audio-analyzer-mcp') -Recurse -Force
           New-Item -ItemType Directory -Path (Join-Path $root 'mcp/source') -Force | Out-Null
-          Copy-Item bridge/server.py,bridge/server_v05.py,bridge/project_tools.py,bridge/server_v06.py,bridge/temporal_tools.py,bridge/server_v07.py,bridge/masking_tools.py,bridge/requirements.txt,bridge/cherry-studio.example.json (Join-Path $root 'mcp/source/') -Force
+          Copy-Item bridge/server.py,bridge/analyzer_core.py,bridge/project_tools.py,bridge/temporal_tools.py,bridge/masking_tools.py,bridge/requirements.txt,bridge/cherry-studio.example.json (Join-Path $root 'mcp/source/') -Force
           Copy-Item 'skills/ai-analyzer-flstudio' (Join-Path $root 'skill') -Recurse -Force
           Copy-Item release/common/START-HERE.md (Join-Path $root 'START-HERE.md')
           Copy-Item release/common/INSTALL.en.md (Join-Path $root 'INSTALL.en.md')
@@ -181,6 +179,7 @@ jobs:
           Platform: Windows x64
           VST3 protocol/measurements: 0.6-compatible temporal frame
           MCP feature layer: 0.7 masking evidence
+          MCP source entrypoint: server.py
           MCP: PyInstaller standalone x64 runtime
           Python required for normal install: No
           Release commit: $env:GITHUB_SHA
@@ -242,7 +241,7 @@ jobs:
           mkdir -p "$ROOT/mcp/runtime" "$ROOT/mcp/source"
           ditto "$VST3_PATH" "$ROOT/AI Audio Analyzer.vst3"
           ditto input/mcp-arm64/ai-audio-analyzer-mcp "$ROOT/mcp/runtime/ai-audio-analyzer-mcp"
-          cp bridge/server.py bridge/server_v05.py bridge/project_tools.py bridge/server_v06.py bridge/temporal_tools.py bridge/server_v07.py bridge/masking_tools.py bridge/requirements.txt bridge/cherry-studio.example.json "$ROOT/mcp/source/"
+          cp bridge/server.py bridge/analyzer_core.py bridge/project_tools.py bridge/temporal_tools.py bridge/masking_tools.py bridge/requirements.txt bridge/cherry-studio.example.json "$ROOT/mcp/source/"
           ditto skills/ai-analyzer-flstudio "$ROOT/skill"
           cp release/common/START-HERE.md "$ROOT/START-HERE.md"
           cp release/common/INSTALL.en.md "$ROOT/INSTALL.en.md"
@@ -258,6 +257,7 @@ jobs:
           Platform: macOS Apple Silicon arm64
           VST3 protocol/measurements: 0.6-compatible temporal frame
           MCP feature layer: 0.7 masking evidence
+          MCP source entrypoint: server.py
           MCP: PyInstaller standalone arm64 runtime
           Python required for normal install: No
           Release commit: ${GITHUB_SHA}
@@ -312,6 +312,7 @@ jobs:
 
           - Windows x64 and macOS Apple Silicon arm64 lazy packages.
           - Standalone PyInstaller MCP runtime; normal users do not need Python or PyPI.
+          - MCP uses one stable source/PyInstaller entrypoint: bridge/server.py.
           - MCP 0.7 adds equal-ERB-rate re-binned spectral/relative-level/temporal masking evidence and a project masking scan.
           - The 0.7 evidence model is transparent heuristic evidence, not a calibrated cochlear/gammatone filterbank and not a probability of audible masking.
           - VST3 OSC measurement schema remains compatible with 0.6; indexes 0..64 are unchanged.
