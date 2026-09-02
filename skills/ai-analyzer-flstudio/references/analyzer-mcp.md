@@ -1,8 +1,8 @@
 # AI Audio Analyzer MCP Reference
 
-This file describes MCP tools, selector rules, call order, validity checks, and OSC compatibility. Measurement semantics are documented in `parameters.md`; V0.7 masking evidence in `masking-evidence.md`; V0.8 stereo evidence in `stereo-evidence.md`; V0.9 tonal evidence in `tonal-evidence.md`.
+This file describes MCP tools, selector rules, call order, validity checks, verification flow, and OSC compatibility. Measurement semantics are documented in `parameters.md`; V0.7 masking evidence in `masking-evidence.md`; V0.8 stereo evidence in `stereo-evidence.md`; V0.9 tonal evidence in `tonal-evidence.md`; V1.0 closed-loop verification in `verification-evidence.md`.
 
-Current MCP 0.9 exposes **24 tools**:
+Current MCP 1.0 exposes **27 tools**:
 
 ```text
 audio_bridge_status()
@@ -29,11 +29,14 @@ audio_stereo_profile(track, seconds=5)
 audio_stereo_compare(track_a, track_b, seconds=5)
 audio_tonal_profile(track, seconds=8)
 audio_tonal_compare(track_a, track_b, seconds=8)
+audio_begin_verification(label, seconds=5, target_selectors=None)
+audio_complete_verification(verification_id, seconds=0, change_summary="", host_readback="")
+audio_verification_status(verification_id="")
 ```
 
 ## Recommended hierarchy
 
-Do not call all 24 tools by default.
+Do not call all 27 tools by default.
 
 ```text
 project readiness
@@ -72,13 +75,162 @@ two-track stereo measurement comparison
 two-track pitch-class distribution comparison
 → audio_tonal_compare()
 
-Before/After verification
+manual Before/After snapshots
 → audio_capture_snapshot() / audio_compare_snapshots()
+
+externally controlled DAW change with auditable A/B
+→ audio_begin_verification()
+→ external control MCP write + host readback
+→ audio_complete_verification()
+→ audio_verification_status()
 ```
 
 Use the highest-level tool that answers the request, then drill down only when more detail is useful.
 
 For exact symbolic note/key/chord facts, use actual DAW/MIDI/project data when available. V0.9 is audio-domain inference evidence.
+
+## V1.0 closed-loop verification
+
+V1.0 adds Bridge-side orchestration only. It does **not** add VST3/OSC fields and does not control FL Studio.
+
+Use it when the agent coordinates a DAW change through an external control MCP and wants auditable Before/After measurement evidence.
+
+Canonical order:
+
+```text
+audio_project_status()
+→ deterministic Identify mapping if needed
+→ play intended comparison passage
+→ audio_begin_verification(...)
+→ check ready_for_external_change / baseline_blockers
+→ external DAW-control MCP performs actual write
+→ external DAW-control MCP reads actual host state back
+→ replay same intended passage
+→ audio_complete_verification(..., change_summary=..., host_readback=...)
+→ inspect controlled_comparison / comparability
+→ specialized Analyzer tools only when deeper evidence is needed
+```
+
+### `audio_begin_verification()`
+
+```text
+audio_begin_verification(
+  label,
+  seconds=5,
+  target_selectors=None
+)
+```
+
+`label` is a short factual description for the current verification session.
+
+`target_selectors` may be omitted or may contain deterministic selectors such as:
+
+```text
+["mixer:4/slot:9", "mixer:7/slot:9"]
+```
+
+Main output:
+
+```text
+verification_id
+status = "awaiting_external_change"
+ready_for_external_change
+baseline_blockers
+target_selectors
+baseline.captured_at
+baseline.window_seconds
+baseline.track_count
+baseline.valid_track_count
+baseline.topology_fingerprint
+baseline.tracks[]
+recommended_next_step
+```
+
+Do not make the DAW write first and then pretend this result is a Before baseline.
+
+If `ready_for_external_change=false`, resolve `baseline_blockers` and begin a new verification before changing the DAW.
+
+### `audio_complete_verification()`
+
+```text
+audio_complete_verification(
+  verification_id,
+  seconds=0,
+  change_summary="",
+  host_readback=""
+)
+```
+
+When `seconds <= 0`, the After capture reuses the Before measurement-window duration.
+
+`change_summary` should factually describe the actual control change attempted.
+
+`host_readback` should be the actual post-write host state returned by the external DAW-control MCP. It is caller-supplied audit evidence; Analyzer stores it but does not independently validate it against FL Studio.
+
+Main output includes:
+
+```text
+status = "completed"
+result.before
+result.after
+result.comparison.controlled_comparison
+result.comparison.comparability.same_window_seconds
+result.comparison.comparability.topology_unchanged
+result.comparison.comparability.active_ratio_tolerance
+result.comparison.comparability.missing_targets
+result.comparison.comparability.invalid_targets
+result.comparison.comparability.coverage_mismatch_targets
+result.comparison.comparability.warnings
+result.comparison.topology
+result.comparison.targets[].delta
+result.external_change.change_summary
+result.external_change.host_readback
+result.external_change.readback_supplied
+result.audit
+```
+
+Basic deltas use:
+
+```text
+After - Before
+```
+
+Calling `audio_complete_verification()` again for an already completed session returns the stored completed result instead of silently replacing the After capture.
+
+### `controlled_comparison`
+
+Current V1.0 requires all of the following:
+
+```text
+one or more compared targets
+same Before/After window duration
+unchanged Analyzer topology fingerprint / identity set
+no requested target missing
+valid active analysis in Before and After for each compared requested target
+absolute active_ratio difference <= 0.15 for each compared requested target
+```
+
+The `0.15` active-ratio tolerance is a transparent passage-coverage guardrail, not an audible threshold or mix-quality threshold.
+
+`controlled_comparison=true` means the A/B measurement conditions satisfy the listed technical guardrails. It does **not** mean After is better, correct, more professional, or should be kept.
+
+### `audio_verification_status()`
+
+```text
+audio_verification_status()
+```
+
+lists recent Bridge-session verification records.
+
+```text
+audio_verification_status(verification_id)
+```
+
+retrieves one session and its completed result when available.
+
+Verification records are in-memory and disappear when the Analyzer MCP Bridge exits.
+
+Detailed semantics are in `verification-evidence.md`.
 
 ## V0.4 Identify: FL Studio ↔ Analyzer mapping
 
@@ -175,6 +327,20 @@ evidence_quality.tonal_center_top2_margin
 evidence_quality.valid_frame_ratio
 ```
 
+For V1.0 verification inspect:
+
+```text
+ready_for_external_change
+baseline_blockers
+controlled_comparison
+same_window_seconds
+topology_unchanged
+missing_targets
+invalid_targets
+coverage_mismatch_targets
+active_ratio_tolerance
+```
+
 ## `audio_project_status()`
 
 Use first for project readiness. Important fields include:
@@ -191,7 +357,7 @@ instances
 warnings
 ```
 
-If instances are unbound, perform Identify before project-wide interpretation.
+If instances are unbound, perform Identify before project-wide interpretation or V1.0 verification.
 
 ## `audio_mix_overview()`
 
@@ -398,6 +564,8 @@ audio_compare_snapshots("before", "after")
 
 Use comparable passages/windows and inspect active coverage. Delta convention is `After - Before`. LUFS-I remains session cumulative.
 
+For agent-coordinated external DAW changes, V1.0 verification is preferred because it also records baseline blockers, topology consistency, target validity, active-coverage comparability, external change summary, and host readback.
+
 ## Multiple instances and OSC
 
 All VST3 instances normally send to:
@@ -410,7 +578,9 @@ Only the Bridge binds UDP 9855. VST3 instances are senders, so multiple instance
 
 ## OSC compatibility
 
-V0.9 remains append-only. Existing indexes `0..111` are unchanged:
+**MCP 1.0 still uses OSC protocol 0.9.** V1.0 adds no VST3 frame fields.
+
+The OSC frame remains append-only through index `127`:
 
 ```text
 0..58    V0.1–V0.4-compatible prefix
@@ -436,4 +606,4 @@ V0.9 remains append-only. Existing indexes `0..111` are unchanged:
 127      V0.9 schema marker = "0.9"
 ```
 
-Historical `bands_db` at indexes `11..42` remains the Mid spectrum. V0.8 and V0.9 only append fields; they do not repurpose existing indexes.
+Historical `bands_db` at indexes `11..42` remains the Mid spectrum. V0.8 and V0.9 only append fields; they do not repurpose existing indexes. V1.0 operates entirely in the Bridge verification layer.

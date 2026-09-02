@@ -473,7 +473,7 @@ Larger means stronger separation between the two top candidates within this 24-t
 
 ### `single_f0_harmonic_energy_ratio`
 
-Single-F0 spectral harmonic-alignment heuristic. The plugin searches a candidate fundamental approximately within `55–1000 Hz` and evaluates spectral energy near up to eight integer harmonics.
+Single-F0 spectral harmonic-alignment heuristic. The plugin searches a candidate fundamental approximately within `55–1000 Hz` and evaluates spectral energy near up to eight integer harmonics. The final matched-energy numerator and semantic denominator both use the approximately `80 Hz–5 kHz` semantic band.
 
 It is not:
 
@@ -513,6 +513,92 @@ They describe normalized distribution differences only and do not imply note/har
 ### Exact symbolic data rule
 
 If exact note events, key metadata, chords, or tuning data are available through DAW/MIDI/project tools, prefer those sources for exact symbolic claims. V0.9 remains an audio-domain inference layer.
+
+## V1.0 closed-loop verification semantics
+
+Detailed workflow semantics are in `verification-evidence.md`.
+
+V1.0 is a Bridge-side measurement-orchestration layer. It adds no OSC fields and does not control the DAW.
+
+### `verification_id`
+
+Session-scoped identifier for one Before/change/readback/After verification record. It is not a permanent project ID, DAW undo ID, or plugin UUID.
+
+### `ready_for_external_change`
+
+Whether the captured Before baseline passed the current technical readiness checks. It does not mean the proposed DAW change is appropriate.
+
+### `baseline_blockers`
+
+Reasons the Before baseline should not be treated as ready, such as incomplete Analyzer mapping, missing requested selectors, stale/incomplete project readiness, or invalid active measurements.
+
+### `topology_fingerprint`
+
+Short SHA-256-derived consistency marker over sorted live Analyzer identity/binding metadata.
+
+It is not an audio fingerprint, persistent FL Studio project hash, or proof that every host parameter is unchanged.
+
+### `active_ratio_tolerance`
+
+Current V1.0 value:
+
+```text
+0.15 absolute difference
+```
+
+Used only as a transparent Before/After passage-coverage comparability guardrail. It is not a quality, audibility, loudness, or psychoacoustic threshold.
+
+### `controlled_comparison`
+
+True only when current V1.0 guardrails pass: at least one compared target, same measurement-window duration, unchanged Analyzer topology, no missing requested targets, valid active analysis in both windows, and active-ratio difference within tolerance.
+
+It is a **measurement-comparability Boolean**, not a claim that After is better, correct, preferred, or more professional.
+
+### `same_window_seconds`
+
+Whether Before and After requested measurement-window durations match. `audio_complete_verification(seconds=0)` reuses the baseline duration.
+
+### `topology_unchanged`
+
+Whether the live Analyzer topology/identity consistency marker and captured identity set remained unchanged.
+
+### `missing_targets`
+
+Requested verification selectors absent from Before or After.
+
+### `invalid_targets`
+
+Requested targets without valid active analysis in one or both windows.
+
+### `coverage_mismatch_targets`
+
+Requested targets whose Before/After active coverage cannot be compared within the current tolerance.
+
+### `change_summary`
+
+Caller-supplied factual description of the external DAW change attempted. Analyzer does not independently prove that the described control write occurred.
+
+### `host_readback`
+
+Caller-supplied actual post-write host-state report from the external DAW-control MCP. Analyzer stores it for auditability but does not independently query or validate FL Studio state.
+
+### `readback_supplied`
+
+Whether non-empty caller-supplied host readback was recorded. This means readback evidence was supplied, not that Analyzer independently verified it.
+
+### Verification delta convention
+
+Basic V1.0 measurement deltas use:
+
+```text
+After - Before
+```
+
+Positive means numerically higher in After, not better.
+
+### Verification persistence
+
+Verification sessions exist only in Bridge memory and disappear when the Analyzer MCP process exits.
 
 ## Identity / topology
 
@@ -571,4 +657,4 @@ Delta convention:
 Delta = After - Before
 ```
 
-Check passage comparability, window length, and `active_ratio` before interpretation.
+Check passage comparability, window length, and `active_ratio` before interpretation. For agent-coordinated DAW changes, prefer V1.0 verification when topology/readback/comparability auditing is needed.
