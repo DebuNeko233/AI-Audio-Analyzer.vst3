@@ -1,8 +1,8 @@
 # AI Audio Analyzer MCP Reference
 
-本文件只描述 MCP 工具、selector、调用顺序和数据有效性。参数的技术语义见 `parameters.md`。
+This document describes MCP tools, selectors, calling order, and data-validity rules. See `parameters.md` for technical parameter semantics.
 
-当前 MCP 0.6 共 18 个工具：
+AI Audio Analyzer MCP 0.6 currently exposes 18 tools:
 
 ```text
 audio_bridge_status()
@@ -25,36 +25,36 @@ audio_temporal_profile(track, seconds=5)
 audio_temporal_compare(track_a, track_b, seconds=5, low_hz=40, high_hz=160, alignment_tolerance_ms=80)
 ```
 
-## 推荐调用层级
+## Recommended call hierarchy
 
-不要无条件把 18 个工具全部调用一遍。优先使用最高层、信息足够的工具，再按问题下钻。
+Do not call all 18 tools automatically. Use the highest-level tool that already contains enough information, then drill down only when needed.
 
 ```text
-工程准备度
+Project readiness
 → audio_project_status()
 
-工程最近窗口
+Project recent window
 → audio_mix_overview()
 
-单轨稳定窗口
+Stable single-track window
 → audio_average()
 
-单轨时间变化
+Single-track temporal behavior
 → audio_temporal_profile()
 
-两轨频谱关系
+Two-track spectral relationship
 → audio_compare_tracks()
 
-两轨时间关系
+Two-track temporal relationship
 → audio_temporal_compare()
 
-修改前后测量
+Before/After measurement
 → audio_capture_snapshot() / audio_compare_snapshots()
 ```
 
 ## V0.4 FL Studio ↔ Analyzer Identify
 
-AI Audio Analyzer 向宿主公开：
+AI Audio Analyzer exposes this host parameter:
 
 ```text
 Parameter ID: identify
@@ -62,34 +62,34 @@ Display name: Identify
 Type: Boolean
 ```
 
-每次布尔值发生翻转都会发送一次 `/aianalyzer/identify`。推荐流程：
+Every boolean transition emits `/aianalyzer/identify`. Recommended flow:
 
-1. 用 FL Studio MCP 找到目标 Mixer Track / Plugin Slot；
-2. 扫描插件真实公开参数，找到 `Identify`；
-3. 读取该实例当前值；
-4. 设置为相反值；
-5. 立即调用 `audio_last_identify()`；
-6. 确认事件 fresh 且未 consumed；
-7. 立即调用 `audio_bind_last_identified(fl_track_index, fl_track_name, slot)`；
-8. 对下一实例重复；
-9. 最后调用 `audio_instance_map()` 检查 `discovery_complete`。
+1. use the FL Studio control MCP to find the real Mixer Track and Plugin Slot;
+2. inspect the plugin's real exposed parameters and locate `Identify`;
+3. read its current value;
+4. set it to the opposite value;
+5. immediately call `audio_last_identify()`;
+6. verify the event is fresh and unconsumed;
+7. immediately call `audio_bind_last_identified(fl_track_index, fl_track_name, slot)`;
+8. repeat for the next instance;
+9. finish with `audio_instance_map()` and inspect `discovery_complete`.
 
-不要假设 FL Studio MCP 的工具名称；使用它实际暴露的工具和参数。
+Do not invent FL Studio MCP tool names. Use the tools and parameters that the connected control MCP actually exposes.
 
-每个 Identify 事件只能消费一次。绑定和 runtime UUID 都是 session-scoped。
+Each Identify event may be consumed only once. Bindings and runtime UUIDs are session-scoped.
 
-## Selector
+## Selectors
 
-推荐优先级：
+Preferred order:
 
 ```text
 mixer:<track_index>/slot:<slot>
-→ 唯一 FL Mixer track name
+→ unique FL Mixer Track name
 → runtime UUID
-→ 唯一 Analyzer 人类名称
+→ unique human-readable Analyzer name
 ```
 
-支持：
+Supported selector forms include:
 
 ```text
 mixer:7
@@ -98,11 +98,11 @@ fl:7
 fl:7/slot:9
 ```
 
-同一 Mixer Track 上存在多个 Analyzer 时必须带 `slot`。
+If one Mixer Track contains multiple Analyzer instances, the selector must include `slot`.
 
 ## Signal / validity
 
-V0.3 Signal Gate：
+V0.3 signal gate:
 
 ```text
 close threshold   ≈ -50 dBFS
@@ -110,16 +110,16 @@ reopen threshold  ≈ -48 dBFS
 hold              ≈ 0.4 s
 ```
 
-必须遵守：
+Rules:
 
-- `signal_present=false` 时不要使用频谱/立体声内容做推断；
-- `null` 表示 unavailable，不是 0；
-- `audio_average()` 要结合 `active_frames`、`active_ratio` 和 `analysis_valid`；
-- stale stream 不应被描述成当前实时状态。
+- do not infer spectral/stereo content when `signal_present=false`;
+- `null` means unavailable, not zero;
+- interpret `audio_average()` together with `active_frames`, `active_ratio`, and `analysis_valid`;
+- do not describe stale streams as current real-time state.
 
 ## `audio_project_status()`
 
-优先用于工程级准备度检查。重点字段：
+Use this first for project-level readiness. Important fields include:
 
 ```text
 project_ready
@@ -133,45 +133,39 @@ instances
 warnings
 ```
 
-如果存在未绑定实例，先做 Identify，而不是靠名称或音频内容猜映射。
+If instances are unbound, run deterministic Identify mapping instead of guessing from names or musical content.
 
 ## `audio_mix_overview()`
 
-用于一次读取多个 Analyzer 最近窗口状态。它会返回：
+Use this to read recent-window state across multiple Analyzer instances. It returns project tracks, Master candidates, and `potential_spectral_conflicts`.
 
-```text
-tracks
-master / master_candidates
-potential_spectral_conflicts
-```
+`potential_spectral_conflicts` is heuristic relative spectral overlap intended to identify areas worth further inspection. It does not prove audible masking.
 
-`potential_spectral_conflicts` 只是 heuristic relative spectral overlap，用来决定是否值得进一步查询。
+If the question is whether two tracks occupy a region **at the same time**, continue with `audio_temporal_compare()` rather than relying on overview overlap alone.
 
-如果要知道两个轨道是否**在时间上**共同占用某频段，不要只看 overview overlap，继续使用 `audio_temporal_compare()`。
-
-## `audio_snapshot()` 与 `audio_average()`
+## `audio_snapshot()` and `audio_average()`
 
 ```text
 audio_snapshot(track)
 ```
 
-读取最新一帧，适合连接/当前状态排查。
+Reads the latest frame. Use it for current-state inspection or connection troubleshooting.
 
 ```text
 audio_average(track, seconds)
 ```
 
-读取稳定窗口，适合需要几秒统计的任务。频谱、立体声和内容相关统计只对 active frames 计算。
+Reads a stable recent window. Spectrum, stereo, and other content-related statistics use active frames only.
 
 ## `audio_compare_tracks()` / `audio_detect_masking()`
 
-`audio_compare_tracks()` 比较两个实例的相对频谱形状。
+`audio_compare_tracks()` compares relative spectral shapes between two active Analyzer instances.
 
-`audio_detect_masking()` 目前仍是频谱重叠候选工具，不是 Bark/ERB 完整心理声学模型。不要把其返回值写成“已经证明可听遮蔽”。
+`audio_detect_masking()` currently remains a spectral-overlap candidate tool, not a complete Bark/ERB psychoacoustic masking model. Do not describe its output as proof that audible masking has occurred.
 
 ## V0.6 `audio_temporal_profile()`
 
-用于读取一个 Analyzer 在最近窗口内的时间变化描述：
+Summarizes recent temporal behavior for one Analyzer:
 
 ```text
 spectral_flux_mean
@@ -184,13 +178,13 @@ onset_candidate_frames
 onset_candidate_density_hz
 ```
 
-调用前提：VST3 必须是 0.6+，并且窗口内有 `temporal_valid` frame。
+Requirements: the VST3 must support the V0.6 temporal tail, and the requested window must contain temporally valid active frames.
 
-`onset_candidate_*` 是阈值化 change candidate，不是 ground-truth onset label。实际阈值会在返回值的 `onset_candidate_thresholds` 中明确给出。
+`onset_candidate_*` fields are thresholded change candidates, not ground-truth onset labels. Actual thresholds are returned under `onset_candidate_thresholds`.
 
 ## V0.6 `audio_temporal_compare()`
 
-用于比较两个 Analyzer 的时间对齐包络：
+Compares time-aligned band envelopes from two Analyzer instances:
 
 ```text
 audio_temporal_compare(
@@ -203,7 +197,7 @@ audio_temporal_compare(
 )
 ```
 
-重点字段：
+Important fields:
 
 ```text
 aligned_pairs
@@ -219,22 +213,22 @@ coincident_onset_candidate_frames
 candidate_coincidence_ratio
 ```
 
-用途区别：
+Interpretation:
 
 ```text
 band_envelope_correlation
-→ 两条所选频段包络是否同向变化
+→ whether the selected-band envelopes tend to vary in the same direction
 
 normalized_band_temporal_overlap
-→ 两条轨道是否经常同时处在各自较强的该频段状态
+→ how often both tracks are simultaneously strong relative to their own selected-band peaks
 
 candidate_coincidence_ratio
-→ V0.6 change/onset candidate 是否在对齐的 OSC frame 中同时出现
+→ how often V0.6 change/onset candidates occur in the same aligned OSC frames
 ```
 
-它们都是时间关系证据，不是处理指令，也不是完整 masking 概率。
+These are timing-relationship measurements/heuristics. They are not processing instructions and not a complete masking probability.
 
-如果 `mean_abs_alignment_offset_ms` 接近或超过允许容差，降低对相关性结果的解释强度。
+If `mean_abs_alignment_offset_ms` approaches the allowed alignment tolerance, reduce confidence in correlation/overlap interpretation.
 
 ## Snapshot / A-B
 
@@ -244,29 +238,29 @@ audio_capture_snapshot("after", seconds=5)
 audio_compare_snapshots("before", "after")
 ```
 
-Snapshot 存在于当前 Bridge session 内。
+Snapshots exist only in the current Bridge session.
 
-为了可比：
+For comparability:
 
-- before / after 尽量使用同一音乐片段；
-- 窗口长度尽量相同；
-- 检查 `active_ratio`；
-- delta 定义为 `After - Before`；
-- LUFS-I 是 session 累积值，短时 A/B 时不要当成两个独立重置窗口。
+- use the same musical passage when practical;
+- use similar window lengths;
+- compare `active_ratio`;
+- delta is defined as `After - Before`;
+- LUFS-I is session-integrated and should not be treated as two independently reset short-window measurements.
 
-## 多实例与 OSC
+## Multiple instances and OSC
 
-所有 VST3 实例默认都向：
+All VST3 instances send OSC to the same default destination:
 
 ```text
 127.0.0.1:9855
 ```
 
-发送 OSC。只有 Bridge 绑定 UDP 9855；VST3 都是 sender，因此不需要每个实例一个端口。
+Only the Bridge binds UDP 9855. VST3 instances are senders, so each Analyzer does not need a separate port.
 
-## V0.6 OSC append-only tail
+## V0.6 append-only OSC tail
 
-`/aianalyzer/frame` 保留 0..58 的旧字段不变，在 runtime UUID 之后新增：
+`/aianalyzer/frame` preserves fields `0..58` unchanged and appends these after the runtime UUID:
 
 ```text
 59  temporal_window_seconds
@@ -277,4 +271,4 @@ Snapshot 存在于当前 Bridge session 内。
 64  frame_schema_version    # "0.6"
 ```
 
-旧 Bridge 可以忽略这些尾字段；0.6 Bridge 先调用稳定旧 parser，再附加解析这些字段。
+Older Bridges may ignore these trailing fields. The 0.6 compatibility layer first runs the stable parser and then attaches the V0.6 tail.
