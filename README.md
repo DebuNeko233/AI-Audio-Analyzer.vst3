@@ -4,7 +4,7 @@
 
 **AI Audio Analyzer** is a JUCE VST3 machine-readable audio measurement layer for AI/LLM-assisted music-production workflows.
 
-The plugin measures audio inside the DAW, emits compact OSC data to the Analyzer MCP Bridge, and exposes structured level, loudness, spectrum, stereo, temporal, project, A/B, masking-related, audio-domain tonal, and V1.0 closed-loop verification evidence to Cherry Studio or another MCP client.
+The plugin measures audio inside the DAW, emits compact OSC data to the Analyzer MCP Bridge, and exposes structured level, loudness, spectrum, stereo, temporal, project, A/B, masking-related, audio-domain tonal, and closed-loop verification evidence to Cherry Studio or another MCP client.
 
 Current product version: **1.0.0**.
 
@@ -30,7 +30,7 @@ AI Audio Analyzer MCP   → observe / measure / compare / verify
 FL Studio MCP           → inspect / control / modify / read back FL Studio
 ```
 
-V1.0 makes the intended closed loop explicit:
+The intended closed loop is:
 
 ```text
 DISCOVER
@@ -61,11 +61,11 @@ FL Studio / DAW
                  ├─ live instance registry
                  ├─ deterministic FL Track/Slot bindings
                  ├─ project overview / Snapshot A-B
-                 ├─ V0.6 temporal evidence
-                 ├─ V0.7 masking evidence
-                 ├─ V0.8 Mid/Side + stereo evidence
-                 ├─ V0.9 tonal / music-semantic evidence
-                 └─ V1.0 closed-loop verification sessions
+                 ├─ temporal evidence
+                 ├─ masking evidence
+                 ├─ Mid/Side + stereo evidence
+                 ├─ tonal / music-semantic evidence
+                 └─ closed-loop verification sessions
                          │
                          ▼
                   Cherry Studio / LLM
@@ -86,11 +86,11 @@ Core measurements include:
 - Spectral Centroid, ~85% Rolloff and Flatness;
 - full-band L/R Correlation and legacy Mid/Side width ratio;
 - 8-band L/R Correlation;
-- V0.6 Spectral Flux, RMS Rise and 40–160 Hz temporal energy;
-- V0.8 Mid RMS, Side RMS, Side/Mid dB, Side spectrum, frequency-dependent Side/Mid ratio, low-band stereo relation, and negative cross-spectrum evidence;
-- V0.9 12-bin Mid-spectrum chroma, chroma analysis coverage, tonal-center profile ranking, and single-F0 harmonic-alignment evidence.
+- Spectral Flux, RMS Rise and 40–160 Hz temporal energy;
+- Mid RMS, Side RMS, Side/Mid dB, Side spectrum, frequency-dependent Side/Mid ratio, low-band stereo relation, and negative cross-spectrum evidence;
+- 12-bin Mid-spectrum chroma, chroma analysis coverage, tonal-center profile ranking, and single-F0 harmonic-alignment evidence.
 
-### V0.3 signal validity
+### Signal validity
 
 Approximate detector behavior:
 
@@ -101,7 +101,7 @@ reopen  above -48 dBFS
 
 When `signal_present=false`, content-dependent measurements become unavailable rather than returning misleading zeroes. `null` means **unavailable**, not numeric zero.
 
-### V0.4 deterministic Analyzer ↔ FL Mixer mapping
+### Deterministic Analyzer ↔ FL Mixer mapping
 
 Every live Analyzer has a session runtime UUID and exposes a host-visible Boolean parameter:
 
@@ -116,11 +116,11 @@ Every Identify transition emits `/aianalyzer/identify`, including while transpor
 mixer:7/slot:9
 ```
 
-### V0.5 project intelligence / Snapshot A-B
+### Project intelligence / Snapshot A-B
 
 Project tools provide readiness, recent overview, and Bridge-session Before/After snapshots.
 
-### V0.6 temporal evidence
+### Temporal evidence
 
 ```text
 audio_temporal_profile()
@@ -129,14 +129,14 @@ audio_temporal_compare()
 
 Temporal overlap/correlation is evidence of time co-occurrence/co-variation, not a masking probability or processing instruction.
 
-### V0.7 stronger masking evidence
+### Stronger masking evidence
 
 ```text
 32 Mid-spectrum features
 → 16 equal ERB-rate regions
 → relative spectral occupancy
 → directional relative-level weighting
-→ V0.6 temporal overlap
+→ temporal overlap
 → region-level masking evidence
 ```
 
@@ -149,9 +149,9 @@ audio_project_masking_scan()
 
 This is **equal-ERB-rate feature re-binning**, not a gammatone/cochlear filterbank or calibrated hearing-threshold model. Scores are heuristic evidence, not audible-masking probabilities.
 
-### V0.8 deeper Mid/Side and stereo evidence
+### Deeper Mid/Side and stereo evidence
 
-V0.8 separates signed L/R correlation, Side/Mid energy, decorrelation proxy, negative cross-spectrum evidence, low-frequency stereo relation, Mid/Side spectra, and frequency-dependent stereo evidence.
+This layer separates signed L/R correlation, Side/Mid energy, decorrelation proxy, negative cross-spectrum evidence, low-frequency stereo relation, Mid/Side spectra, and frequency-dependent stereo evidence.
 
 ```text
 audio_stereo_profile(track, seconds=5)
@@ -160,9 +160,9 @@ audio_stereo_compare(track_a, track_b, seconds=5)
 
 No universal width, correlation, Side/Mid, or low-frequency stereo target is defined.
 
-### V0.9 audio-domain tonal / music-semantic evidence
+### Audio-domain tonal / music-semantic evidence
 
-V0.9 provides:
+The Analyzer provides:
 
 ```text
 12-bin normalized chroma: C..B
@@ -180,9 +180,9 @@ audio_tonal_compare(track_a, track_b, seconds=8)
 
 Tonal-center ranking uses 24 major/minor Krumhansl-Kessler profile correlations. These are audio-domain evidence, not exact key/note probabilities. Prefer exact MIDI/DAW note, key, chord, or tuning metadata for exact symbolic facts when available.
 
-### V1.0 reliable closed-loop verification
+### Reliable closed-loop verification
 
-V1.0 adds **Bridge-side verification orchestration**, not new DSP or OSC fields:
+This is **Bridge-side verification orchestration**, not new DSP or OSC fields:
 
 ```text
 audio_begin_verification(label, seconds=5, target_selectors=None)
@@ -211,7 +211,7 @@ Verification sessions are Bridge-session memory only.
 
 ## MCP tools
 
-MCP 1.0 exposes **27 tools**. In addition to the existing 24 measurement/evidence tools, V1.0 adds:
+MCP 1.0 exposes **27 tools**. In addition to the existing 24 measurement/evidence tools, it adds:
 
 ```text
 audio_begin_verification(...)
@@ -219,7 +219,7 @@ audio_complete_verification(...)
 audio_verification_status(...)
 ```
 
-Do not mechanically call every tool. Start at project level and choose only the evidence family required by the question. When changing the DAW and verifying the result, wrap the external write/readback with the V1.0 verification tools.
+Do not mechanically call every tool. Start at project level and choose only the evidence family required by the question. When changing the DAW and verifying the result, wrap the external write/readback with the verification tools.
 
 ## User installation
 
@@ -288,7 +288,7 @@ MCP version           1.0
 OSC protocol version  0.9
 ```
 
-V1.0 intentionally keeps OSC at `0.9` because no VST3 frame fields changed.
+No VST3 frame fields changed in 1.0, so the OSC protocol intentionally remains `0.9`.
 
 Internal modules:
 
@@ -296,11 +296,11 @@ Internal modules:
 bridge/server.py             startup / self-test / shared tool registry
 bridge/analyzer_core.py      OSC state, identity/binding, base tools
 bridge/project_tools.py      project overview / Snapshot A-B
-bridge/temporal_tools.py     V0.6 temporal layer
-bridge/masking_tools.py      V0.7 masking-evidence layer
-bridge/stereo_tools.py       V0.8 Mid/Side and stereo layer
-bridge/semantic_tools.py     V0.9 chroma / tonal-center / harmonic evidence
-bridge/verification_tools.py V1.0 controlled verification sessions
+bridge/temporal_tools.py     temporal layer
+bridge/masking_tools.py      masking-evidence layer
+bridge/stereo_tools.py       Mid/Side and stereo layer
+bridge/semantic_tools.py     chroma / tonal-center / harmonic evidence
+bridge/verification_tools.py controlled verification sessions
 ```
 
 `bridge/ci_regression.py` is repository-only synthetic regression code. It is not shipped in beginner Releases.
@@ -341,7 +341,7 @@ MCP 1.0 continues to use the append-only **OSC protocol 0.9**:
 127      V0.9 schema marker = "0.9"
 ```
 
-Historical indexes `11..42` remain the 32-band **Mid spectrum**. V1.0 adds no tail after index `127`.
+Historical indexes `11..42` remain the 32-band **Mid spectrum**. The 1.0 release adds no tail after index `127`.
 
 Identify address remains `/aianalyzer/identify`.
 
@@ -351,16 +351,16 @@ The audio callback does not perform FFT, loudness, semantic analysis, OSC, MCP, 
 
 ## Current limitations
 
-- V0.7 ERB handling is feature re-binning, not a true auditory filterbank.
+- ERB handling is feature re-binning, not a true auditory filterbank.
 - Masking evidence remains heuristic.
-- V0.8 negative-cross evidence is not a phase-angle histogram or mono-cancellation percentage.
-- V0.8 Side/Mid and correlation metrics are measurements, not stereo-quality scores.
-- V0.9 chroma is FFT-derived 12-TET pitch-class evidence, not transcription.
-- V0.9 tonal-center ranking is profile correlation, not exact key detection.
-- V0.9 single-F0 harmonic evidence is a heuristic and can be unstable on polyphonic/noisy/inharmonic material.
-- V1.0 topology fingerprint is a live Analyzer consistency marker, not a complete persistent DAW-project hash.
-- V1.0 `host_readback` is supplied by the caller/external control MCP and is not independently validated by Analyzer.
-- V1.0 verification sessions are in-memory and disappear when the Bridge exits.
+- Negative-cross evidence is not a phase-angle histogram or mono-cancellation percentage.
+- Side/Mid and correlation metrics are measurements, not stereo-quality scores.
+- Chroma is FFT-derived 12-TET pitch-class evidence, not transcription.
+- Tonal-center ranking is profile correlation, not exact key detection.
+- Single-F0 harmonic evidence is a heuristic and can be unstable on polyphonic/noisy/inharmonic material.
+- The topology fingerprint is a live Analyzer consistency marker, not a complete persistent DAW-project hash.
+- `host_readback` is supplied by the caller/external control MCP and is not independently validated by Analyzer.
+- Verification sessions are in-memory and disappear when the Bridge exits.
 - Temporal stream alignment is limited by independent OSC timing/update resolution.
 - LUFS-I and session max True Peak are cumulative session measurements.
 - FL Mixer bindings are session-scoped and may require rediscovery after reopening/reinstantiating plugins.
