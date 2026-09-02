@@ -23,9 +23,11 @@ private:
     juce::Label instanceLabel;
     juce::Label hostLabel;
     juce::Label portLabel;
+    juce::Label profileLabel;
     juce::TextEditor instanceEditor;
     juce::TextEditor hostEditor;
     juce::TextEditor portEditor;
+    juce::ComboBox profileBox;
     juce::TextButton applyButton { "Apply" };
 
     aianalyzer::AnalysisFrame latestFrame;
