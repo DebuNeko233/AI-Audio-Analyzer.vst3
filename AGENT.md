@@ -230,6 +230,19 @@ The audio callback may cheaply read the host parameter and update atomic profile
 
 The worker observes the requested profile asynchronously on its own loop. Non-realtime control/state-restoration paths may use the normal worker setter when an immediate wake-up is useful.
 
+### Worker wake and loudness polling invariants
+
+The audio callback still does **not** wake the worker. When the FIFO contains less than one analysis hop, the worker estimates the arrival time of the missing samples from the current sample rate and sleeps for a bounded interval of **1–20 ms**. The upper bound keeps transport restarts responsive while avoiding the old fixed 2 ms idle polling rate when no audio is arriving. Non-realtime Identify/config/profile requests may still call `notify()` for immediate wake-up.
+
+When Loudness is enabled:
+
+- every 1024-sample hop is still passed to `ebur128_add_frames_float()`; audio is never downsampled or skipped for loudness measurement;
+- `ebur128_prev_true_peak()` is read every hop, so short true-peak transients are still captured at hop cadence;
+- session max True Peak is the running maximum of those per-hop True Peak values;
+- LUFS-S and LUFS-I aggregate queries are polled every **100 ms**, aligned with the OSC/network evidence timescale rather than recomputed on every hop.
+
+`tests/WorkerSchedulingTests.cpp` must verify the idle-wait boundaries and that the running maximum of per-hop `prev_true_peak` values matches libebur128's global `true_peak` result for synthetic audio. Do not change this cadence or True Peak accumulation strategy without updating that regression and re-reviewing measurement semantics.
+
 ### Profile transitions must not bridge unmeasured gaps
 
 When a disabled family is re-enabled:
@@ -335,6 +348,7 @@ MCP source/self-test
 exact expected tool registry
 bridge/ci_regression.py
 release installer validation
+worker scheduling / True Peak C++ regressions
 Windows x64 VST3 build
 macOS arm64 VST3 build
 ```
@@ -344,6 +358,8 @@ Do not substitute an older green run after the head has moved.
 ### Development workflow scope
 
 `.github/workflows/build.yml` is intentionally path-scoped. Changes unrelated to plugin source/build files, Bridge, Analyzer Skill, Release installer material, or the build/release workflows should not start the development workflow.
+
+`tests/**` is part of the plugin validation scope. Internal C++ regressions are enabled in development CI with `AI_ANALYZER_BUILD_TESTS=ON`; ordinary Release builds leave that option off and do not ship the test executable.
 
 For `pull_request` `synchronize` events, component detection compares the previous PR head (`github.event.before`) with the new head instead of repeatedly comparing the PR base with the full current head. This is deliberate: a plugin change earlier in a PR must not force Windows/macOS VST3 rebuilds after a later docs-only, Skill-only, or Bridge-only commit.
 
