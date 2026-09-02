@@ -37,13 +37,25 @@ Intel/x86_64 macOS is intentionally not built or packaged.
 
 ## Standalone MCP 0.7
 
-Release packages use a PyInstaller `onedir` runtime built from the single supported entrypoint:
+Release packages use PyInstaller **one-file mode (`-F` / `--onefile`)** built from the single supported entrypoint:
 
 ```text
 bridge/server.py
 ```
 
 Do not add version-named entrypoints such as `server_v08.py`. MCP/protocol versions are metadata, not startup filenames.
+
+The PyInstaller output is one executable per platform. The lazy package intentionally keeps the existing runtime directory path for installer/config compatibility:
+
+```text
+Windows
+mcp/runtime/ai-audio-analyzer-mcp/ai-audio-analyzer-mcp.exe
+
+macOS
+mcp/runtime/ai-audio-analyzer-mcp/ai-audio-analyzer-mcp
+```
+
+There is no PyInstaller `_internal/` directory in the one-file runtime.
 
 Current source modules packaged for developer fallback:
 
@@ -66,7 +78,7 @@ audio_project_masking_scan()
 
 The VST3 frame schema remains V0.6-compatible; V0.7 masking evidence is computed in the Bridge from existing spectrum, level, and temporal measurements.
 
-The packaged executable must pass its built-in self-test before lazy-package assembly continues.
+The **actual one-file executable** must pass its built-in self-test before lazy-package assembly continues.
 
 ## Native runtime matrix
 
@@ -85,7 +97,9 @@ Windows:
 AI-Audio-Analyzer-v<version>-Windows/
 ├─ AI Audio Analyzer.vst3
 ├─ mcp/
-│  ├─ runtime/ai-audio-analyzer-mcp/...
+│  ├─ runtime/
+│  │  └─ ai-audio-analyzer-mcp/
+│  │     └─ ai-audio-analyzer-mcp.exe
 │  └─ source/
 │     ├─ server.py
 │     ├─ analyzer_core.py
@@ -102,7 +116,7 @@ AI-Audio-Analyzer-v<version>-Windows/
 └─ INSTALL.en.md
 ```
 
-macOS Apple Silicon has the same logical structure plus `Install.command` and `install.sh`.
+macOS Apple Silicon has the same logical structure plus `Install.command` and `install.sh`; its runtime directory contains only the single `ai-audio-analyzer-mcp` executable.
 
 `mcp/source/` is retained for development/manual fallback only.
 
@@ -112,8 +126,8 @@ Do not conflate these states:
 
 ```text
 source syntax/self-test
-PyInstaller build
-packaged-runtime self-test
+PyInstaller one-file build
+one-file packaged-runtime self-test
 VST3 build
 lazy-package assembly
 checksum generation
@@ -144,7 +158,9 @@ Actions
 
 当前 Release 目标只有 Windows x64 和 macOS Apple Silicon / arm64，不构建 Intel/x86_64 macOS。
 
-MCP 使用 PyInstaller 打包，**唯一源码和打包入口始终是 `bridge/server.py`**。普通用户不需要 Python、pip、venv 或 PyPI。
+MCP 使用 PyInstaller **`-F` / `--onefile` 单文件模式**打包，唯一源码和打包入口始终是 `bridge/server.py`。普通用户不需要 Python、pip、venv 或 PyPI。
+
+为了不破坏安装器和 Cherry Studio 的既有路径，懒人包仍保留 `mcp/runtime/ai-audio-analyzer-mcp/` 这一层目录，但目录中只有一个 MCP executable，不再包含 `_internal/`。
 
 0.7 新增的是 Bridge 侧的 ERB-rate 重分箱 + 相对电平 + V0.6 时间重叠证据模型。它不会增加 OSC 字段，也不应被描述成可听遮蔽概率或自动混音指令。
 
