@@ -67,7 +67,14 @@ MCP_VERSION = "0.7"
 OSC_PROTOCOL_VERSION = "0.6"
 ```
 
-Release builds package `bridge/server.py` with PyInstaller. Normal users should not need Python, pip, a venv, or PyPI. Python source remains in Release packages as developer/manual fallback.
+Release builds package `bridge/server.py` with PyInstaller **one-file mode (`-F` / `--onefile`)**. Normal users should not need Python, pip, a venv, or PyPI. Python source remains in Release packages as developer/manual fallback.
+
+For installer/config compatibility, the lazy package keeps the existing runtime directory path, but that directory contains only one PyInstaller executable and no `_internal/` tree:
+
+```text
+Windows: mcp/runtime/ai-audio-analyzer-mcp/ai-audio-analyzer-mcp.exe
+macOS:   mcp/runtime/ai-audio-analyzer-mcp/ai-audio-analyzer-mcp
+```
 
 ### Skill
 
@@ -129,6 +136,8 @@ macOS Apple Silicon arm64 only
 ```
 
 Do not reintroduce Intel macOS / x86_64 unless explicitly requested.
+
+Current MCP Release packaging policy is PyInstaller one-file (`-F`) rather than `onedir`; the final runtime must be the single generated executable and must pass self-test before package assembly.
 
 ### 0.5 — project intelligence and A/B
 
@@ -325,6 +334,8 @@ A packaged MCP runtime must pass its built-in self-test before it is accepted. C
 bridge/server.py
 ```
 
+PyInstaller Release mode is **one-file (`-F` / `--onefile`)**. Do not silently switch back to `--onedir` without updating Release assembly, installers, docs, and this file.
+
 The executable name remains `ai-audio-analyzer-mcp` / `.exe`.
 
 ### macOS
@@ -429,6 +440,7 @@ Do not create a new startup filename for a version bump. Keep `server.py` stable
 - Do not rename Bundle ID / plugin IDs casually.
 - Keep `bridge/server.py` as the only MCP entrypoint.
 - Do not reintroduce `server_vXX.py` startup files.
+- Keep Release PyInstaller packaging in one-file (`-F`) mode unless explicitly changing that policy.
 - Do not guess FL Studio MCP tool names; inspect what it actually exposes.
 - Do not guess Analyzer ↔ Mixer mapping when Identify is available.
 - Do not treat `null` as zero.
