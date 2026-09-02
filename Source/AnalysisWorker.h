@@ -45,6 +45,7 @@ private:
 
     void resetAnalysisState();
     void resetLoudnessState();
+    void resetTemporalAccumulator() noexcept;
     void updateSignalState();
     void processLoudnessHop();
     void processWindow();
@@ -81,6 +82,20 @@ private:
     std::array<float, kFftSize * 2> fftLeftData {};
     std::array<float, kFftSize * 2> fftRightData {};
     std::array<float, kFftSize> midMagnitudes {};
+
+    // V0.6 temporal state. Spectral flux compares normalized successive spectra
+    // at the internal FFT-hop rate. Network-facing aggregates collect those
+    // hop measurements until the next ~10 Hz OSC frame is emitted.
+    std::array<float, kFftSize> previousMidMagnitudes {};
+    bool hasPreviousTemporalFrame = false;
+    float previousWindowRmsDb = -120.0f;
+    double temporalAccumulatedSeconds = 0.0;
+    double temporalSpectralFluxSum = 0.0;
+    int temporalSpectralFluxCount = 0;
+    float temporalSpectralFluxPeak = 0.0f;
+    float temporalRmsRisePeakDb = 0.0f;
+    double temporalLowBandPowerSum = 0.0;
+    int temporalLowBandPowerCount = 0;
 
     ebur128_state* loudnessState = nullptr;
     float latestLufsShortTerm = -120.0f;
