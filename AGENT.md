@@ -26,15 +26,17 @@ The Analyzer must remain measurement-oriented. Do not encode one artistic mixing
 ### VST3
 
 - JUCE 8.0.8, C++20, CMake.
-- Current public/product version: **0.7.0**.
+- Current public/product version: **0.8.0**.
 - Visible product name: `AI Audio Analyzer`.
 - Internal target: `AIAnalyzer`.
 - Bundle ID: `com.debuneko.aianalyzer`.
-- Manufacturer/plugin IDs must remain stable unless an explicit compatibility migration is planned.
+- Manufacturer/plugin IDs remain stable for DAW-project compatibility.
 - Default OSC endpoint: `127.0.0.1:9855`.
 - Audio callback only writes to a preallocated SPSC FIFO.
-- FFT, loudness, temporal analysis and OSC run off the realtime audio thread.
+- FFT, loudness, temporal/stereo analysis and OSC run off the realtime audio thread.
 - `libebur128` provides LUFS / True Peak measurement.
+
+Do not casually change host/plugin identity fields.
 
 ### MCP
 
@@ -44,23 +46,24 @@ There is exactly **one supported source/PyInstaller entrypoint**:
 bridge/server.py
 ```
 
-Do not create `server_v08.py`, `server_v09.py`, or other version-named startup files. Versions are metadata, not filenames.
+Do not create `server_v09.py`, `server_v10.py`, or any other version-named startup file. Versions are metadata, not filenames.
 
 Current internal layout:
 
 ```text
 bridge/server.py          startup, self-test, version metadata, tool registration
 bridge/analyzer_core.py   OSC/runtime state, identity/binding, base tools
-bridge/project_tools.py   project overview / Snapshot A-B
+bridge/project_tools.py   V0.5 project overview / Snapshot A-B
 bridge/temporal_tools.py  V0.6 temporal parsing/tools
 bridge/masking_tools.py   V0.7 masking evidence
+bridge/stereo_tools.py    V0.8 Mid/Side and stereo evidence
 ```
 
-Current MCP tool count: **20**.
+Current MCP tool count: **22**.
 
 ```text
-MCP_VERSION = "0.7"
-OSC_PROTOCOL_VERSION = "0.6"
+MCP_VERSION = "0.8"
+OSC_PROTOCOL_VERSION = "0.8"
 ```
 
 ### Skill
@@ -77,15 +80,15 @@ README-CHERRY-STUDIO.md
 references/*.md
 ```
 
-Skill scope is limited to MCP calling strategy, selector/mapping rules, measurement validity, parameter semantics, temporal evidence, masking evidence, and limitations.
+Skill scope is limited to MCP calling strategy, selector/mapping rules, measurement validity, parameter semantics, temporal evidence, masking evidence, Mid/Side/stereo evidence, and limitations.
 
-Do not add fixed genre EQ recipes, LUFS targets, mandatory sidechain rules, mastering chains, or “metric X always means processor Y”.
+Do not add fixed genre EQ recipes, LUFS targets, mandatory sidechain rules, stereo recipes, mastering chains, or “metric X always means processor Y”.
 
 ## 3. Implemented milestones
 
 ### 0.2 — loudness / True Peak / stereo bands
 
-Implemented LUFS-S, LUFS-I, current/session-max True Peak and 8-band stereo correlation.
+Implemented LUFS-S, LUFS-I, current/session-max True Peak and 8-band L/R correlation.
 
 ### 0.3 — signal validity and runtime identity
 
@@ -113,7 +116,7 @@ Never guess Analyzer ↔ Mixer mapping from names or audio content when Identify
 
 Added automatic installers, bilingual user instructions, PyInstaller standalone MCP, Release workflow, and macOS quarantine/signature handling.
 
-Historical packages included more developer material. **Current user Release policy is stricter: no MCP source code or developer fallback files are shipped.**
+Historical packages contained developer material. Current user Release policy is stricter: **no MCP source or developer fallback files are shipped**.
 
 ### 0.5 — project intelligence / Snapshot A-B
 
@@ -129,7 +132,7 @@ audio_compare_snapshots()
 
 ### 0.6 — temporal interaction evidence
 
-VST3 append-only OSC fields:
+Append-only OSC fields:
 
 ```text
 59  temporal_window_seconds
@@ -137,7 +140,7 @@ VST3 append-only OSC fields:
 61  spectral_flux_peak
 62  rms_rise_peak_db
 63  low_band_energy_db
-64  frame_schema_version = "0.6"
+64  V0.6 schema marker = "0.6"
 ```
 
 MCP adds:
@@ -154,7 +157,7 @@ Temporal results are evidence of time co-occurrence/co-variation, not masking pr
 V0.7 reuses the V0.6 OSC frame and adds Bridge/MCP evidence:
 
 ```text
-32 spectrum features
+32 Mid-spectrum features
 → 16 equal ERB-rate regions
 → relative spectral occupancy
 → directional relative-level weighting
@@ -173,7 +176,7 @@ ERB is feature re-binning, not a gammatone/cochlear filterbank. Scores are trans
 
 ### 0.7 — MCP entrypoint consolidation
 
-Removed historical `server_v05.py`, `server_v06.py`, and `server_v07.py`. `bridge/server.py` is now permanently the single startup entrypoint.
+Removed historical `server_v05.py`, `server_v06.py`, and `server_v07.py`. `bridge/server.py` is permanently the single startup entrypoint.
 
 ### 0.7 — beginner Release cleanup
 
@@ -190,23 +193,60 @@ click-oriented installers and guides
 
 The Release is designed for people with **zero programming experience**.
 
-## 4. Current roadmap
-
 ### 0.8 — deeper Mid/Side and stereo measurement
 
-Target additions:
+V0.8 keeps OSC append-only: existing indexes `0..64` remain unchanged and fields `65..111` are appended.
 
-- Mid spectrum;
-- Side spectrum;
-- frequency-dependent M/S energy;
-- distinction between wide, decorrelated, and phase-opposed behavior;
-- stronger low-frequency mono-compatibility evidence.
+New VST3 measurements:
 
-Prefer append-only OSC evolution when new VST3 measurements are required.
+```text
+mid_rms_db
+side_rms_db
+side_to_mid_db
+negative_cross_energy_ratio
+low_band_20_120_correlation
+low_band_20_120_side_to_mid_db
+32 Side-spectrum bands
+8 Side/Mid frequency-band ratios
+```
+
+Historical `bands_db` remains the 32-band **Mid spectrum**.
+
+New MCP tools:
+
+```text
+audio_stereo_profile()
+audio_stereo_compare()
+```
+
+V0.8 deliberately keeps these concepts separate:
+
+```text
+signed L/R correlation
+Side/Mid energy
+decorrelation proxy = 1 - abs(correlation)
+negative cross-spectrum evidence
+frequency-dependent stereo relation
+```
+
+Important semantics:
+
+- low correlation is not anti-correlation;
+- high Side energy is not proof of phase opposition;
+- `negative_cross_energy_ratio` is weighted negative real cross-spectrum evidence, not a phase-angle histogram, mono-cancellation percentage, audibility probability, or quality score;
+- no universal stereo target or processing action is encoded.
+
+## 4. Current roadmap
 
 ### 0.9 — music-semantic measurements
 
-Possible audio-domain evidence such as chroma, pitch-class distribution, or tonal-center evidence. Do not duplicate information available more reliably from DAW/MIDI/project data through another MCP.
+Evaluate useful audio-domain evidence such as:
+
+- chroma / pitch-class distribution;
+- tonal-center evidence;
+- harmonic vs non-harmonic distribution where technically defensible.
+
+Do not duplicate information available more reliably from DAW/MIDI/project data through another MCP. Any semantic inference must expose uncertainty/validity and remain measurement evidence rather than an artistic prescription.
 
 ### 1.0 — reliable closed-loop measurement system
 
@@ -244,15 +284,19 @@ Use window/project tools for observations requiring temporal stability. `audio_s
 
 ### Evidence quality must be visible
 
-Expose enough context to judge reliability: window length, active coverage, aligned pair count, frequency/ERB region, alignment tolerance/offset, and usable temporal pairs.
+Expose enough context to judge reliability: window length, active coverage, valid frame count, aligned pair count when applicable, frequency/ERB/stereo region, alignment tolerance/offset, and usable temporal pairs.
 
 ### Heuristics must be labeled
 
-Spectral overlap, onset/change candidates, temporal overlap, ERB-rebinned evidence, and project candidate ranking are heuristic/measurement evidence unless replaced by a validated stronger model.
+Spectral overlap, onset/change candidates, temporal overlap, ERB-rebinned evidence, negative-cross evidence, decorrelation proxies, and candidate rankings are measurement/heuristic evidence unless replaced by a validated stronger model.
+
+### Keep independent stereo concepts independent
+
+Do not collapse correlation, Side/Mid energy, decorrelation proxy, and negative-cross evidence into one opaque “stereo quality” score.
 
 ### A/B is measurement-oriented
 
-Snapshot comparison returns measurements/deltas, not subjective claims such as “better”, “warmer”, or “professional”.
+Snapshot/stereo comparisons return measurements and deltas, not subjective claims such as “better”, “warmer”, “wider”, or “professional”.
 
 ## 6. Release and platform rules
 
@@ -269,7 +313,7 @@ Do not re-add Intel/x86_64 macOS unless explicitly requested.
 
 The GitHub Release is for ordinary end users, including people who have never programmed.
 
-The normal user flow must remain:
+Normal flow:
 
 ```text
 download ZIP
@@ -285,7 +329,7 @@ User-facing docs should explain **what to click**, not how the software is built
 
 ### User package contents
 
-Windows target:
+Windows:
 
 ```text
 AI Audio Analyzer.vst3
@@ -299,7 +343,7 @@ INSTALL.zh-CN.md
 VERSION.txt
 ```
 
-macOS target:
+macOS:
 
 ```text
 AI Audio Analyzer.vst3
@@ -313,7 +357,7 @@ INSTALL.zh-CN.md
 VERSION.txt
 ```
 
-The following are forbidden in user Releases:
+Forbidden in user Releases:
 
 ```text
 mcp/source/
@@ -335,13 +379,11 @@ Release MCP uses:
 -F / --onefile
 ```
 
-The packaged runtime must pass native self-test before package assembly.
+The native packaged runtime must pass its self-test before package assembly.
 
 ### Single-compression policy
 
 **Final user archives are compressed exactly once.**
-
-Do not create platform Release ZIPs inside platform jobs and then upload those ZIPs inside Actions artifacts.
 
 Required flow:
 
@@ -400,7 +442,10 @@ release/windows/Install.ps1
 release/macos/install.sh
 skills/ai-analyzer-flstudio/README-CHERRY-STUDIO.md
 skills/ai-analyzer-flstudio/SKILL.md
-skills/ai-analyzer-flstudio/references/*.md
+skills/ai-analyzer-flstudio/references/analyzer-mcp.md
+skills/ai-analyzer-flstudio/references/parameters.md
+skills/ai-analyzer-flstudio/references/masking-evidence.md
+skills/ai-analyzer-flstudio/references/stereo-evidence.md
 bridge/cherry-studio.example.json
 bridge/requirements.txt
 .github/workflows/build.yml
@@ -412,8 +457,8 @@ For every change ask:
 ```text
 Did public version change?
 Did MCP entrypoint/tool count/arguments/defaults/output change?
-Did OSC schema or metric semantics change?
-Did signal/temporal/evidence validity change?
+Did OSC schema/indexes or metric semantics change?
+Did signal/temporal/masking/stereo validity change?
 Did Identify/binding/selectors change?
 Did supported OS/architecture change?
 Did Release contents/layout change?
@@ -452,9 +497,9 @@ Distinguish these states:
 ```text
 source syntax/self-test
 MCP regression
+VST3 build
 PyInstaller build
 packaged-runtime self-test
-VST3 build
 package staging
 final ZIP creation
 Release publication
@@ -474,7 +519,10 @@ One succeeding does not prove the others succeeded.
 - Do not guess FL Studio MCP tool names; inspect actual exposed tools.
 - Do not guess Analyzer ↔ Mixer mapping when Identify is available.
 - Do not treat `null` as zero.
-- Do not present heuristic masking/temporal evidence as ground truth.
+- Do not present masking/temporal/stereo heuristic evidence as ground truth.
+- Do not call low correlation anti-correlation without checking sign.
+- Do not treat Side/Mid energy as proof of phase opposition.
+- Do not describe negative-cross evidence as a mono-cancellation percentage.
 - Do not encode one mixing aesthetic into MCP or Skill.
 - Keep LLM-facing Skill content in English.
 - Do not re-add Intel macOS Release support unless explicitly requested.

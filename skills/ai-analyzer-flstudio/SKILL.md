@@ -1,6 +1,6 @@
 ---
 name: ai-analyzer-flstudio
-description: Technical usage skill for Cherry Studio + AI Audio Analyzer MCP. Teaches deterministic Analyzer discovery/binding, tool selection, measurement validity, level/loudness/spectrum/stereo/temporal semantics, project overview, Snapshot A/B, and MCP 0.7 masking-evidence interpretation. It does not prescribe a mixing style, LUFS target, EQ/compression/sidechain recipe, or aesthetic decision.
+description: Technical usage skill for Cherry Studio + AI Audio Analyzer MCP. Teaches deterministic Analyzer discovery/binding, tool selection, measurement validity, level/loudness/spectrum/stereo/temporal semantics, project overview, Snapshot A/B, V0.7 masking-evidence interpretation, and V0.8 Mid/Side stereo evidence. It does not prescribe a mixing style, LUFS target, EQ/compression/sidechain recipe, stereo recipe, or aesthetic decision.
 ---
 
 # AI Audio Analyzer MCP Usage Skill
@@ -10,7 +10,7 @@ This Skill has two responsibilities only:
 1. help the model call **AI Audio Analyzer MCP** correctly;
 2. help the model interpret returned measurements and evidence without overstating them.
 
-It is **not a mixing-style guide**. Do not infer a mandatory EQ, compressor, limiter, sidechain, panning, stereo, or mastering action merely because a measurement is high, low, overlapping, correlated, or temporally coincident. Artistic decisions come from the user's goal, musical context, references, DAW state, and the model's own reasoning—not from this Skill.
+It is **not a mixing-style guide**. Do not infer a mandatory EQ, compressor, limiter, sidechain, panning, stereo, mono, or mastering action merely because a measurement is high, low, overlapping, correlated, anti-correlated, wide, or temporally coincident. Artistic decisions come from the user's goal, musical context, references, DAW state, and the model's own reasoning—not from this Skill.
 
 ## 1. Start at project level
 
@@ -95,7 +95,16 @@ temporal_valid
 temporal_window_seconds
 ```
 
-A legacy Analyzer may still provide level/spectrum data while lacking V0.6 temporal evidence.
+For V0.8 deep stereo measurements inspect:
+
+```text
+stereo_v08_supported
+stereo_v08_valid
+stereo_frames
+active_ratio
+```
+
+A legacy Analyzer may still provide level/spectrum/legacy stereo data while lacking V0.6 temporal or V0.8 Mid/Side evidence.
 
 ## 4. Tool selection
 
@@ -147,6 +156,43 @@ audio_temporal_profile(track, seconds=5)
 
 Use for normalized spectral flux, RMS-rise evidence, low-band temporal energy, and threshold-based onset/change candidate density.
 
+### Deep single-track stereo profile — V0.8
+
+```text
+audio_stereo_profile(track, seconds=5)
+```
+
+Use when the question depends on Mid/Side energy, Side spectrum, signed L/R correlation, low-frequency stereo relation, or negative cross-spectrum evidence over a passage.
+
+Important output groups:
+
+```text
+full_band
+low_band_20_120_hz
+mid_spectrum_db
+side_spectrum_db
+frequency_dependent_stereo
+```
+
+Keep these evidence axes separate:
+
+```text
+correlation
+side_to_mid_db
+decorrelation_proxy_mean
+negative_cross_energy_ratio_mean
+```
+
+Do not treat them as interchangeable definitions of "width" or "phase".
+
+### Two-track stereo measurement comparison — V0.8
+
+```text
+audio_stereo_compare(track_a, track_b, seconds=5)
+```
+
+Use when the user asks how two measured stereo states differ. Deltas are `B - A` and are not labelled better/worse.
+
 ### Two-track spectral comparison
 
 ```text
@@ -195,11 +241,13 @@ existing 32-band Analyzer spectrum
 
 The ERB stage is **re-binning**, not a gammatone/cochlear filterbank. The score is **heuristic evidence**, not an audible-masking probability.
 
-### Stereo bands
+### Legacy stereo bands
 
 ```text
 audio_stereo_bands(track)
 ```
+
+Use for the existing eight correlation bands when V0.8 detail is unnecessary or unavailable. Prefer `audio_stereo_profile()` when Mid/Side or Side-spectrum evidence matters.
 
 ### Master technical summary
 
@@ -219,7 +267,69 @@ audio_compare_snapshots("before", "after")
 
 Use comparable musical passages, similar window lengths, and comparable `active_ratio`. Snapshot deltas are `After - Before`. LUFS-I is session cumulative, not a reset per snapshot.
 
-## 5. How to read V0.7 masking evidence
+## 5. How to read V0.8 stereo evidence
+
+### Correlation is signed
+
+```text
++1 → strongly similar L/R
+ 0 → weak linear relation
+-1 → strongly anti-correlated
+```
+
+Correlation does not by itself quantify Side energy.
+
+### `side_to_mid_db` is an energy relation
+
+```text
+10 * log10(Side power / Mid power)
+```
+
+Negative values mean Mid energy exceeds Side energy. Positive values mean Side exceeds Mid. There is no universal target.
+
+### `decorrelation_proxy_mean`
+
+Transparent derived formula:
+
+```text
+1 - abs(L/R correlation)
+```
+
+This becomes high near correlation `0`, but both `+1` and `-1` produce values near `0`. Always read it with correlation sign.
+
+### `negative_cross_energy_ratio`
+
+Fraction of bilateral FFT-bin weight whose real L/R cross-spectrum is negative.
+
+Use it as phase-opposition evidence. It is not a phase-angle histogram, mono-cancellation percentage, audible-problem probability, or quality score.
+
+### Low-frequency evidence
+
+```text
+low_band_20_120_correlation
+low_band_20_120_side_to_mid_db
+```
+
+These describe approximately 20–120 Hz stereo relation. Very low-energy bands should not be overinterpreted. Do not impose a universal mono requirement from this Skill.
+
+### Mid and Side spectra
+
+The historical `bands_db` field is the Mid spectrum. V0.8 adds `side_bands_db` and exposes window means as:
+
+```text
+mid_spectrum_db
+side_spectrum_db
+```
+
+Use them to identify where common versus difference energy is concentrated. They are FFT-derived machine features, not calibrated SPL.
+
+Detailed semantics are in:
+
+```text
+references/stereo-evidence.md
+```
+
+## 6. How to read V0.7 masking evidence
 
 `audio_masking_evidence()` reports multiple transparent components instead of one opaque conclusion.
 
@@ -260,49 +370,58 @@ Do not compare these values to an undocumented universal threshold. Prefer relat
 
 A compact summary of the strongest returned regions. Use it to rank candidates, not to label a pair as objectively "bad".
 
-## 6. Evidence quality matters
+## 7. Evidence quality matters
 
-When interpreting V0.6/V0.7 pair evidence, report or inspect:
+When interpreting pair/window evidence, report or inspect the relevant validity context:
 
 ```text
 window_seconds
-active_ratio_a / active_ratio_b
-alignment.aligned_pairs
+active_ratio
+stereo_frames for V0.8 stereo profiles
+active_ratio_a / active_ratio_b for pair evidence
+alignment.aligned_pairs for temporal/masking evidence
 alignment.tolerance_ms
 alignment.mean_abs_offset_ms
 temporal_usable_pairs
-ERB region low_hz / high_hz
+frequency / stereo band / ERB region
 ```
 
 Sparse, stale, mostly silent, or poorly aligned data should reduce confidence in the interpretation.
 
-## 7. Relationship between old and new masking tools
+## 8. Relationship between tools
 
-Use the tools progressively:
+Use tools progressively rather than mechanically:
 
 ```text
+audio_project_status()
+    project readiness
+        ↓
 audio_mix_overview()
-    coarse project spectral candidates
+    coarse project state
         ↓
 audio_project_masking_scan()
-    project ranking with V0.7 evidence
+    project interaction ranking when needed
         ↓
 audio_masking_evidence(a, b)
-    detailed ERB-region evidence
+    detailed masking-related pair evidence
+
+audio_stereo_profile(track)
+    detailed Mid/Side and stereo evidence for one track
         ↓
-audio_temporal_compare(a, b, custom band)
-    custom-frequency temporal drill-down when needed
+audio_stereo_compare(a, b)
+    measurement-only comparison when two stereo states matter
 ```
 
-Do not mechanically call every layer if the user's question is already answered.
+Do not call every layer if the user's question is already answered.
 
-## 8. Parameter interpretation rules
+## 9. Parameter interpretation rules
 
 Detailed semantics:
 
 ```text
 references/parameters.md
 references/masking-evidence.md
+references/stereo-evidence.md
 ```
 
 Tool/selector details:
@@ -318,14 +437,18 @@ Always keep these distinctions:
 - LUFS-S ≠ cumulative LUFS-I.
 - Analyzer spectrum dB is not calibrated SPL.
 - Centroid/Rolloff/Flatness are descriptive statistics, not quality scores.
-- Stereo Correlation/Width are measurements, not good/bad scores.
+- Stereo Correlation ≠ Side/Mid energy.
+- Low correlation ≠ anti-correlation.
+- High Side energy ≠ proof of phase opposition.
+- `decorrelation_proxy = 1 - abs(correlation)` must be read with correlation sign.
+- Negative-cross evidence is not an audible mono-cancellation percentage.
 - Spectral Flux is normalized spectral redistribution, not simple gain change.
 - RMS Rise is rapid level-increase evidence, not Crest Factor or attack time.
 - Spectral overlap, temporal overlap, and V0.7 masking evidence are not probabilities of audible masking.
 - Onset candidates are threshold-based change candidates, not ground-truth labels.
 - `null` is unavailable, not zero.
 
-## 9. Boundary with FL Studio control MCP
+## 10. Boundary with FL Studio control MCP
 
 AI Audio Analyzer MCP is responsible for:
 
@@ -343,7 +466,7 @@ This Skill may guide deterministic Identify mapping and measurement readback aft
 
 If the user asks to modify the project, first read the actual DAW tracks/slots/plugins/parameters, do not invent controls, read back the host state after changes, and use Analyzer measurements only as technical evidence.
 
-## 10. Output discipline
+## 11. Output discipline
 
 When citing Analyzer evidence, include enough context to make it auditable:
 
@@ -351,7 +474,7 @@ When citing Analyzer evidence, include enough context to make it auditable:
 instance / selector
 measurement window
 signal validity / active ratio
-frequency or ERB region when relevant
+frequency / stereo band / ERB region when relevant
 alignment quality for temporal evidence
 measurement/evidence value
 what the metric can and cannot establish
@@ -359,10 +482,11 @@ what the metric can and cannot establish
 
 Do not present these as Analyzer-measured facts:
 
-- a sound "should" be warmer, brighter, wider, louder, or more modern;
+- a sound "should" be warmer, brighter, wider, louder, narrower, or more modern;
 - a genre must hit a fixed LUFS number;
 - a frequency must be cut/boosted by a specific amount;
 - spectral or V0.7 masking evidence automatically requires EQ or sidechain;
-- one correlation/evidence score is inherently good or bad.
+- one correlation/Side-Mid/negative-cross score is inherently good or bad;
+- V0.8 stereo evidence automatically requires mono, narrowing, widening, phase rotation, or a stereo processor.
 
 Those are artistic or processing judgments, outside the measurement scope of this MCP and Skill.

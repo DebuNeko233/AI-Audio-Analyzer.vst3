@@ -9,7 +9,7 @@ if(APPLE AND NOT CMAKE_OSX_DEPLOYMENT_TARGET)
     set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Minimum supported macOS version")
 endif()
 
-project(AIAnalyzer VERSION 0.7.0 LANGUAGES C CXX)
+project(AIAnalyzer VERSION 0.8.0 LANGUAGES C CXX)
 
 include(FetchContent)
 
@@ -83,8 +83,4 @@ target_link_libraries(AIAnalyzer PRIVATE
     juce::juce_dsp
     juce::juce_osc
     ebur128
-    PUBLIC
-    juce::juce_recommended_config_flags
-    juce::juce_recommended_lto_flags
-    juce::juce_recommended_warning_flags
 )

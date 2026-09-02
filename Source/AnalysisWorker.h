@@ -82,6 +82,7 @@ private:
     std::array<float, kFftSize * 2> fftLeftData {};
     std::array<float, kFftSize * 2> fftRightData {};
     std::array<float, kFftSize> midMagnitudes {};
+    std::array<float, kFftSize> sideMagnitudes {};
 
     // V0.6 temporal state. Spectral flux compares normalized successive spectra
     // at the internal FFT-hop rate. Network-facing aggregates collect those

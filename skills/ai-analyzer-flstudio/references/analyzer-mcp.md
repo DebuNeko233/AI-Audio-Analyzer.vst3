@@ -1,8 +1,8 @@
 # AI Audio Analyzer MCP Reference
 
-This file describes MCP tools, selector rules, call order, and validity checks. Measurement semantics are documented in `parameters.md`; V0.7 masking-evidence details are documented in `masking-evidence.md`.
+This file describes MCP tools, selector rules, call order, and validity checks. Measurement semantics are documented in `parameters.md`; V0.7 masking-evidence details are documented in `masking-evidence.md`; V0.8 stereo evidence is documented in `stereo-evidence.md`.
 
-Current MCP 0.7 exposes **20 tools**:
+Current MCP 0.8 exposes **22 tools**:
 
 ```text
 audio_bridge_status()
@@ -25,11 +25,13 @@ audio_temporal_profile(track, seconds=5)
 audio_temporal_compare(track_a, track_b, seconds=5, low_hz=40, high_hz=160, alignment_tolerance_ms=80)
 audio_masking_evidence(track_a, track_b, seconds=5, alignment_tolerance_ms=80, max_regions=8)
 audio_project_masking_scan(seconds=5, max_pairs=8, alignment_tolerance_ms=80)
+audio_stereo_profile(track, seconds=5)
+audio_stereo_compare(track_a, track_b, seconds=5)
 ```
 
 ## Recommended hierarchy
 
-Do not call all 20 tools by default.
+Do not call all 22 tools by default.
 
 ```text
 project readiness
@@ -47,6 +49,9 @@ stable single track
 single-track temporal change
 → audio_temporal_profile()
 
+single-track deep stereo / Mid-Side
+→ audio_stereo_profile()
+
 two-track basic spectrum
 → audio_compare_tracks()
 
@@ -55,6 +60,9 @@ two-track detailed masking evidence
 
 custom-band temporal relation
 → audio_temporal_compare()
+
+two-track stereo measurement comparison
+→ audio_stereo_compare()
 
 Before/After verification
 → audio_capture_snapshot() / audio_compare_snapshots()
@@ -135,6 +143,15 @@ temporal_valid
 temporal_window_seconds
 ```
 
+For V0.8 deep stereo tools inspect:
+
+```text
+stereo_v08_supported
+stereo_v08_valid
+stereo_frames
+active_ratio
+```
+
 ## `audio_project_status()`
 
 Use first for project readiness.
@@ -201,6 +218,77 @@ audio_average(track, seconds)
 ```
 
 Stable recent window; preferred when describing several seconds of content. Content-dependent averages use active frames only.
+
+## `audio_stereo_bands()` — legacy stereo correlation view
+
+Returns the existing eight correlation bands. Use it when the legacy band view is sufficient.
+
+For Mid/Side energy, Side spectrum, low-band Side/Mid, or negative-cross evidence, use `audio_stereo_profile()` instead.
+
+## `audio_stereo_profile()` — V0.8
+
+```text
+audio_stereo_profile(track, seconds=5)
+```
+
+Returns a windowed profile with:
+
+```text
+full_band.mid_rms_db
+full_band.side_rms_db
+full_band.side_to_mid_db
+full_band.stereo_correlation_mean
+full_band.stereo_correlation_min
+full_band.decorrelation_proxy_mean
+full_band.negative_cross_energy_ratio_mean
+full_band.negative_cross_energy_ratio_max
+
+low_band_20_120_hz.correlation_mean
+low_band_20_120_hz.correlation_min
+low_band_20_120_hz.side_to_mid_db
+low_band_20_120_hz.side_to_mid_db_max
+
+mid_spectrum_db[32]
+side_spectrum_db[32]
+frequency_dependent_stereo[8]
+```
+
+Each `frequency_dependent_stereo` entry contains the range plus:
+
+```text
+correlation
+side_to_mid_db
+```
+
+Do not collapse correlation, Side/Mid, decorrelation proxy, and negative-cross evidence into one stereo-quality score.
+
+## `audio_stereo_compare()` — V0.8
+
+```text
+audio_stereo_compare(track_a, track_b, seconds=5)
+```
+
+Returns measurement deltas using:
+
+```text
+B - A
+```
+
+Important fields:
+
+```text
+deltas_b_minus_a.mid_rms_db
+deltas_b_minus_a.side_rms_db
+deltas_b_minus_a.side_to_mid_db
+deltas_b_minus_a.stereo_correlation_mean
+deltas_b_minus_a.decorrelation_proxy_mean
+deltas_b_minus_a.negative_cross_energy_ratio_mean
+deltas_b_minus_a.low_band_20_120_correlation
+deltas_b_minus_a.low_band_20_120_side_to_mid_db
+frequency_dependent_deltas[]
+```
+
+Positive/negative deltas are not automatically better/worse.
 
 ## `audio_compare_tracks()` / `audio_detect_masking()`
 
@@ -284,26 +372,6 @@ strongest_regions[]
 evidence_formula
 ```
 
-Per-region fields include:
-
-```text
-low_hz / high_hz / center_hz
-a_db / b_db
-level_delta_a_minus_b_db
-relative_spectral_overlap
-level_direction_weight_a_over_b
-level_direction_weight_b_over_a
-spectral_level_evidence_a_over_b
-spectral_level_evidence_b_over_a
-temporal_usable_pairs
-coactive_ratio
-band_envelope_correlation
-normalized_band_temporal_overlap
-combined_evidence_a_over_b
-combined_evidence_b_over_a
-dominant_direction
-```
-
 The model is deliberately transparent. `auditory_band_model.filterbank=false` because the implementation re-bins existing 32-band features rather than running a gammatone/cochlear filterbank.
 
 Do not report `masking_evidence_score` as an audible-masking probability.
@@ -336,16 +404,25 @@ Only the Bridge binds UDP port 9855. VST3 instances are senders, so multiple Ana
 
 ## OSC compatibility
 
-MCP 0.7 does **not** add new OSC fields. It reuses the V0.6 append-only frame:
+V0.8 keeps the frame append-only. Existing indexes `0..64` are unchanged:
 
 ```text
-0..58   V0.1–V0.4-compatible prefix
-59      temporal_window_seconds
-60      spectral_flux_mean
-61      spectral_flux_peak
-62      rms_rise_peak_db
-63      low_band_energy_db
-64      frame_schema_version = "0.6"
+0..58    V0.1–V0.4-compatible prefix
+59       temporal_window_seconds
+60       spectral_flux_mean
+61       spectral_flux_peak
+62       rms_rise_peak_db
+63       low_band_energy_db
+64       V0.6 schema marker = "0.6"
+65       mid_rms_db
+66       side_rms_db
+67       side_to_mid_db
+68       negative_cross_energy_ratio
+69       low_band_20_120_correlation
+70       low_band_20_120_side_to_mid_db
+71..102  32 Side-spectrum bands
+103..110 8 Side/Mid band ratios
+111      V0.8 schema marker = "0.8"
 ```
 
-The 0.7 masking-evidence model is computed in the Bridge from existing 0.6 measurements.
+The historical `bands_db` at indexes `11..42` is the Mid spectrum. V0.8 appends the Side spectrum rather than changing those existing fields.
