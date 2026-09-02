@@ -407,10 +407,6 @@ jobs:
           )
           for file in "${files[@]}"; do test -f "$file"; done
 
-          create_flags=()
-          if [ "$PRERELEASE" = 'true' ]; then create_flags+=(--prerelease); fi
-          if [ "$DRAFT" = 'true' ]; then create_flags+=(--draft); fi
-
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" "${files[@]}" --clobber
             gh release edit "$TAG" \
@@ -418,12 +414,29 @@ jobs:
               --notes-file release-assets/RELEASE-NOTES.md \
               --draft="$DRAFT" \
               --prerelease="$PRERELEASE"
-          else
+          elif [ "$DRAFT" = 'true' ] && [ "$PRERELEASE" = 'true' ]; then
             gh release create "$TAG" "${files[@]}" \
               --target "$GITHUB_SHA" \
               --title "AI Audio Analyzer $TAG" \
               --notes-file release-assets/RELEASE-NOTES.md \
-              "${create_flags[@]}"
+              --draft --prerelease
+          elif [ "$DRAFT" = 'true' ]; then
+            gh release create "$TAG" "${files[@]}" \
+              --target "$GITHUB_SHA" \
+              --title "AI Audio Analyzer $TAG" \
+              --notes-file release-assets/RELEASE-NOTES.md \
+              --draft
+          elif [ "$PRERELEASE" = 'true' ]; then
+            gh release create "$TAG" "${files[@]}" \
+              --target "$GITHUB_SHA" \
+              --title "AI Audio Analyzer $TAG" \
+              --notes-file release-assets/RELEASE-NOTES.md \
+              --prerelease
+          else
+            gh release create "$TAG" "${files[@]}" \
+              --target "$GITHUB_SHA" \
+              --title "AI Audio Analyzer $TAG" \
+              --notes-file release-assets/RELEASE-NOTES.md
           fi
 
           if [ "$DRAFT" = 'true' ]; then
