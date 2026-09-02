@@ -1,11 +1,45 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 
+#include <functional>
+#include <utility>
+
+namespace
+{
+class IdentifyParameter final : public juce::AudioParameterBool
+{
+public:
+    explicit IdentifyParameter(std::function<void()> callback)
+        : juce::AudioParameterBool(
+              juce::ParameterID { "identify", 1 },
+              "Identify",
+              false),
+          onChange(std::move(callback))
+    {
+    }
+
+protected:
+    void valueChanged(bool) override
+    {
+        if (onChange)
+            onChange();
+    }
+
+private:
+    std::function<void()> onChange;
+};
+} // namespace
+
 AIAnalyzerAudioProcessor::AIAnalyzerAudioProcessor()
     : AudioProcessor(BusesProperties()
                          .withInput("Input", juce::AudioChannelSet::stereo(), true)
                          .withOutput("Output", juce::AudioChannelSet::stereo(), true))
 {
+    addParameter(new IdentifyParameter([this]
+    {
+        analysisWorker.requestIdentify();
+    }));
+
     analysisWorker.setOscConfig(instanceId, oscHost, oscPort);
 }
 

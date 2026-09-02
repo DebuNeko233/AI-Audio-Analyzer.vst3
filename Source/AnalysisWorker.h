@@ -24,6 +24,12 @@ public:
     bool pushAudio(const float* left, const float* right, int numSamples) noexcept;
 
     void setOscConfig(juce::String instanceId, juce::String host, int port);
+    void requestIdentify() noexcept
+    {
+        identifyRequested.store(true, std::memory_order_release);
+        notify();
+    }
+
     bool getLatestFrame(AnalysisFrame& destination) const;
     std::uint64_t getDroppedBlocks() const noexcept { return fifo.getDroppedBlocks(); }
 
@@ -44,6 +50,7 @@ private:
     void processWindow();
     void refreshOscConnectionIfNeeded();
     void sendFrame(const AnalysisFrame& frame);
+    void sendIdentify();
 
     static float amplitudeToDb(float value) noexcept;
     static float sanitizeLoudness(double value) noexcept;
@@ -56,6 +63,7 @@ private:
 
     std::atomic<double> sampleRate { 48000.0 };
     std::atomic<bool> resetRequested { true };
+    std::atomic<bool> identifyRequested { false };
 
     std::array<float, kHopSize> hopLeft {};
     std::array<float, kHopSize> hopRight {};
