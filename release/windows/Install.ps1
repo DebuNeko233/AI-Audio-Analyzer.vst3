@@ -44,15 +44,15 @@ if ($PluginOnly) {
     exit 0
 }
 
-Write-Host 'AI Audio Analyzer automatic installer'
-Write-Host "Package: $PackageRoot"
+Write-Host 'AI Audio Analyzer installer'
+Write-Host 'No programming tools are required.' -ForegroundColor Green
 
 if (-not $SkipPlugin) {
     if (Test-IsAdministrator) {
         Write-Step 'Installing VST3'
         Install-Vst3
     } else {
-        Write-Host 'VST3 installation needs Administrator permission. Requesting UAC for the plugin copy only...'
+        Write-Host 'Windows will ask for Administrator permission to copy the VST3.'
         $arguments = @(
             '-NoProfile',
             '-ExecutionPolicy', 'Bypass',
@@ -66,7 +66,7 @@ if (-not $SkipPlugin) {
     }
 }
 
-Write-Step 'Installing packaged Analyzer MCP and Skill for the current user'
+Write-Step 'Installing Analyzer connection and Cherry Studio Skill'
 New-Item -ItemType Directory -Path $InstallRoot -Force | Out-Null
 
 foreach ($name in @('mcp', 'skill')) {
@@ -82,18 +82,18 @@ foreach ($doc in @('START-HERE.md', 'INSTALL.en.md', 'INSTALL.zh-CN.md')) {
     if (Test-Path $source) { Copy-Item $source $InstallRoot -Force }
 }
 
-$McpExe = Join-Path $InstallRoot 'mcp\runtime\ai-audio-analyzer-mcp\ai-audio-analyzer-mcp.exe'
+$McpExe = Join-Path $InstallRoot 'mcp\ai-audio-analyzer-mcp.exe'
 if (-not (Test-Path $McpExe)) {
-    throw "Packaged MCP executable not found: $McpExe"
+    throw "Analyzer MCP executable not found: $McpExe"
 }
 
-Write-Step 'Validating packaged MCP runtime'
+Write-Step 'Checking Analyzer connection service'
 $oldSelfTest = $env:AI_ANALYZER_SELF_TEST
 try {
     $env:AI_ANALYZER_SELF_TEST = '1'
     & $McpExe
     if ($LASTEXITCODE -ne 0) {
-        throw "Packaged MCP self-test failed with exit code $LASTEXITCODE."
+        throw "Analyzer MCP self-test failed with exit code $LASTEXITCODE."
     }
 } finally {
     if ($null -eq $oldSelfTest) {
@@ -103,7 +103,7 @@ try {
     }
 }
 
-Write-Step 'Generating Cherry Studio MCP configuration'
+Write-Step 'Creating Cherry Studio configuration'
 $ConfigPath = Join-Path $InstallRoot 'cherry-studio-mcp.json'
 $config = @{
     mcpServers = @{
@@ -120,16 +120,13 @@ $config = @{
 $config | ConvertTo-Json -Depth 8 | Set-Content -Path $ConfigPath -Encoding UTF8
 
 Write-Host ''
-Write-Host 'Installation completed.' -ForegroundColor Green
-Write-Host 'Python and pip are NOT required for the packaged MCP runtime.' -ForegroundColor Green
-Write-Host "MCP executable: $McpExe"
-Write-Host "MCP config: $ConfigPath"
-Write-Host "Skill folder: $(Join-Path $InstallRoot 'skill')"
+Write-Host 'Installation completed successfully.' -ForegroundColor Green
 Write-Host ''
-Write-Host 'Next:'
-Write-Host '1. Fully restart FL Studio and rescan VST3 plugins.'
-Write-Host '2. Add the generated MCP config to Cherry Studio.'
-Write-Host '3. Import the Skill folder into Cherry Studio.'
-Write-Host '4. For DAW control, also install https://github.com/rosasynthesiz/flstudio-mcp'
+Write-Host 'Next steps:'
+Write-Host '1. Restart FL Studio and rescan VST3 plugins.'
+Write-Host '2. In Cherry Studio, add the generated MCP configuration:'
+Write-Host "   $ConfigPath"
+Write-Host '3. Import the installed Skill folder:'
+Write-Host "   $(Join-Path $InstallRoot 'skill')"
 Write-Host ''
-Write-Host 'Developer/manual Python fallback remains under mcp\source.'
+Write-Host 'You do not need Python, pip, a terminal, or any programming setup.' -ForegroundColor Green
