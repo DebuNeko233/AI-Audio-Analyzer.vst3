@@ -89,7 +89,7 @@ jobs:
           python -m PyInstaller \
             --noconfirm \
             --clean \
-            --onedir \
+            -F \
             --name ai-audio-analyzer-mcp \
             --paths bridge \
             --collect-all mcp \
@@ -101,9 +101,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          chmod +x dist/ai-audio-analyzer-mcp/ai-audio-analyzer-mcp
-          AI_ANALYZER_SELF_TEST=1 dist/ai-audio-analyzer-mcp/ai-audio-analyzer-mcp
-          file dist/ai-audio-analyzer-mcp/ai-audio-analyzer-mcp
+          chmod +x dist/ai-audio-analyzer-mcp
+          AI_ANALYZER_SELF_TEST=1 dist/ai-audio-analyzer-mcp
+          file dist/ai-audio-analyzer-mcp
 
       - name: Smoke-test packaged runtime on Windows
         if: runner.os == 'Windows'
@@ -111,16 +111,22 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $env:AI_ANALYZER_SELF_TEST = '1'
-          & 'dist/ai-audio-analyzer-mcp/ai-audio-analyzer-mcp.exe'
+          & 'dist/ai-audio-analyzer-mcp.exe'
           if ($LASTEXITCODE -ne 0) { throw "Packaged MCP self-test failed: $LASTEXITCODE" }
           Remove-Item Env:AI_ANALYZER_SELF_TEST -ErrorAction SilentlyContinue
 
       - name: Stage runtime
         shell: bash
         run: |
+          set -euo pipefail
           rm -rf runtime-artifact
-          mkdir -p runtime-artifact
-          cp -R dist/ai-audio-analyzer-mcp runtime-artifact/
+          mkdir -p runtime-artifact/ai-audio-analyzer-mcp
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            cp dist/ai-audio-analyzer-mcp.exe runtime-artifact/ai-audio-analyzer-mcp/
+          else
+            cp dist/ai-audio-analyzer-mcp runtime-artifact/ai-audio-analyzer-mcp/
+            chmod +x runtime-artifact/ai-audio-analyzer-mcp/ai-audio-analyzer-mcp
+          fi
 
       - uses: actions/upload-artifact@v4
         with:
@@ -180,7 +186,7 @@ jobs:
           VST3 protocol/measurements: 0.6-compatible temporal frame
           MCP feature layer: 0.7 masking evidence
           MCP source entrypoint: server.py
-          MCP: PyInstaller standalone x64 runtime
+          MCP: PyInstaller one-file x64 runtime
           Python required for normal install: No
           Release commit: $env:GITHUB_SHA
           "@ | Set-Content (Join-Path $root 'VERSION.txt') -Encoding UTF8
@@ -258,7 +264,7 @@ jobs:
           VST3 protocol/measurements: 0.6-compatible temporal frame
           MCP feature layer: 0.7 masking evidence
           MCP source entrypoint: server.py
-          MCP: PyInstaller standalone arm64 runtime
+          MCP: PyInstaller one-file arm64 runtime
           Python required for normal install: No
           Release commit: ${GITHUB_SHA}
           EOF
@@ -311,7 +317,7 @@ jobs:
           # AI Audio Analyzer ${TAG}
 
           - Windows x64 and macOS Apple Silicon arm64 lazy packages.
-          - Standalone PyInstaller MCP runtime; normal users do not need Python or PyPI.
+          - MCP runtime is packaged with PyInstaller one-file mode (`-F`); normal users do not need Python or PyPI.
           - MCP uses one stable source/PyInstaller entrypoint: bridge/server.py.
           - MCP 0.7 adds equal-ERB-rate re-binned spectral/relative-level/temporal masking evidence and a project masking scan.
           - The 0.7 evidence model is transparent heuristic evidence, not a calibrated cochlear/gammatone filterbank and not a probability of audible masking.
