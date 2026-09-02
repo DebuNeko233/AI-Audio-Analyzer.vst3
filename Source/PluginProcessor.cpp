@@ -6,6 +6,14 @@ AIAnalyzerAudioProcessor::AIAnalyzerAudioProcessor()
                          .withInput("Input", juce::AudioChannelSet::stereo(), true)
                          .withOutput("Output", juce::AudioChannelSet::stereo(), true))
 {
+    auto* identify = new juce::AudioParameterBool(
+        juce::ParameterID { "identify", 1 },
+        "Identify",
+        false);
+    addParameter(identify);
+    identifyParameter = identify;
+    lastIdentifyState.store(identify->getValue() >= 0.5f, std::memory_order_release);
+
     analysisWorker.setOscConfig(instanceId, oscHost, oscPort);
 }
 
@@ -46,6 +54,16 @@ void AIAnalyzerAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                                              juce::MidiBuffer&)
 {
     juce::ScopedNoDenormals noDenormals;
+
+    if (identifyParameter != nullptr)
+    {
+        const auto currentIdentifyState = identifyParameter->getValue() >= 0.5f;
+        const auto previousIdentifyState = lastIdentifyState.exchange(
+            currentIdentifyState, std::memory_order_acq_rel);
+
+        if (currentIdentifyState != previousIdentifyState)
+            analysisWorker.requestIdentify();
+    }
 
     const auto numInputChannels = getTotalNumInputChannels();
     if (numInputChannels <= 0 || buffer.getNumSamples() <= 0)
