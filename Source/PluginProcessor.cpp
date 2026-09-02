@@ -201,9 +201,17 @@ void AIAnalyzerAudioProcessor::setAnalysisProfileIndex(int profileIndex, bool no
         const auto normalized = analysisProfileParameter->convertTo0to1(
             static_cast<float>(profileIndex));
         if (notifyHost)
+        {
             analysisProfileParameter->setValueNotifyingHost(normalized);
+        }
         else
-            analysisProfileParameter->setValue(normalized);
+        {
+            // AudioParameterChoice narrows setValue() to private in JUCE 8.
+            // Call through the public AudioProcessorParameter interface so state
+            // restoration updates the parameter without emitting a host change.
+            static_cast<juce::AudioProcessorParameter*>(analysisProfileParameter)
+                ->setValue(normalized);
+        }
     }
 
     lastWorkerProfileIndex = profileIndex;
