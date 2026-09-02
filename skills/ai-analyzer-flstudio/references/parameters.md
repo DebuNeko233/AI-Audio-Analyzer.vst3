@@ -90,7 +90,13 @@ For short Snapshot A/B, LUFS-I is not independently reset for each snapshot.
 
 ### `bands_db`
 
-32 log-spaced 20 Hz–20 kHz FFT-derived machine features in dB-like relative level units.
+32 log-spaced 20 Hz–20 kHz FFT-derived **Mid-spectrum** machine features in dB-like relative level units.
+
+The field predates explicit V0.8 Mid/Side naming, but the underlying implementation has historically used:
+
+```text
+Mid = (L + R) / 2
+```
 
 They are useful for spectral shape comparisons but are not calibrated SPL.
 
@@ -120,7 +126,7 @@ Current implementation uses approximately 85% spectral rolloff: the frequency be
 
 Spectral Flatness, describing whether a spectrum is more concentrated/tonal or more distributed/noise-like. It is not a distortion or quality score.
 
-## Stereo
+## Legacy stereo measurements
 
 ### `stereo_correlation`
 
@@ -136,7 +142,13 @@ It is a statistical relation, not a good/bad score.
 
 ### `stereo_width`
 
-Mid/Side energy-ratio style width measurement. It is relative, not a fixed percentage score.
+Legacy Mid/Side RMS ratio-style measurement:
+
+```text
+Side RMS / Mid RMS
+```
+
+The plugin clamps this legacy scalar to a bounded range for continuity. V0.8 `side_to_mid_db` is the clearer unambiguous energy-ratio representation for detailed analysis.
 
 ### `band_stereo_correlation`
 
@@ -154,6 +166,140 @@ Eight band-limited L/R correlation values:
 ```
 
 Very low-energy bands should not be overinterpreted.
+
+## V0.8 Mid/Side and stereo measurements
+
+Detailed interpretation notes are in `stereo-evidence.md`.
+
+### `stereo_v08_supported`
+
+Whether the current frame contains the append-only V0.8 stereo tail.
+
+Older VST3 versions can still expose legacy correlation/width fields while this is false or absent.
+
+### `stereo_v08_valid`
+
+Whether the V0.8 fields are valid for the current frame. Active signal is required.
+
+### `mid_rms_db`
+
+RMS level of:
+
+```text
+Mid = (L + R) / 2
+```
+
+in Analyzer dBFS-like units.
+
+### `side_rms_db`
+
+RMS level of:
+
+```text
+Side = (L - R) / 2
+```
+
+Higher/lower Side RMS describes difference energy, not quality.
+
+### `side_to_mid_db`
+
+Side/Mid energy relation:
+
+```text
+10 * log10(Side power / Mid power)
+```
+
+Equivalent form:
+
+```text
+20 * log10(Side RMS / Mid RMS)
+```
+
+Interpretation:
+
+```text
+negative → Mid energy exceeds Side
+0        → equal Mid and Side energy
+positive → Side energy exceeds Mid
+```
+
+There is no universal target.
+
+### `negative_cross_energy_ratio`
+
+Range `0..1`.
+
+For each FFT bin, the plugin computes the real L/R cross-spectrum. Bins with a negative real cross term contribute to the numerator, weighted by bilateral L/R spectral energy.
+
+This is **phase-opposition evidence**. It is not:
+
+- a phase-angle histogram;
+- a sample-sign ratio;
+- a mono-cancellation percentage;
+- an audibility probability;
+- a quality score.
+
+### `low_band_20_120_correlation`
+
+Aggregate L/R correlation over approximately `20-120 Hz` FFT content.
+
+It describes signed low-frequency channel relation. Very low-energy low bands should not be overinterpreted.
+
+### `low_band_20_120_side_to_mid_db`
+
+Integrated Side/Mid power relation over approximately `20-120 Hz`.
+
+It is low-frequency difference/common energy evidence, not an automatic mono-compatibility pass/fail score.
+
+### `side_bands_db`
+
+32 log-spaced Side-spectrum features using the same center frequencies as `bands_db`.
+
+They represent:
+
+```text
+Side = (L - R) / 2
+```
+
+and are FFT-derived machine features, not calibrated SPL.
+
+### `band_side_to_mid_db`
+
+Eight integrated Side/Mid power ratios using the same frequency regions as `band_stereo_correlation`.
+
+Read each ratio together with the corresponding signed correlation; they answer different questions.
+
+### `decorrelation_proxy_mean`
+
+Returned by `audio_stereo_profile()` as the transparent derived quantity:
+
+```text
+1 - abs(stereo_correlation)
+```
+
+Range is approximately `0..1`.
+
+Important: both correlation `+1` and `-1` produce a proxy near `0`. Therefore this field must be read with correlation **sign** and negative-cross evidence.
+
+It is a mathematical proxy, not perceptual spaciousness.
+
+### `mid_spectrum_db` / `side_spectrum_db`
+
+Window-averaged spectrum arrays returned by `audio_stereo_profile()`.
+
+`mid_spectrum_db` is derived from historical `bands_db`; `side_spectrum_db` is derived from V0.8 `side_bands_db`.
+
+### `frequency_dependent_stereo`
+
+V0.8 profile output with eight regions. Each region contains:
+
+```text
+range
+correlation
+side_to_mid_db
+```
+
+Correlation describes signed L/R relation. Side/Mid dB describes difference/common energy distribution.
 
 ## V0.6 temporal measurements
 
