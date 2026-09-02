@@ -1,8 +1,8 @@
 # AI Audio Analyzer MCP Reference
 
-This file describes MCP tools, selector rules, call order, and validity checks. Measurement semantics are documented in `parameters.md`; V0.7 masking-evidence details are documented in `masking-evidence.md`; V0.8 stereo evidence is documented in `stereo-evidence.md`.
+This file describes MCP tools, selector rules, call order, validity checks, and OSC compatibility. Measurement semantics are documented in `parameters.md`; V0.7 masking evidence in `masking-evidence.md`; V0.8 stereo evidence in `stereo-evidence.md`; V0.9 tonal evidence in `tonal-evidence.md`.
 
-Current MCP 0.8 exposes **22 tools**:
+Current MCP 0.9 exposes **24 tools**:
 
 ```text
 audio_bridge_status()
@@ -27,11 +27,13 @@ audio_masking_evidence(track_a, track_b, seconds=5, alignment_tolerance_ms=80, m
 audio_project_masking_scan(seconds=5, max_pairs=8, alignment_tolerance_ms=80)
 audio_stereo_profile(track, seconds=5)
 audio_stereo_compare(track_a, track_b, seconds=5)
+audio_tonal_profile(track, seconds=8)
+audio_tonal_compare(track_a, track_b, seconds=8)
 ```
 
 ## Recommended hierarchy
 
-Do not call all 22 tools by default.
+Do not call all 24 tools by default.
 
 ```text
 project readiness
@@ -52,6 +54,9 @@ single-track temporal change
 single-track deep stereo / Mid-Side
 → audio_stereo_profile()
 
+single-track audio tonal evidence
+→ audio_tonal_profile()
+
 two-track basic spectrum
 → audio_compare_tracks()
 
@@ -64,11 +69,16 @@ custom-band temporal relation
 two-track stereo measurement comparison
 → audio_stereo_compare()
 
+two-track pitch-class distribution comparison
+→ audio_tonal_compare()
+
 Before/After verification
 → audio_capture_snapshot() / audio_compare_snapshots()
 ```
 
 Use the highest-level tool that answers the request, then drill down only when more detail is useful.
+
+For exact symbolic note/key/chord facts, use actual DAW/MIDI/project data when available. V0.9 is audio-domain inference evidence.
 
 ## V0.4 Identify: FL Studio ↔ Analyzer mapping
 
@@ -90,7 +100,7 @@ Every Boolean transition emits `/aianalyzer/identify`. Recommended flow:
 6. verify the event is fresh and not consumed;
 7. immediately call `audio_bind_last_identified(fl_track_index, fl_track_name, slot)`;
 8. repeat for the next instance;
-9. call `audio_instance_map()` and verify `discovery_complete`.
+9. call `audio_instance_map()` and verify discovery.
 
 Do not assume FL Studio MCP tool names. Use the tools and parameter names it actually exposes.
 
@@ -130,12 +140,12 @@ hold              ≈ 0.4 s
 
 Rules:
 
-- do not infer spectrum/stereo content from `signal_present=false` frames;
+- do not infer spectrum/stereo/semantic content from `signal_present=false` frames;
 - `null` means unavailable, not zero;
-- inspect `active_frames`, `active_ratio`, and `analysis_valid` for window tools;
+- inspect active/valid frame coverage for window tools;
 - stale streams are not current real-time state.
 
-For temporal tools also inspect:
+For V0.6 temporal tools inspect:
 
 ```text
 temporal_supported
@@ -152,11 +162,22 @@ stereo_frames
 active_ratio
 ```
 
+For V0.9 tonal tools inspect:
+
+```text
+semantic_v09_supported
+semantic_v09_valid
+valid_frames
+active_ratio
+evidence_quality.mean_chroma_energy_ratio
+evidence_quality.normalized_pitch_class_entropy
+evidence_quality.tonal_center_top2_margin
+evidence_quality.valid_frame_ratio
+```
+
 ## `audio_project_status()`
 
-Use first for project readiness.
-
-Important fields:
+Use first for project readiness. Important fields include:
 
 ```text
 project_ready
@@ -174,13 +195,7 @@ If instances are unbound, perform Identify before project-wide interpretation.
 
 ## `audio_mix_overview()`
 
-Returns recent project-level track summaries and:
-
-```text
-potential_spectral_conflicts
-```
-
-These are coarse relative-spectrum candidates, not proof of audible masking.
+Returns recent project-level summaries and `potential_spectral_conflicts`. Those are coarse relative-spectrum candidates, not proof of audible masking.
 
 ## `audio_project_masking_scan()` — V0.7
 
@@ -192,18 +207,7 @@ audio_project_masking_scan(
 )
 ```
 
-It starts from project spectral-conflict candidates and evaluates them with the V0.7 ERB-rebinned spectral/relative-level/temporal evidence model.
-
-Use it for project-level ranking, not as a universal list of problems.
-
-Important fields:
-
-```text
-candidate_pair_count
-pairs[].masking_evidence_score
-pairs[].top_region
-pairs[].alignment
-```
+It ranks project spectral candidates with the V0.7 ERB-rebinned spectral/relative-level/temporal evidence model. Use it for candidate ranking, not a universal problem list.
 
 ## `audio_snapshot()` / `audio_average()`
 
@@ -217,13 +221,11 @@ Latest frame; useful for current-state/connection checks.
 audio_average(track, seconds)
 ```
 
-Stable recent window; preferred when describing several seconds of content. Content-dependent averages use active frames only.
+Stable recent window; preferred for several seconds of content. Content-dependent averages use active frames only.
 
-## `audio_stereo_bands()` — legacy stereo correlation view
+## `audio_stereo_bands()`
 
-Returns the existing eight correlation bands. Use it when the legacy band view is sufficient.
-
-For Mid/Side energy, Side spectrum, low-band Side/Mid, or negative-cross evidence, use `audio_stereo_profile()` instead.
+Returns the legacy eight correlation bands. Use `audio_stereo_profile()` when Mid/Side energy, Side spectrum, low-band Side/Mid, or negative-cross evidence is needed.
 
 ## `audio_stereo_profile()` — V0.8
 
@@ -231,7 +233,7 @@ For Mid/Side energy, Side spectrum, low-band Side/Mid, or negative-cross evidenc
 audio_stereo_profile(track, seconds=5)
 ```
 
-Returns a windowed profile with:
+Main output:
 
 ```text
 full_band.mid_rms_db
@@ -244,20 +246,11 @@ full_band.negative_cross_energy_ratio_mean
 full_band.negative_cross_energy_ratio_max
 
 low_band_20_120_hz.correlation_mean
-low_band_20_120_hz.correlation_min
 low_band_20_120_hz.side_to_mid_db
-low_band_20_120_hz.side_to_mid_db_max
 
 mid_spectrum_db[32]
 side_spectrum_db[32]
 frequency_dependent_stereo[8]
-```
-
-Each `frequency_dependent_stereo` entry contains the range plus:
-
-```text
-correlation
-side_to_mid_db
 ```
 
 Do not collapse correlation, Side/Mid, decorrelation proxy, and negative-cross evidence into one stereo-quality score.
@@ -268,39 +261,82 @@ Do not collapse correlation, Side/Mid, decorrelation proxy, and negative-cross e
 audio_stereo_compare(track_a, track_b, seconds=5)
 ```
 
-Returns measurement deltas using:
+Deltas use `B - A`. Positive/negative is not automatically better/worse.
+
+## `audio_tonal_profile()` — V0.9
 
 ```text
-B - A
+audio_tonal_profile(track, seconds=8)
 ```
 
-Important fields:
+Use for audio-domain music-semantic evidence over a stable recent window.
+
+Main output:
 
 ```text
-deltas_b_minus_a.mid_rms_db
-deltas_b_minus_a.side_rms_db
-deltas_b_minus_a.side_to_mid_db
-deltas_b_minus_a.stereo_correlation_mean
-deltas_b_minus_a.decorrelation_proxy_mean
-deltas_b_minus_a.negative_cross_energy_ratio_mean
-deltas_b_minus_a.low_band_20_120_correlation
-deltas_b_minus_a.low_band_20_120_side_to_mid_db
-frequency_dependent_deltas[]
+chroma.pitch_class_order[12]
+chroma.normalized_power[12]
+chroma.top_pitch_classes
+chroma.normalized_entropy
+chroma.analysis_range_hz
+
+tonal_center_evidence.method
+tonal_center_evidence.top_candidates[]
+tonal_center_evidence.top2_margin
+tonal_center_evidence.probability = false
+
+harmonic_alignment.single_f0_harmonic_energy_ratio_mean
+harmonic_alignment.single_f0_harmonic_energy_ratio_max
+harmonic_alignment.f0_candidate_hz_median
+harmonic_alignment.f0_candidate_hz_min
+harmonic_alignment.f0_candidate_hz_max
+
+evidence_quality.mean_chroma_energy_ratio
+evidence_quality.normalized_pitch_class_entropy
+evidence_quality.tonal_center_top2_margin
+evidence_quality.valid_frame_ratio
+evidence_quality.active_ratio
 ```
 
-Positive/negative deltas are not automatically better/worse.
+The chroma order is:
+
+```text
+C C# D D# E F F# G G# A A# B
+```
+
+Tonal-center candidates are Pearson correlations against Krumhansl-Kessler major/minor templates. They are **not ground-truth key labels or probabilities**.
+
+The harmonic fields are a single-F0 spectral-alignment heuristic. They are not pitch transcription, note detection, harmonic/percussive source separation, or probability of harmonic content.
+
+If exact notes/key/chords are available from MIDI/project metadata, prefer those for exact symbolic questions.
+
+## `audio_tonal_compare()` — V0.9
+
+```text
+audio_tonal_compare(track_a, track_b, seconds=8)
+```
+
+Main output:
+
+```text
+pitch_class_comparison.cosine_similarity
+pitch_class_comparison.jensen_shannon_divergence
+pitch_class_comparison.pitch_class_order
+pitch_class_comparison.normalized_power_delta_b_minus_a[12]
+harmonic_alignment_delta_b_minus_a
+evidence_quality.track_a
+evidence_quality.track_b
+```
+
+The deltas are `B - A`. Chroma similarity/divergence does not establish harmonic compatibility, consonance, correctness, or a required musical action.
 
 ## `audio_compare_tracks()` / `audio_detect_masking()`
 
-These are older spectrum-only comparison paths.
-
-`audio_detect_masking()` should still be understood as a heuristic spectral-overlap candidate tool. It is not a Bark/ERB psychoacoustic proof of masking.
-
-For stronger current evidence use `audio_masking_evidence()`.
+These are older spectrum-only comparison paths. `audio_detect_masking()` is a heuristic spectral-overlap candidate tool. For stronger current evidence use `audio_masking_evidence()`.
 
 ## `audio_temporal_profile()` — V0.6
 
-Returns recent temporal descriptors such as:
+Returns descriptors such as:
 
 ```text
 spectral_flux_mean
@@ -311,7 +347,7 @@ onset_candidate_frames
 onset_candidate_density_hz
 ```
 
-Onset/change candidates are threshold-based heuristics. The active thresholds are returned explicitly in `onset_candidate_thresholds`.
+Onset/change candidates are threshold-based heuristics, not ground-truth musical onset labels.
 
 ## `audio_temporal_compare()` — V0.6
 
@@ -326,19 +362,7 @@ audio_temporal_compare(
 )
 ```
 
-Important fields:
-
-```text
-aligned_pairs
-usable_band_pairs
-mean_abs_alignment_offset_ms
-coactive_ratio
-band_envelope_correlation
-normalized_band_temporal_overlap
-candidate_coincidence_ratio
-```
-
-Use it when a user asks whether two sources actually co-occupy or co-vary in a custom frequency range over time.
+Important fields include aligned pairs, band-envelope correlation, normalized band temporal overlap, candidate coincidence, and alignment offset.
 
 ## `audio_masking_evidence()` — V0.7
 
@@ -352,7 +376,7 @@ audio_masking_evidence(
 )
 ```
 
-The current model:
+Current model:
 
 ```text
 32 Analyzer spectrum features
@@ -362,19 +386,7 @@ The current model:
 → V0.6 temporal overlap when available
 ```
 
-Important output:
-
-```text
-auditory_band_model
-alignment
-masking_evidence_score
-strongest_regions[]
-evidence_formula
-```
-
-The model is deliberately transparent. `auditory_band_model.filterbank=false` because the implementation re-bins existing 32-band features rather than running a gammatone/cochlear filterbank.
-
-Do not report `masking_evidence_score` as an audible-masking probability.
+`auditory_band_model.filterbank=false`; this is re-binning, not a cochlear/gammatone filterbank. `masking_evidence_score` is not an audible-masking probability.
 
 ## Snapshot / A-B
 
@@ -384,13 +396,7 @@ audio_capture_snapshot("after", seconds=5)
 audio_compare_snapshots("before", "after")
 ```
 
-For comparability:
-
-- use the same musical passage when possible;
-- use similar window lengths;
-- inspect `active_ratio`;
-- remember delta = `After - Before`;
-- LUFS-I is session cumulative, not independently reset for each snapshot.
+Use comparable passages/windows and inspect active coverage. Delta convention is `After - Before`. LUFS-I remains session cumulative.
 
 ## Multiple instances and OSC
 
@@ -400,11 +406,11 @@ All VST3 instances normally send to:
 127.0.0.1:9855
 ```
 
-Only the Bridge binds UDP port 9855. VST3 instances are senders, so multiple Analyzer instances do not need separate ports.
+Only the Bridge binds UDP 9855. VST3 instances are senders, so multiple instances do not need separate ports.
 
 ## OSC compatibility
 
-V0.8 keeps the frame append-only. Existing indexes `0..64` are unchanged:
+V0.9 remains append-only. Existing indexes `0..111` are unchanged:
 
 ```text
 0..58    V0.1–V0.4-compatible prefix
@@ -423,6 +429,11 @@ V0.8 keeps the frame append-only. Existing indexes `0..64` are unchanged:
 71..102  32 Side-spectrum bands
 103..110 8 Side/Mid band ratios
 111      V0.8 schema marker = "0.8"
+112..123 12 chroma bins: C..B
+124      chroma_energy_ratio
+125      single_f0_harmonic_energy_ratio
+126      harmonic_f0_candidate_hz
+127      V0.9 schema marker = "0.9"
 ```
 
-The historical `bands_db` at indexes `11..42` is the Mid spectrum. V0.8 appends the Side spectrum rather than changing those existing fields.
+Historical `bands_db` at indexes `11..42` remains the Mid spectrum. V0.8 and V0.9 only append fields; they do not repurpose existing indexes.
