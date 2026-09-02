@@ -115,13 +115,11 @@ jobs:
           python -m pip install -r bridge/requirements.txt
           python -m py_compile \
             bridge/server.py \
-            bridge/server_v05.py \
+            bridge/analyzer_core.py \
             bridge/project_tools.py \
-            bridge/server_v06.py \
             bridge/temporal_tools.py \
-            bridge/server_v07.py \
             bridge/masking_tools.py
-          AI_ANALYZER_SELF_TEST=1 python bridge/server_v07.py
+          AI_ANALYZER_SELF_TEST=1 python bridge/server.py
 
           python - <<'PY'
           import asyncio
@@ -129,8 +127,8 @@ jobs:
           from importlib.metadata import version
 
           sys.path.insert(0, "bridge")
-          import server as core
-          import server_v07 as entry
+          import analyzer_core as core
+          import server as entry
           import project_tools as project
           import temporal_tools as temporal
           import masking_tools as masking
@@ -140,6 +138,8 @@ jobs:
           assert mcp_version.split(".", 1)[0] == "2", mcp_version
           assert isinstance(entry.mcp, MCPServer)
           assert entry.mcp is core.mcp
+          assert entry.MCP_VERSION == "0.7"
+          assert entry.OSC_PROTOCOL_VERSION == "0.6"
 
           names = {tool.name for tool in asyncio.run(entry.mcp.list_tools())}
           assert names == entry.EXPECTED_TOOLS, sorted(names ^ entry.EXPECTED_TOOLS)
@@ -164,7 +164,6 @@ jobs:
               v06 = [0.1, flux * 0.5, flux, rise, -28.0, "0.6"]
               return prefix + v02 + v03 + v06
 
-          # Similar spectral shapes with changing levels produce useful 0.6/0.7 evidence.
           shape_a = [-55.0 + min(i, 12) * 1.8 for i in range(32)]
           shape_b = [value + 2.0 for value in shape_a]
           for i in range(8):
@@ -211,7 +210,8 @@ jobs:
 
           print(
               f"AI Audio Analyzer MCP SDK {mcp_version}: {len(names)} tools; "
-              "V0.4 mapping + V0.5 project A/B + V0.6 temporal + V0.7 masking evidence OK"
+              "single server.py entrypoint + V0.4 mapping + V0.5 project A/B + "
+              "V0.6 temporal + V0.7 masking evidence OK"
           )
           PY
 
@@ -222,11 +222,9 @@ jobs:
           rm -rf dist
           mkdir -p dist/mcp dist/skill
           cp bridge/server.py dist/mcp/
-          cp bridge/server_v05.py dist/mcp/
+          cp bridge/analyzer_core.py dist/mcp/
           cp bridge/project_tools.py dist/mcp/
-          cp bridge/server_v06.py dist/mcp/
           cp bridge/temporal_tools.py dist/mcp/
-          cp bridge/server_v07.py dist/mcp/
           cp bridge/masking_tools.py dist/mcp/
           cp bridge/requirements.txt dist/mcp/
           cp bridge/cherry-studio.example.json dist/mcp/
