@@ -42,6 +42,9 @@ public:
                            juce::String& host,
                            int& port) const;
 
+    int getAnalysisProfileIndex() const noexcept;
+    void setAnalysisProfileIndex(int profileIndex, bool notifyHost = true);
+
     bool getLatestAnalysis(aianalyzer::AnalysisFrame& frame) const;
     std::uint64_t getDroppedBlocks() const noexcept;
 
@@ -51,6 +54,7 @@ private:
     juce::String oscHost { "127.0.0.1" };
     int oscPort = 9855;
 
+    juce::AudioParameterChoice* analysisProfileParameter = nullptr;
     aianalyzer::AnalysisWorker analysisWorker;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(AIAnalyzerAudioProcessor)
