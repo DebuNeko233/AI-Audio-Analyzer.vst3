@@ -72,7 +72,7 @@ void AIAnalyzerAudioProcessorEditor::paint(juce::Graphics& g)
 
     g.setColour(juce::Colours::white);
     g.setFont(juce::FontOptions(22.0f, juce::Font::bold));
-    g.drawText("AI Analyzer", 18, 12, 220, 32, juce::Justification::centredLeft);
+    g.drawText("AI Audio Analyzer", 18, 12, 260, 32, juce::Justification::centredLeft);
 
     g.setFont(juce::FontOptions(12.0f));
     g.setColour(juce::Colours::lightgrey);
