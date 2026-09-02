@@ -11,6 +11,7 @@ Current layers:
 - temporal_tools: V0.6 temporal frame tail and temporal comparisons
 - masking_tools: V0.7 masking-evidence tools
 - stereo_tools: V0.8 Mid/Side, Side-spectrum, and stereo evidence
+- semantic_tools: V0.9 chroma, tonal-center, and harmonic-alignment evidence
 
 Set AI_ANALYZER_SELF_TEST=1 to validate source or packaged runtime without
 opening the OSC listener or MCP stdio transport.
@@ -41,8 +42,8 @@ def __getattr__(name: str) -> Any:
 
 
 # Import order matters. Each protocol layer wraps the previous append-only
-# frame parser. V0.8 therefore preserves the stable core + V0.6 fields before
-# attaching its own tail.
+# frame parser. V0.9 therefore preserves the stable core + V0.6 + V0.8 fields
+# before attaching its own music-semantic tail.
 import project_tools as project  # noqa: E402,F401
 import temporal_tools as temporal  # noqa: E402
 
@@ -53,8 +54,12 @@ import stereo_tools as stereo  # noqa: E402
 
 core._on_frame = stereo.on_frame_v08
 
-MCP_VERSION = "0.8"
-OSC_PROTOCOL_VERSION = "0.8"
+import semantic_tools as semantic  # noqa: E402
+
+core._on_frame = semantic.on_frame_v09
+
+MCP_VERSION = "0.9"
+OSC_PROTOCOL_VERSION = "0.9"
 
 EXPECTED_TOOLS = {
     "audio_bridge_status",
@@ -79,6 +84,8 @@ EXPECTED_TOOLS = {
     "audio_project_masking_scan",
     "audio_stereo_profile",
     "audio_stereo_compare",
+    "audio_tonal_profile",
+    "audio_tonal_compare",
 }
 
 
