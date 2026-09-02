@@ -13,7 +13,9 @@ FetchContent_MakeAvailable(JUCE)
 
 # libebur128 supplies standards-based EBU R128 / ITU-R BS.1770 loudness and
 # true-peak measurement. Build it statically so the VST3 has no extra runtime
-# library dependency.
+# library dependency. libebur128 1.2.6 still declares an old CMake minimum, so
+# modern CMake 4 runners need an explicit policy compatibility floor.
+set(CMAKE_POLICY_VERSION_MINIMUM 3.5 CACHE STRING "" FORCE)
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 set(WITH_STATIC_PIC ON CACHE BOOL "" FORCE)
 set(ENABLE_TESTS OFF CACHE BOOL "" FORCE)
