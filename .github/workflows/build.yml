@@ -126,21 +126,24 @@ jobs:
           set -euo pipefail
           python -m pip install --upgrade pip
           python -m pip install -r bridge/requirements.txt
-          python -m py_compile bridge/server.py
+          python -m py_compile bridge/server.py bridge/project_tools.py bridge/server_v05.py
           python - <<'PY'
           import asyncio
           import sys
           from importlib.metadata import version
 
           sys.path.insert(0, "bridge")
-          import server
+          import server as core
+          import server_v05 as entry
+          import project_tools as project
           from mcp.server import MCPServer
 
           mcp_version = version("mcp")
           assert mcp_version.split(".", 1)[0] == "2", mcp_version
-          assert isinstance(server.mcp, MCPServer)
+          assert isinstance(entry.mcp, MCPServer)
+          assert entry.mcp is core.mcp
 
-          tools = asyncio.run(server.mcp.list_tools())
+          tools = asyncio.run(entry.mcp.list_tools())
           names = {tool.name for tool in tools}
           expected = {
               "audio_bridge_status",
@@ -154,6 +157,11 @@ jobs:
               "audio_compare_tracks",
               "audio_detect_masking",
               "audio_master_status",
+              "audio_project_status",
+              "audio_mix_overview",
+              "audio_capture_snapshot",
+              "audio_list_snapshots",
+              "audio_compare_snapshots",
           }
           missing = expected - names
           assert not missing, f"Missing MCP tools: {sorted(missing)}"
@@ -163,59 +171,94 @@ jobs:
               500.0, 5000.0, 0.1, 0.8, 0.2,
           ] + [-40.0] * 32 + [-18.0, -14.0, -1.0, -0.5] + [0.9] * 8
 
-          with server._lock:
-              server._tracks.clear()
-              server._history.clear()
-              server._bindings.clear()
-              server._identify_events.clear()
-              server._identify_sequence = 0
+          with core._lock:
+              core._tracks.clear()
+              core._history.clear()
+              core._bindings.clear()
+              core._identify_events.clear()
+              core._identify_sequence = 0
+          with project._snapshot_lock:
+              project._project_snapshots.clear()
 
-          server._on_frame("/aianalyzer/frame", *(base + [1, -20.0, 0.0, "uuid-a"]))
-          server._on_frame("/aianalyzer/frame", *(base + [1, -20.0, 0.0, "uuid-b"]))
-          assert len(server._tracks) == 2
+          core._on_frame("/aianalyzer/frame", *(base + [1, -20.0, 0.0, "uuid-a"]))
+          core._on_frame("/aianalyzer/frame", *(base + [1, -20.0, 0.0, "uuid-b"]))
+          assert len(core._tracks) == 2
 
           try:
-              server._resolve_track("Bass")
+              core._resolve_track("Bass")
           except ValueError as exc:
               assert "Ambiguous analyzer instance name" in str(exc)
           else:
               raise AssertionError("Duplicate analyzer names must be ambiguous before binding")
 
-          server._on_identify("/aianalyzer/identify", "uuid-a", "Bass", 2.0, "0.4")
-          last = server.audio_last_identify()
+          core._on_identify("/aianalyzer/identify", "uuid-a", "Bass", 2.0, "0.4")
+          last = core.audio_last_identify()
           assert last["runtime_id"] == "uuid-a"
           assert last["consumed"] is False
 
-          bound = server.audio_bind_last_identified(7, "Bass Sub", 9)
+          bound = core.audio_bind_last_identified(7, "Bass Sub", 9)
           assert bound["binding"]["runtime_id"] == "uuid-a"
-          assert server._resolve_track("mixer:7/slot:9") == "uuid-a"
-          assert server._resolve_track("Bass Sub") == "uuid-a"
+          assert core._resolve_track("mixer:7/slot:9") == "uuid-a"
+          assert core._resolve_track("Bass Sub") == "uuid-a"
 
           try:
-              server.audio_bind_last_identified(8, "Wrong Bass", 9)
+              core.audio_bind_last_identified(8, "Wrong Bass", 9)
           except ValueError as exc:
               assert "already consumed" in str(exc)
           else:
               raise AssertionError("An Identify event must not bind twice")
 
-          topology = server.audio_instance_map()
+          topology = core.audio_instance_map()
           assert topology["bound_count"] == 1
           assert topology["unbound_count"] == 1
 
           silent = list(base)
           silent[3] = -80.0
-          server._on_frame("/aianalyzer/frame", *(silent + [0, -80.0, 4.0, "uuid-a"]))
-          snapshot = server._snapshot("mixer:7/slot:9")
-          assert snapshot["signal_present"] is False
-          assert snapshot["bands_db"] is None
-          assert snapshot["stereo_correlation"] is None
-          assert snapshot["lufs_s"] is None
-          assert snapshot["lufs_i"] == -14.0
-          assert snapshot["binding"]["fl_track_name"] == "Bass Sub"
+          core._on_frame("/aianalyzer/frame", *(silent + [0, -80.0, 4.0, "uuid-a"]))
+          safe = core._snapshot("mixer:7/slot:9")
+          assert safe["signal_present"] is False
+          assert safe["bands_db"] is None
+          assert safe["stereo_correlation"] is None
+          assert safe["lufs_s"] is None
+          assert safe["lufs_i"] == -14.0
+          assert safe["binding"]["fl_track_name"] == "Bass Sub"
+
+          # V0.5 project intelligence.
+          core._on_frame("/aianalyzer/frame", *(base + [1, -20.0, 0.0, "uuid-a"]))
+          status = project.audio_project_status()
+          assert status["live_count"] == 2
+          assert status["bound_count"] == 1
+          assert status["unbound_count"] == 1
+
+          overview = project.audio_mix_overview(10.0)
+          assert overview["track_count"] == 2
+          assert overview["active_track_count"] >= 1
+
+          before = project.audio_capture_snapshot("before", 10.0)
+          assert before["track_count"] == 2
+
+          changed = list(base)
+          changed[3] = -10.0
+          changed[4] = -20.0
+          changed[11:43] = [-30.0] * 32
+          with core._lock:
+              core._history["uuid-a"].clear()
+          core._on_frame("/aianalyzer/frame", *(changed + [1, -10.0, 0.0, "uuid-a"]))
+
+          after = project.audio_capture_snapshot("after", 10.0)
+          assert after["track_count"] == 2
+          listed = project.audio_list_snapshots()
+          assert listed["count"] == 2
+
+          comparison = project.audio_compare_snapshots("before", "after")
+          assert comparison["shared_track_count"] == 2
+          bass = next(item for item in comparison["tracks"] if item["identity"] == "mixer:7/slot:9")
+          assert bass["delta"]["rms_db"] is not None
+          assert bass["delta"]["rms_db"] > 0.0
 
           print(
               f"AI Audio Analyzer MCP v{mcp_version}: {len(names)} tools registered; "
-              "V0.4 identify/mapping protocol OK"
+              "V0.4 mapping + V0.5 project intelligence/A-B protocol OK"
           )
           PY
 
@@ -227,6 +270,8 @@ jobs:
           mkdir -p dist/mcp dist/skill
 
           cp bridge/server.py dist/mcp/
+          cp bridge/server_v05.py dist/mcp/
+          cp bridge/project_tools.py dist/mcp/
           cp bridge/requirements.txt dist/mcp/
           cp bridge/cherry-studio.example.json dist/mcp/
           cp -R skills/ai-analyzer-flstudio/. dist/skill/
@@ -297,6 +342,8 @@ jobs:
           ditto "$VST3_PATH" "dist/AI Audio Analyzer.vst3"
 
           cp bridge/server.py dist/mcp/
+          cp bridge/server_v05.py dist/mcp/
+          cp bridge/project_tools.py dist/mcp/
           cp bridge/requirements.txt dist/mcp/
           cp bridge/cherry-studio.example.json dist/mcp/
           cp -R skills/ai-analyzer-flstudio/. dist/skill/
@@ -321,6 +368,8 @@ jobs:
           Copy-Item -Path $vst3.FullName -Destination 'dist/AI Audio Analyzer.vst3' -Recurse -Force
 
           Copy-Item 'bridge/server.py' 'dist/mcp/server.py'
+          Copy-Item 'bridge/server_v05.py' 'dist/mcp/server_v05.py'
+          Copy-Item 'bridge/project_tools.py' 'dist/mcp/project_tools.py'
           Copy-Item 'bridge/requirements.txt' 'dist/mcp/requirements.txt'
           Copy-Item 'bridge/cherry-studio.example.json' 'dist/mcp/cherry-studio.example.json'
           Copy-Item 'skills/ai-analyzer-flstudio/*' 'dist/skill/' -Recurse -Force
