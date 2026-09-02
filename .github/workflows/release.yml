@@ -364,13 +364,13 @@ jobs:
 
           Download the package for your computer, unzip it once, and run the installer inside.
 
-          - **Windows:** download `AI-Audio-Analyzer-*-Windows.zip`, unzip it, then double-click `Install.cmd`.
-          - **macOS Apple Silicon:** download `AI-Audio-Analyzer-*-macOS.zip`, unzip it, then double-click `Install.command`.
+          - Windows: download AI-Audio-Analyzer-*-Windows.zip, unzip it, then double-click Install.cmd.
+          - macOS Apple Silicon: download AI-Audio-Analyzer-*-macOS.zip, unzip it, then double-click Install.command.
           - No Python, source code, package manager, or programming setup is included or required.
           - Each user package contains the VST3, standalone MCP executable, Cherry Studio Skill, installer, and simple installation guides.
           - macOS Release is Apple Silicon arm64 only and is currently ad-hoc signed rather than Apple-notarized.
 
-          See `START-HERE.md` inside the downloaded package for the shortest setup path.
+          See START-HERE.md inside the downloaded package for the shortest setup path.
           EOF
 
       - name: Create or update GitHub Release
