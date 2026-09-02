@@ -4,7 +4,7 @@
 
 **AI Audio Analyzer** 是一个面向 AI / LLM 音乐制作工作流的 JUCE VST3 机器可读音频测量层。
 
-插件在 DAW 内直接测量音频，通过 OSC 把紧凑数据发送给 Analyzer MCP Bridge，再由 Cherry Studio 或其他 MCP 客户端结构化读取电平、响度、频谱、立体声、时间关系、工程概览、A/B、遮蔽相关证据、音频域调性证据，以及 V1.0 的闭环修改验证信息。
+插件在 DAW 内直接测量音频，通过 OSC 把紧凑数据发送给 Analyzer MCP Bridge，再由 Cherry Studio 或其他 MCP 客户端结构化读取电平、响度、频谱、立体声、时间关系、工程概览、A/B、遮蔽相关证据、音频域调性证据，以及闭环修改验证信息。
 
 当前产品版本：**1.0.0**。
 
@@ -30,7 +30,7 @@ AI Audio Analyzer MCP   → 观察 / 测量 / 比较 / 验证
 FL Studio MCP           → 读取 / 控制 / 修改 / 回读 FL Studio
 ```
 
-V1.0 把闭环明确为：
+闭环流程为：
 
 ```text
 工程发现
@@ -61,11 +61,11 @@ FL Studio / DAW
                  ├─ Live Instance Registry
                  ├─ FL Track/Slot 确定性映射
                  ├─ Project Overview / Snapshot A-B
-                 ├─ V0.6 Temporal Evidence
-                 ├─ V0.7 Masking Evidence
-                 ├─ V0.8 Mid/Side + Stereo Evidence
-                 ├─ V0.9 Tonal / Music-Semantic Evidence
-                 └─ V1.0 Closed-loop Verification Sessions
+                 ├─ Temporal Evidence
+                 ├─ Masking Evidence
+                 ├─ Mid/Side + Stereo Evidence
+                 ├─ Tonal / Music-Semantic Evidence
+                 └─ Closed-loop Verification Sessions
                          │
                          ▼
                   Cherry Studio / LLM
@@ -86,11 +86,11 @@ FL Studio / DAW
 - Spectral Centroid、约 85% Rolloff、Flatness；
 - Full-band L/R Correlation 和历史 Mid/Side Width Ratio；
 - 8 个分频段 L/R Correlation；
-- V0.6 Spectral Flux、RMS Rise、40–160 Hz Temporal Energy；
-- V0.8 Mid RMS、Side RMS、Side/Mid dB、Side Spectrum、分频段 Side/Mid、低频 Stereo Relation 和 Negative Cross-Spectrum Evidence；
-- V0.9 12-bin Mid-spectrum Chroma、Chroma 分析覆盖率、Tonal-center Profile Ranking 和 Single-F0 Harmonic-alignment Evidence。
+- Spectral Flux、RMS Rise、40–160 Hz Temporal Energy；
+- Mid RMS、Side RMS、Side/Mid dB、Side Spectrum、分频段 Side/Mid、低频 Stereo Relation 和 Negative Cross-Spectrum Evidence；
+- 12-bin Mid-spectrum Chroma、Chroma 分析覆盖率、Tonal-center Profile Ranking 和 Single-F0 Harmonic-alignment Evidence。
 
-### V0.3 Signal Validity
+### Signal Validity
 
 ```text
 关闭   低于 -50 dBFS 持续约 0.4 s
@@ -99,7 +99,7 @@ FL Studio / DAW
 
 `signal_present=false` 时，依赖真实音频内容的字段会变成 unavailable，而不是返回误导性的 0。`null` 表示**当前没有有效测量**，不是数值 0。
 
-### V0.4 Analyzer ↔ FL Mixer 确定性映射
+### Analyzer ↔ FL Mixer 确定性映射
 
 每个 Live Analyzer 都有 Session Runtime UUID，并向宿主公开：
 
@@ -114,11 +114,11 @@ Display name: Identify
 mixer:7/slot:9
 ```
 
-### V0.5 Project Intelligence / Snapshot A-B
+### Project Intelligence / Snapshot A-B
 
 提供工程准备度、最近窗口概览，以及当前 Bridge Session 内的 Before / After Snapshot。
 
-### V0.6 Temporal Evidence
+### Temporal Evidence
 
 ```text
 audio_temporal_profile()
@@ -127,14 +127,14 @@ audio_temporal_compare()
 
 Temporal overlap / correlation 是时间共现和共变证据，不是遮蔽概率，也不是处理指令。
 
-### V0.7 Masking Evidence
+### Masking Evidence
 
 ```text
 32 个 Mid Spectrum 特征
 → 16 个 equal ERB-rate 区间
 → 相对频谱占用
 → 相对电平方向权重
-→ V0.6 时间重叠
+→ 时间重叠
 → Region-level Masking Evidence
 ```
 
@@ -145,9 +145,9 @@ audio_project_masking_scan()
 
 这里是 **equal-ERB-rate feature re-binning**，不是 gammatone / cochlear filterbank，也不是经过听阈校准的心理声学模型。分数是 heuristic evidence，不是可听遮蔽概率。
 
-### V0.8 Mid/Side 与 Stereo Evidence
+### Mid/Side 与 Stereo Evidence
 
-V0.8 将 Signed L/R Correlation、Side/Mid Energy、Decorrelation Proxy、Negative Cross-Spectrum、低频 Stereo Relation、Mid/Side Spectrum 和分频段 Stereo 关系拆开测量。
+这一层将 Signed L/R Correlation、Side/Mid Energy、Decorrelation Proxy、Negative Cross-Spectrum、低频 Stereo Relation、Mid/Side Spectrum 和分频段 Stereo 关系拆开测量。
 
 ```text
 audio_stereo_profile(track, seconds=5)
@@ -156,9 +156,9 @@ audio_stereo_compare(track_a, track_b, seconds=5)
 
 Skill 不定义统一的 Width、Correlation、Side/Mid 或低频 Stereo 目标。
 
-### V0.9 音频域调性 / Music-semantic Evidence
+### 音频域调性 / Music-semantic Evidence
 
-V0.9 提供：
+Analyzer 提供：
 
 ```text
 12-bin normalized chroma: C..B
@@ -176,9 +176,9 @@ audio_tonal_compare(track_a, track_b, seconds=8)
 
 Tonal-center 使用 24 个 Major/Minor Krumhansl-Kessler Profile Correlation。它们是音频域证据，不是精确 Key / Note 概率。涉及精确 Note、Key、Chord、Tuning 时，如果 DAW/MIDI MCP 有真实符号数据，应优先用该数据。
 
-### V1.0 可靠闭环验证
+### 可靠闭环验证
 
-V1.0 新增的是 **Bridge 侧 Verification Orchestration**，没有新增 DSP 或 OSC 字段：
+这是 **Bridge 侧 Verification Orchestration**，没有新增 DSP 或 OSC 字段：
 
 ```text
 audio_begin_verification(label, seconds=5, target_selectors=None)
@@ -215,7 +215,7 @@ audio_complete_verification(...)
 audio_verification_status(...)
 ```
 
-不要为了“完整”机械调用所有工具。先从工程级工具开始，只选择当前问题真正需要的 Evidence Family；如果任务要求修改 DAW 并验证结果，就用 V1.0 Verification 包住外部写入和宿主回读。
+不要为了“完整”机械调用所有工具。先从工程级工具开始，只选择当前问题真正需要的 Evidence Family；如果任务要求修改 DAW 并验证结果，就用 Verification 包住外部写入和宿主回读。
 
 ## 用户安装
 
@@ -284,7 +284,7 @@ MCP version           1.0
 OSC protocol version  0.9
 ```
 
-V1.0 没有改 VST3 Frame，因此 OSC Protocol 故意保持 0.9。
+1.0 没有改 VST3 Frame，因此 OSC Protocol 故意保持 0.9。
 
 内部模块：
 
@@ -292,11 +292,11 @@ V1.0 没有改 VST3 Frame，因此 OSC Protocol 故意保持 0.9。
 bridge/server.py             启动 / self-test / 共享 Tool Registry
 bridge/analyzer_core.py      OSC 状态、身份映射、基础工具
 bridge/project_tools.py      Project Overview / Snapshot A-B
-bridge/temporal_tools.py     V0.6 Temporal Layer
-bridge/masking_tools.py      V0.7 Masking Evidence Layer
-bridge/stereo_tools.py       V0.8 Mid/Side + Stereo Layer
-bridge/semantic_tools.py     V0.9 Chroma / Tonal-center / Harmonic Evidence
-bridge/verification_tools.py V1.0 Closed-loop Verification
+bridge/temporal_tools.py     Temporal Layer
+bridge/masking_tools.py      Masking Evidence Layer
+bridge/stereo_tools.py       Mid/Side + Stereo Layer
+bridge/semantic_tools.py     Chroma / Tonal-center / Harmonic Evidence
+bridge/verification_tools.py Closed-loop Verification
 ```
 
 `bridge/ci_regression.py` 只用于仓库 CI，不进入普通用户 Release。
@@ -335,7 +335,7 @@ MCP 1.0 继续使用 append-only **OSC Protocol 0.9**：
 127        V0.9 schema marker = "0.9"
 ```
 
-历史 `11..42` 仍是 32-band **Mid Spectrum**。V1.0 不会在 127 后面继续追加字段。
+历史 `11..42` 仍是 32-band **Mid Spectrum**。1.0 不会在 127 后面继续追加字段。
 
 Identify 地址仍是 `/aianalyzer/identify`。
 
@@ -345,16 +345,16 @@ Audio Callback 不执行 FFT、响度、Music-semantic Analysis、OSC、MCP、Ve
 
 ## 当前限制
 
-- V0.7 ERB 仍是 feature re-binning，不是真正 auditory filterbank；
+- ERB 仍是 feature re-binning，不是真正 auditory filterbank；
 - Masking Evidence 仍是 heuristic；
-- V0.8 Negative Cross Evidence 不是 phase-angle histogram 或 mono-cancellation 百分比；
-- V0.8 Side/Mid 与 Correlation 都是测量，不是 Stereo Quality Score；
-- V0.9 Chroma 是 FFT-derived 12-TET Pitch-class Evidence，不是 Transcription；
-- V0.9 Tonal-center Ranking 是 Profile Correlation，不是精确 Key Detection；
-- V0.9 Single-F0 Harmonic Evidence 是 Heuristic，在 Polyphonic / Noisy / Inharmonic Material 上可能不稳定；
-- V1.0 Topology Fingerprint 只代表当前 Live Analyzer 的一致性，不是完整、永久的 FL Studio Project Hash；
-- V1.0 `host_readback` 由调用方/外部 Control MCP 提供，Analyzer 不独立验证；
-- V1.0 Verification Session 是内存态，Bridge 退出后消失；
+- Negative Cross Evidence 不是 phase-angle histogram 或 mono-cancellation 百分比；
+- Side/Mid 与 Correlation 都是测量，不是 Stereo Quality Score；
+- Chroma 是 FFT-derived 12-TET Pitch-class Evidence，不是 Transcription；
+- Tonal-center Ranking 是 Profile Correlation，不是精确 Key Detection；
+- Single-F0 Harmonic Evidence 是 Heuristic，在 Polyphonic / Noisy / Inharmonic Material 上可能不稳定；
+- Topology Fingerprint 只代表当前 Live Analyzer 的一致性，不是完整、永久的 FL Studio Project Hash；
+- `host_readback` 由调用方/外部 Control MCP 提供，Analyzer 不独立验证；
+- Verification Session 是内存态，Bridge 退出后消失；
 - Temporal 对齐受独立 OSC Stream 和更新分辨率限制；
 - LUFS-I / Session Max True Peak 是 Session 累积量；
 - FL Mixer Binding 是 Session-scoped，重新打开工程后可能需要重新 Identify；
