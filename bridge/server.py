@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
 """OSC receiver + MCP server for AI Analyzer.vst3.
 
-The VST3 sends compact analysis frames to UDP localhost. This process caches the
-latest/history per plugin instance and exposes LLM-friendly MCP tools over stdio.
-Uses the stable MCP Python SDK v2 high-level MCPServer API.
+AI Analyzer VST3 instances send compact analysis frames over UDP/OSC. This
+process caches the latest/history per instance and exposes LLM-friendly tools
+through MCP stdio.
+
+The bridge deliberately keeps MCP alive even when OSC cannot bind. This makes
+startup problems observable through ``audio_bridge_status`` instead of causing
+an opaque "MCP error -32000: Connection closed" in desktop MCP clients.
 """
 
 from __future__ import annotations
@@ -14,6 +18,7 @@ import sys
 import threading
 import time
 from collections import deque
+from importlib.metadata import PackageNotFoundError, version
 from typing import Any
 
 from mcp.server import MCPServer
@@ -25,23 +30,50 @@ NUM_STEREO_CORR_BANDS = 8
 MIN_HZ = 20.0
 MAX_HZ = 20000.0
 HISTORY_LENGTH = 3600
+DEFAULT_OSC_HOST = "127.0.0.1"
+DEFAULT_OSC_PORT = 9855
 
 BAND_EDGES = [
     MIN_HZ * (MAX_HZ / MIN_HZ) ** (i / NUM_BANDS)
     for i in range(NUM_BANDS + 1)
 ]
-BAND_CENTERS = [math.sqrt(BAND_EDGES[i] * BAND_EDGES[i + 1]) for i in range(NUM_BANDS)]
-STEREO_CORR_EDGES = [20.0, 60.0, 120.0, 250.0, 500.0, 1000.0, 2000.0, 5000.0, 20000.0]
+BAND_CENTERS = [
+    math.sqrt(BAND_EDGES[i] * BAND_EDGES[i + 1]) for i in range(NUM_BANDS)
+]
+STEREO_CORR_EDGES = [
+    20.0,
+    60.0,
+    120.0,
+    250.0,
+    500.0,
+    1000.0,
+    2000.0,
+    5000.0,
+    20000.0,
+]
 
 _lock = threading.RLock()
 _tracks: dict[str, dict[str, Any]] = {}
 _history: dict[str, deque[dict[str, Any]]] = {}
+_bridge_started_at = time.time()
+_osc_host = DEFAULT_OSC_HOST
+_osc_port = DEFAULT_OSC_PORT
+_osc_listening = False
+_osc_error: str | None = None
+_last_frame_at: float | None = None
 
 mcp = MCPServer("AI Analyzer Audio MCP")
 
 
+def _mcp_version() -> str:
+    try:
+        return version("mcp")
+    except PackageNotFoundError:
+        return "unknown"
+
+
 def _clean_frame(frame: dict[str, Any]) -> dict[str, Any]:
-    return {k: v for k, v in frame.items() if not k.startswith("_")}
+    return {key: value for key, value in frame.items() if not key.startswith("_")}
 
 
 def _resolve_track(track: str) -> str:
@@ -52,7 +84,14 @@ def _resolve_track(track: str) -> str:
         for name in _tracks:
             if name.casefold() == wanted:
                 return name
-    raise ValueError(f"Unknown analyzer instance: {track!r}. Available: {sorted(_tracks)}")
+        available = sorted(_tracks)
+    raise ValueError(f"Unknown analyzer instance: {track!r}. Available: {available}")
+
+
+def _snapshot(track: str) -> dict[str, Any]:
+    name = _resolve_track(track)
+    with _lock:
+        return _clean_frame(dict(_tracks[name]))
 
 
 def _stereo_corr_ranges() -> list[str]:
@@ -67,12 +106,42 @@ def _stereo_corr_ranges() -> list[str]:
     return result
 
 
+def _mean_db_like(values: list[float]) -> float | None:
+    finite = [value for value in values if math.isfinite(value) and value > -120.0]
+    if not finite:
+        return None
+    mean_power = sum(10.0 ** (value / 10.0) for value in finite) / len(finite)
+    return 10.0 * math.log10(max(mean_power, 1e-12))
+
+
+def _band_range(index: int) -> str:
+    lo = BAND_EDGES[index]
+    hi = BAND_EDGES[index + 1]
+    if hi < 1000:
+        return f"{lo:.0f}-{hi:.0f} Hz"
+    return f"{lo / 1000:.2f}-{hi / 1000:.2f} kHz"
+
+
+def _read_osc_config() -> tuple[str, int, str | None]:
+    host = os.getenv("AI_ANALYZER_OSC_HOST", DEFAULT_OSC_HOST).strip() or DEFAULT_OSC_HOST
+    raw_port = os.getenv("AI_ANALYZER_OSC_PORT", str(DEFAULT_OSC_PORT)).strip()
+    try:
+        port = int(raw_port)
+    except ValueError:
+        return host, DEFAULT_OSC_PORT, f"Invalid AI_ANALYZER_OSC_PORT={raw_port!r}; expected an integer."
+    if not 1 <= port <= 65535:
+        return host, DEFAULT_OSC_PORT, f"Invalid AI_ANALYZER_OSC_PORT={port}; expected 1..65535."
+    return host, port, None
+
+
 def _on_frame(_address: str, *args: Any) -> None:
-    # Backward-compatible V0.2 schema:
+    """Receive one backward-compatible V0.2 analyzer frame."""
+    global _last_frame_at
+
     # V0.1 prefix:
     # instance, sample_rate, plugin_timestamp, peak, rms, crest,
     # centroid, rolloff, flatness, correlation, width, 32 spectrum dB values
-    # V0.2 appended extras:
+    # V0.2 extras:
     # LUFS-S, LUFS-I, current true peak dBTP, session max true peak dBTP,
     # 8 band-limited stereo-correlation values.
     base_count = 11 + NUM_BANDS
@@ -80,11 +149,12 @@ def _on_frame(_address: str, *args: Any) -> None:
         print(
             f"AI Analyzer: ignored malformed OSC frame with {len(args)} args",
             file=sys.stderr,
+            flush=True,
         )
         return
 
     instance = str(args[0]).strip() or "Track"
-    bands = [float(v) for v in args[11 : 11 + NUM_BANDS]]
+    bands = [float(value) for value in args[11 : 11 + NUM_BANDS]]
     extra = 11 + NUM_BANDS
 
     lufs_s: float | None = None
@@ -102,7 +172,8 @@ def _on_frame(_address: str, *args: Any) -> None:
     corr_start = extra + 4
     if len(args) >= corr_start + NUM_STEREO_CORR_BANDS:
         band_stereo_correlation = [
-            float(v) for v in args[corr_start : corr_start + NUM_STEREO_CORR_BANDS]
+            float(value)
+            for value in args[corr_start : corr_start + NUM_STEREO_CORR_BANDS]
         ]
 
     now = time.time()
@@ -131,22 +202,90 @@ def _on_frame(_address: str, *args: Any) -> None:
 
     with _lock:
         _tracks[instance] = frame
-        history = _history.setdefault(instance, deque(maxlen=HISTORY_LENGTH))
-        history.append(frame)
+        _history.setdefault(instance, deque(maxlen=HISTORY_LENGTH)).append(frame)
+        _last_frame_at = now
 
 
-def _snapshot(track: str) -> dict[str, Any]:
-    name = _resolve_track(track)
+def _compare_tracks(track_a: str, track_b: str) -> dict[str, Any]:
+    a = _snapshot(track_a)
+    b = _snapshot(track_b)
+    max_a = max(a["bands_db"])
+    max_b = max(b["bands_db"])
+    overlaps: list[dict[str, Any]] = []
+
+    for index, (db_a, db_b) in enumerate(zip(a["bands_db"], b["bands_db"])):
+        rel_a = 10.0 ** ((float(db_a) - max_a) / 10.0)
+        rel_b = 10.0 ** ((float(db_b) - max_b) / 10.0)
+        score = min(rel_a, rel_b)
+        overlaps.append(
+            {
+                "band": index,
+                "range": _band_range(index),
+                "center_hz": BAND_CENTERS[index],
+                "score": round(score, 4),
+                "a_db": float(db_a),
+                "b_db": float(db_b),
+            }
+        )
+
+    strongest = sorted(overlaps, key=lambda item: item["score"], reverse=True)[:8]
+    overall = sum(item["score"] for item in strongest[:5]) / max(1, min(5, len(strongest)))
+    return {
+        "track_a": a["track"],
+        "track_b": b["track"],
+        "spectral_overlap_score": round(overall, 4),
+        "strongest_overlap_bands": strongest,
+        "note": "Heuristic relative spectral overlap, not a psychoacoustic masking model. Use musical context before EQ/sidechain decisions.",
+    }
+
+
+@mcp.tool()
+def audio_bridge_status() -> dict[str, Any]:
+    """Report MCP/OSC bridge health, startup errors, and analyzer stream state."""
+    now = time.time()
     with _lock:
-        return _clean_frame(dict(_tracks[name]))
+        track_names = sorted(_tracks)
+        last_frame_at = _last_frame_at
+        listening = _osc_listening
+        error = _osc_error
+        host = _osc_host
+        port = _osc_port
 
+    last_age = None if last_frame_at is None else round(max(0.0, now - last_frame_at), 3)
 
-def _mean_db_like(values: list[float]) -> float | None:
-    finite = [v for v in values if math.isfinite(v) and v > -120.0]
-    if not finite:
-        return None
-    mean_power = sum(10.0 ** (v / 10.0) for v in finite) / len(finite)
-    return 10.0 * math.log10(max(mean_power, 1e-12))
+    if error:
+        hint = (
+            "MCP is running, but OSC is unavailable. If the error says address already in use, "
+            "stop any manually started server.py/older bridge using the same UDP port, then restart this MCP server."
+        )
+    elif not listening:
+        hint = "MCP is running, but OSC listener has not started."
+    elif not track_names:
+        hint = (
+            "OSC is listening but no analyzer frames have arrived yet. Load AI Analyzer.vst3, "
+            "use the same OSC port, click Apply if needed, and start FL Studio playback."
+        )
+    elif last_age is not None and last_age > 3.0:
+        hint = "Analyzer data is stale; check FL Studio playback and the VST3 OSC connection."
+    else:
+        hint = "Bridge is healthy and receiving analyzer frames."
+
+    return {
+        "ok": bool(listening and error is None),
+        "pid": os.getpid(),
+        "mcp_sdk_version": _mcp_version(),
+        "uptime_seconds": round(max(0.0, now - _bridge_started_at), 3),
+        "osc": {
+            "host": host,
+            "port": port,
+            "listening": listening,
+            "error": error,
+        },
+        "track_count": len(track_names),
+        "tracks": track_names,
+        "last_frame_age_seconds": last_age,
+        "hint": hint,
+    }
 
 
 @mcp.tool()
@@ -182,7 +321,7 @@ def audio_average(track: str, seconds: float = 5.0) -> dict[str, Any]:
     cutoff = time.time() - seconds
 
     with _lock:
-        frames = [f for f in _history.get(name, ()) if f["_received_at"] >= cutoff]
+        frames = [frame for frame in _history.get(name, ()) if frame["_received_at"] >= cutoff]
 
     if not frames:
         return _snapshot(name)
@@ -193,62 +332,57 @@ def audio_average(track: str, seconds: float = 5.0) -> dict[str, Any]:
         "frames": len(frames),
         "band_centers_hz": BAND_CENTERS,
         "stereo_correlation_band_ranges": _stereo_corr_ranges(),
+        "peak_db": max(float(frame["peak_db"]) for frame in frames),
+        "rms_db": _mean_db_like([float(frame["rms_db"]) for frame in frames]),
+        "crest_db": sum(float(frame["crest_db"]) for frame in frames) / len(frames),
+        "centroid_hz": sum(float(frame["centroid_hz"]) for frame in frames) / len(frames),
+        "rolloff_hz": sum(float(frame["rolloff_hz"]) for frame in frames) / len(frames),
+        "flatness": sum(float(frame["flatness"]) for frame in frames) / len(frames),
+        "stereo_correlation": sum(float(frame["stereo_correlation"]) for frame in frames) / len(frames),
+        "stereo_width": sum(float(frame["stereo_width"]) for frame in frames) / len(frames),
     }
 
-    result["peak_db"] = max(float(f["peak_db"]) for f in frames)
-    result["rms_db"] = _mean_db_like([float(f["rms_db"]) for f in frames])
-    result["crest_db"] = sum(float(f["crest_db"]) for f in frames) / len(frames)
-    result["centroid_hz"] = sum(float(f["centroid_hz"]) for f in frames) / len(frames)
-    result["rolloff_hz"] = sum(float(f["rolloff_hz"]) for f in frames) / len(frames)
-    result["flatness"] = sum(float(f["flatness"]) for f in frames) / len(frames)
-    result["stereo_correlation"] = sum(float(f["stereo_correlation"]) for f in frames) / len(frames)
-    result["stereo_width"] = sum(float(f["stereo_width"]) for f in frames) / len(frames)
-
-    short_term_values = [float(f["lufs_s"]) for f in frames if f.get("lufs_s") is not None]
-    result["lufs_s"] = _mean_db_like(short_term_values)
-
-    # LUFS-I is already integrated by the plugin since its loudness state was reset;
-    # averaging those cumulative values would be misleading, so return the newest one.
+    short_term = [float(frame["lufs_s"]) for frame in frames if frame.get("lufs_s") is not None]
+    result["lufs_s"] = _mean_db_like(short_term)
     result["lufs_i"] = next(
-        (float(f["lufs_i"]) for f in reversed(frames) if f.get("lufs_i") is not None),
+        (float(frame["lufs_i"]) for frame in reversed(frames) if frame.get("lufs_i") is not None),
         None,
     )
 
-    true_peaks = [float(f["true_peak_dbtp"]) for f in frames if f.get("true_peak_dbtp") is not None]
+    true_peaks = [
+        float(frame["true_peak_dbtp"])
+        for frame in frames
+        if frame.get("true_peak_dbtp") is not None
+    ]
     result["true_peak_dbtp"] = max(true_peaks) if true_peaks else None
     result["max_true_peak_dbtp"] = next(
         (
-            float(f["max_true_peak_dbtp"])
-            for f in reversed(frames)
-            if f.get("max_true_peak_dbtp") is not None
+            float(frame["max_true_peak_dbtp"])
+            for frame in reversed(frames)
+            if frame.get("max_true_peak_dbtp") is not None
         ),
         None,
     )
 
-    bands_db: list[float] = []
+    averaged_bands: list[float] = []
     for band in range(NUM_BANDS):
-        mean_power = sum(10.0 ** (float(f["bands_db"][band]) / 10.0) for f in frames) / len(frames)
-        bands_db.append(10.0 * math.log10(max(mean_power, 1e-12)))
-    result["bands_db"] = bands_db
+        mean_power = sum(
+            10.0 ** (float(frame["bands_db"][band]) / 10.0) for frame in frames
+        ) / len(frames)
+        averaged_bands.append(10.0 * math.log10(max(mean_power, 1e-12)))
+    result["bands_db"] = averaged_bands
 
-    corr_frames = [f for f in frames if f.get("band_stereo_correlation") is not None]
-    if corr_frames:
-        result["band_stereo_correlation"] = [
-            sum(float(f["band_stereo_correlation"][i]) for f in corr_frames) / len(corr_frames)
+    corr_frames = [frame for frame in frames if frame.get("band_stereo_correlation") is not None]
+    result["band_stereo_correlation"] = (
+        [
+            sum(float(frame["band_stereo_correlation"][i]) for frame in corr_frames)
+            / len(corr_frames)
             for i in range(NUM_STEREO_CORR_BANDS)
         ]
-    else:
-        result["band_stereo_correlation"] = None
-
+        if corr_frames
+        else None
+    )
     return result
-
-
-def _band_range(index: int) -> str:
-    lo = BAND_EDGES[index]
-    hi = BAND_EDGES[index + 1]
-    if hi < 1000:
-        return f"{lo:.0f}-{hi:.0f} Hz"
-    return f"{lo / 1000:.2f}-{hi / 1000:.2f} kHz"
 
 
 @mcp.tool()
@@ -265,16 +399,16 @@ def audio_stereo_bands(track: str) -> dict[str, Any]:
 
     bands = []
     for label, value in zip(_stereo_corr_ranges(), values):
-        value = float(value)
-        if value < -0.25:
+        numeric = float(value)
+        if numeric < -0.25:
             flag = "high mono-compatibility risk"
-        elif value < 0.0:
+        elif numeric < 0.0:
             flag = "negative correlation"
-        elif value < 0.25:
+        elif numeric < 0.25:
             flag = "very wide / weakly correlated"
         else:
             flag = "normal/positive correlation"
-        bands.append({"range": label, "correlation": value, "flag": flag})
+        bands.append({"range": label, "correlation": numeric, "flag": flag})
 
     return {
         "track": frame["track"],
@@ -287,45 +421,16 @@ def audio_stereo_bands(track: str) -> dict[str, Any]:
 @mcp.tool()
 def audio_compare_tracks(track_a: str, track_b: str) -> dict[str, Any]:
     """Compare two tracks and return a heuristic spectral-overlap report."""
-    a = _snapshot(track_a)
-    b = _snapshot(track_b)
-
-    max_a = max(a["bands_db"])
-    max_b = max(b["bands_db"])
-    overlaps = []
-
-    for i, (db_a, db_b) in enumerate(zip(a["bands_db"], b["bands_db"])):
-        rel_a = 10.0 ** ((float(db_a) - max_a) / 10.0)
-        rel_b = 10.0 ** ((float(db_b) - max_b) / 10.0)
-        score = min(rel_a, rel_b)
-        overlaps.append(
-            {
-                "band": i,
-                "range": _band_range(i),
-                "center_hz": BAND_CENTERS[i],
-                "score": round(score, 4),
-                "a_db": float(db_a),
-                "b_db": float(db_b),
-            }
-        )
-
-    strongest = sorted(overlaps, key=lambda item: item["score"], reverse=True)[:8]
-    overall = sum(item["score"] for item in strongest[:5]) / max(1, min(5, len(strongest)))
-
-    return {
-        "track_a": a["track"],
-        "track_b": b["track"],
-        "spectral_overlap_score": round(overall, 4),
-        "strongest_overlap_bands": strongest,
-        "note": "Heuristic relative spectral overlap, not a psychoacoustic masking model. Use musical context before EQ/sidechain decisions.",
-    }
+    return _compare_tracks(track_a, track_b)
 
 
 @mcp.tool()
 def audio_detect_masking(track_a: str, track_b: str) -> dict[str, Any]:
     """Find likely masking regions between two analyzer instances."""
-    report = audio_compare_tracks(track_a, track_b)
-    candidates = [b for b in report["strongest_overlap_bands"] if b["score"] >= 0.15]
+    report = _compare_tracks(track_a, track_b)
+    candidates = [
+        band for band in report["strongest_overlap_bands"] if band["score"] >= 0.15
+    ]
     return {
         "track_a": report["track_a"],
         "track_b": report["track_b"],
@@ -346,10 +451,10 @@ def audio_master_status(track: str = "Master") -> dict[str, Any]:
         true_peak = frame.get("true_peak_dbtp")
 
     if true_peak is not None:
-        true_peak = float(true_peak)
-        if true_peak > 0.0:
+        numeric_peak = float(true_peak)
+        if numeric_peak > 0.0:
             warnings.append("True peak exceeds 0 dBTP; inter-sample clipping is likely.")
-        elif true_peak > -1.0:
+        elif numeric_peak > -1.0:
             warnings.append("True peak is above -1 dBTP; codec/transcoding headroom is limited.")
     elif frame["peak_db"] > -0.1:
         warnings.append("Sample peak is at/near digital full scale; true-peak data is unavailable.")
@@ -380,22 +485,60 @@ def audio_master_status(track: str = "Master") -> dict[str, Any]:
 
 
 def main() -> None:
-    host = os.getenv("AI_ANALYZER_OSC_HOST", "127.0.0.1")
-    port = int(os.getenv("AI_ANALYZER_OSC_PORT", "9855"))
+    global _osc_error, _osc_host, _osc_listening, _osc_port
 
-    dispatcher = Dispatcher()
-    dispatcher.map("/aianalyzer/frame", _on_frame)
-    osc_server = ThreadingOSCUDPServer((host, port), dispatcher)
-    osc_thread = threading.Thread(target=osc_server.serve_forever, name="AIAnalyzerOSC", daemon=True)
-    osc_thread.start()
+    host, port, config_error = _read_osc_config()
+    with _lock:
+        _osc_host = host
+        _osc_port = port
+        _osc_error = config_error
+        _osc_listening = False
 
-    print(f"AI Analyzer OSC listening on udp://{host}:{port}", file=sys.stderr)
+    osc_server: ThreadingOSCUDPServer | None = None
+
+    if config_error is None:
+        dispatcher = Dispatcher()
+        dispatcher.map("/aianalyzer/frame", _on_frame)
+        try:
+            osc_server = ThreadingOSCUDPServer((host, port), dispatcher)
+        except OSError as exc:
+            with _lock:
+                _osc_error = f"{type(exc).__name__}: {exc}"
+            print(
+                f"AI Analyzer OSC unavailable on udp://{host}:{port}: {exc}. MCP will stay online; use audio_bridge_status for details.",
+                file=sys.stderr,
+                flush=True,
+            )
+        else:
+            thread = threading.Thread(
+                target=osc_server.serve_forever,
+                name="AIAnalyzerOSC",
+                daemon=True,
+            )
+            thread.start()
+            with _lock:
+                _osc_listening = True
+                _osc_error = None
+            print(
+                f"AI Analyzer OSC listening on udp://{host}:{port}",
+                file=sys.stderr,
+                flush=True,
+            )
+    else:
+        print(
+            f"AI Analyzer OSC configuration error: {config_error}. MCP will stay online; use audio_bridge_status for details.",
+            file=sys.stderr,
+            flush=True,
+        )
 
     try:
         mcp.run(transport="stdio")
     finally:
-        osc_server.shutdown()
-        osc_server.server_close()
+        if osc_server is not None:
+            osc_server.shutdown()
+            osc_server.server_close()
+        with _lock:
+            _osc_listening = False
 
 
 if __name__ == "__main__":
