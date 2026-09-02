@@ -18,14 +18,16 @@ private:
     void applyConfig();
     void drawSpectrum(juce::Graphics&, juce::Rectangle<float> bounds) const;
 
-    AIAnalyzerAudioProcessor& processor;
+    AIAnalyzerAudioProcessor& ownerProcessor;
 
     juce::Label instanceLabel;
     juce::Label hostLabel;
     juce::Label portLabel;
+    juce::Label profileLabel;
     juce::TextEditor instanceEditor;
     juce::TextEditor hostEditor;
     juce::TextEditor portEditor;
+    juce::ComboBox profileBox;
     juce::TextButton applyButton { "Apply" };
 
     aianalyzer::AnalysisFrame latestFrame;

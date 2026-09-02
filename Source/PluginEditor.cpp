@@ -16,34 +16,73 @@ juce::String formatDbtp(float value)
 {
     return juce::String(value, 1) + " dBTP";
 }
+
+bool frameHasFeatureForProfile(const aianalyzer::AnalysisFrame& frame,
+                               int hostProfileIndex,
+                               aianalyzer::AnalysisFeature feature) noexcept
+{
+    const auto profile = static_cast<aianalyzer::AnalysisProfile>(
+        juce::jlimit(0, 3, hostProfileIndex));
+    const auto requestedMask = aianalyzer::analysisFeatureMaskForProfile(profile);
+    const auto featureBit = static_cast<std::uint32_t>(feature);
+    return (frame.analysisFeatureMask & requestedMask & featureBit) != 0u;
+}
+
+juce::String profileName(int profile)
+{
+    switch (static_cast<aianalyzer::AnalysisProfile>(juce::jlimit(0, 3, profile)))
+    {
+        case aianalyzer::AnalysisProfile::Eco: return "Eco";
+        case aianalyzer::AnalysisProfile::Balanced: return "Balanced";
+        case aianalyzer::AnalysisProfile::Mix: return "Mix";
+        case aianalyzer::AnalysisProfile::Full:
+        default: return "Full";
+    }
+}
 } // namespace
 
 AIAnalyzerAudioProcessorEditor::AIAnalyzerAudioProcessorEditor(AIAnalyzerAudioProcessor& p)
-    : AudioProcessorEditor(&p), processor(p)
+    : AudioProcessorEditor(&p), ownerProcessor(p)
 {
     setSize(760, 500);
 
     instanceLabel.setText("Instance", juce::dontSendNotification);
     hostLabel.setText("OSC Host", juce::dontSendNotification);
     portLabel.setText("Port", juce::dontSendNotification);
+    profileLabel.setText("Profile", juce::dontSendNotification);
 
     addAndMakeVisible(instanceLabel);
     addAndMakeVisible(hostLabel);
     addAndMakeVisible(portLabel);
+    addAndMakeVisible(profileLabel);
     addAndMakeVisible(instanceEditor);
     addAndMakeVisible(hostEditor);
     addAndMakeVisible(portEditor);
+    addAndMakeVisible(profileBox);
     addAndMakeVisible(applyButton);
 
     juce::String instance;
     juce::String host;
     int port = 9855;
-    processor.getAnalyzerConfig(instance, host, port);
+    ownerProcessor.getAnalyzerConfig(instance, host, port);
 
     instanceEditor.setText(instance, false);
     hostEditor.setText(host, false);
     portEditor.setText(juce::String(port), false);
     portEditor.setInputRestrictions(5, "0123456789");
+
+    profileBox.addItem("Eco", 1);
+    profileBox.addItem("Balanced", 2);
+    profileBox.addItem("Mix", 3);
+    profileBox.addItem("Full", 4);
+    profileBox.setSelectedId(ownerProcessor.getAnalysisProfileIndex() + 1,
+                             juce::dontSendNotification);
+    profileBox.onChange = [this]
+    {
+        const auto selected = profileBox.getSelectedId();
+        if (selected >= 1 && selected <= 4)
+            ownerProcessor.setAnalysisProfileIndex(selected - 1, true);
+    };
 
     applyButton.onClick = [this] { applyConfig(); };
     instanceEditor.onReturnKey = [this] { applyConfig(); };
@@ -55,14 +94,32 @@ AIAnalyzerAudioProcessorEditor::AIAnalyzerAudioProcessorEditor(AIAnalyzerAudioPr
 
 void AIAnalyzerAudioProcessorEditor::applyConfig()
 {
-    processor.setAnalyzerConfig(instanceEditor.getText(),
-                                hostEditor.getText(),
-                                portEditor.getText().getIntValue());
+    ownerProcessor.setAnalyzerConfig(instanceEditor.getText(),
+                                     hostEditor.getText(),
+                                     portEditor.getText().getIntValue());
+
+    // Echo the actual sanitized configuration back to the editor. This avoids
+    // showing stale/invalid text when empty values fall back to defaults or the
+    // port is clamped to its valid range.
+    juce::String instance;
+    juce::String host;
+    int port = 9855;
+    ownerProcessor.getAnalyzerConfig(instance, host, port);
+    instanceEditor.setText(instance, false);
+    hostEditor.setText(host, false);
+    portEditor.setText(juce::String(port), false);
 }
 
 void AIAnalyzerAudioProcessorEditor::timerCallback()
 {
-    hasFrame = processor.getLatestAnalysis(latestFrame);
+    hasFrame = ownerProcessor.getLatestAnalysis(latestFrame);
+
+    // Follow host automation/state restoration without feeding the change back
+    // into the host from the editor timer.
+    const auto actualProfileId = ownerProcessor.getAnalysisProfileIndex() + 1;
+    if (profileBox.getSelectedId() != actualProfileId)
+        profileBox.setSelectedId(actualProfileId, juce::dontSendNotification);
+
     repaint();
 }
 
@@ -76,7 +133,7 @@ void AIAnalyzerAudioProcessorEditor::paint(juce::Graphics& g)
 
     g.setFont(juce::FontOptions(12.0f));
     g.setColour(juce::Colours::lightgrey);
-    g.drawText("Spectrum / EBU R128 loudness / true peak / stereo analysis → OSC → MCP",
+    g.drawText("Adaptive audio analysis → OSC → MCP",
                18, 42, getWidth() - 36, 22, juce::Justification::centredLeft);
 
     auto analysisArea = getLocalBounds().toFloat().reduced(18.0f);
@@ -89,29 +146,47 @@ void AIAnalyzerAudioProcessorEditor::paint(juce::Graphics& g)
     g.setFont(juce::FontOptions(12.5f));
     g.setColour(juce::Colours::white);
 
+    const auto hostProfileIndex = ownerProcessor.getAnalysisProfileIndex();
+
     if (hasFrame)
     {
+        const bool loudnessAvailable = frameHasFeatureForProfile(
+            latestFrame, hostProfileIndex, aianalyzer::FeatureLoudness);
+        const bool stereoAvailable = frameHasFeatureForProfile(
+            latestFrame, hostProfileIndex, aianalyzer::FeatureStereo);
         const auto columnWidth = metrics.getWidth() / 4.0f;
+
+        const auto truePeakText = loudnessAvailable
+            ? formatDbtp(latestFrame.truePeakDbtp)
+            : juce::String("--");
         g.drawFittedText("Sample / True Peak\n" + formatDb(latestFrame.peakDb)
-                         + " / " + formatDbtp(latestFrame.truePeakDbtp),
+                         + " / " + truePeakText,
                          metrics.withWidth(columnWidth).toNearestInt(),
                          juce::Justification::centred, 2);
+
         g.drawFittedText("RMS / Crest\n" + formatDb(latestFrame.rmsDb)
                          + " / " + (latestFrame.signalPresent ? formatDb(latestFrame.crestDb) : juce::String("--")),
                          metrics.withX(metrics.getX() + columnWidth).withWidth(columnWidth).toNearestInt(),
                          juce::Justification::centred, 2);
 
-        const auto shortTermText = (!latestFrame.signalPresent && latestFrame.silenceSeconds >= 3.0f)
+        const auto shortTermText = !loudnessAvailable
             ? juce::String("--")
-            : formatLufs(latestFrame.lufsShortTerm);
+            : ((!latestFrame.signalPresent && latestFrame.silenceSeconds >= 3.0f)
+                ? juce::String("--")
+                : formatLufs(latestFrame.lufsShortTerm));
+        const auto integratedText = loudnessAvailable
+            ? formatLufs(latestFrame.lufsIntegrated)
+            : juce::String("--");
         g.drawFittedText("LUFS-S / LUFS-I\n" + shortTermText
-                         + " / " + formatLufs(latestFrame.lufsIntegrated),
+                         + " / " + integratedText,
                          metrics.withX(metrics.getX() + columnWidth * 2.0f).withWidth(columnWidth).toNearestInt(),
                          juce::Justification::centred, 2);
 
-        const auto stereoText = latestFrame.signalPresent
-            ? juce::String(latestFrame.stereoCorrelation, 2) + " / " + juce::String(latestFrame.stereoWidth, 2)
-            : juce::String("NO SIGNAL");
+        const auto stereoText = !stereoAvailable
+            ? juce::String("-- / --")
+            : (latestFrame.signalPresent
+                ? juce::String(latestFrame.stereoCorrelation, 2) + " / " + juce::String(latestFrame.stereoWidth, 2)
+                : juce::String("NO SIGNAL"));
         g.drawFittedText("Corr / Width\n" + stereoText,
                          metrics.withX(metrics.getX() + columnWidth * 3.0f).withWidth(columnWidth).toNearestInt(),
                          juce::Justification::centred, 2);
@@ -129,21 +204,43 @@ void AIAnalyzerAudioProcessorEditor::paint(juce::Graphics& g)
         g.setFont(juce::FontOptions(11.0f));
         g.setColour(latestFrame.signalPresent ? juce::Colours::lightgrey : juce::Colours::orange);
 
+        const bool spectrumAvailable = frameHasFeatureForProfile(
+            latestFrame, hostProfileIndex, aianalyzer::FeatureSpectrum);
+        const bool loudnessAvailable = frameHasFeatureForProfile(
+            latestFrame, hostProfileIndex, aianalyzer::FeatureLoudness);
+        const bool profilePending = latestFrame.analysisProfile != hostProfileIndex;
+
+        juce::String detailText = "PROFILE " + profileName(hostProfileIndex);
+        if (profilePending)
+            detailText += " (pending)";
+        detailText += "   ·   ";
+
         if (latestFrame.signalPresent)
         {
-            g.drawText("SIGNAL   ·   Detector " + formatDb(latestFrame.detectorPeakDb)
-                       + "   ·   Centroid " + juce::String(latestFrame.spectralCentroidHz, 0) + " Hz"
-                       + "   ·   Rolloff " + juce::String(latestFrame.spectralRolloffHz, 0) + " Hz"
-                       + "   ·   Session max TP " + formatDbtp(latestFrame.maxTruePeakDbtp),
-                       detail.toNearestInt(), juce::Justification::centredLeft);
+            detailText += "SIGNAL   ·   Detector " + formatDb(latestFrame.detectorPeakDb);
+            if (spectrumAvailable)
+            {
+                detailText += "   ·   Centroid " + juce::String(latestFrame.spectralCentroidHz, 0) + " Hz"
+                           + "   ·   Rolloff " + juce::String(latestFrame.spectralRolloffHz, 0) + " Hz";
+            }
+            else
+            {
+                detailText += "   ·   Spectrum unavailable";
+            }
         }
         else
         {
-            g.drawText("NO INPUT (< -50 dBFS)   ·   Detector " + formatDb(latestFrame.detectorPeakDb)
-                       + "   ·   Silence " + juce::String(latestFrame.silenceSeconds, 1) + " s"
-                       + "   ·   Session max TP " + formatDbtp(latestFrame.maxTruePeakDbtp),
-                       detail.toNearestInt(), juce::Justification::centredLeft);
+            detailText += "NO INPUT (< -50 dBFS)   ·   Detector " + formatDb(latestFrame.detectorPeakDb)
+                       + "   ·   Silence " + juce::String(latestFrame.silenceSeconds, 1) + " s";
         }
+
+        if (loudnessAvailable)
+            detailText += "   ·   Session max TP " + formatDbtp(latestFrame.maxTruePeakDbtp);
+
+        g.drawFittedText(detailText,
+                         detail.toNearestInt(),
+                         juce::Justification::centredLeft,
+                         1);
         analysisArea.removeFromTop(6.0f);
     }
 
@@ -151,7 +248,7 @@ void AIAnalyzerAudioProcessorEditor::paint(juce::Graphics& g)
 
     g.setFont(juce::FontOptions(11.0f));
     g.setColour(juce::Colours::grey);
-    g.drawText("Dropped audio FIFO blocks: " + juce::String(static_cast<juce::int64>(processor.getDroppedBlocks())),
+    g.drawText("Dropped audio FIFO blocks: " + juce::String(static_cast<juce::int64>(ownerProcessor.getDroppedBlocks())),
                18, getHeight() - 20, getWidth() - 36, 14, juce::Justification::centredRight);
 }
 
@@ -163,6 +260,21 @@ void AIAnalyzerAudioProcessorEditor::drawSpectrum(juce::Graphics& g,
 
     if (!hasFrame)
         return;
+
+    const auto hostProfileIndex = ownerProcessor.getAnalysisProfileIndex();
+    if (!frameHasFeatureForProfile(latestFrame,
+                                   hostProfileIndex,
+                                   aianalyzer::FeatureSpectrum))
+    {
+        g.setColour(juce::Colours::grey);
+        g.setFont(juce::FontOptions(13.0f));
+        const auto pending = latestFrame.analysisProfile != hostProfileIndex;
+        g.drawText(pending ? "Spectrum waiting for active Analysis Profile"
+                           : "Spectrum disabled by Analysis Profile",
+                   bounds.toNearestInt(),
+                   juce::Justification::centred);
+        return;
+    }
 
     if (!latestFrame.signalPresent)
     {
@@ -204,17 +316,21 @@ void AIAnalyzerAudioProcessorEditor::resized()
 
     auto row = area.removeFromTop(34);
 
-    auto label = row.removeFromLeft(58);
+    auto label = row.removeFromLeft(54);
     instanceLabel.setBounds(label);
-    instanceEditor.setBounds(row.removeFromLeft(170).reduced(2));
+    instanceEditor.setBounds(row.removeFromLeft(120).reduced(2));
 
-    label = row.removeFromLeft(72);
+    label = row.removeFromLeft(62);
     hostLabel.setBounds(label);
-    hostEditor.setBounds(row.removeFromLeft(160).reduced(2));
+    hostEditor.setBounds(row.removeFromLeft(120).reduced(2));
 
-    label = row.removeFromLeft(42);
+    label = row.removeFromLeft(34);
     portLabel.setBounds(label);
-    portEditor.setBounds(row.removeFromLeft(72).reduced(2));
+    portEditor.setBounds(row.removeFromLeft(60).reduced(2));
 
-    applyButton.setBounds(row.removeFromLeft(74).reduced(2));
+    label = row.removeFromLeft(48);
+    profileLabel.setBounds(label);
+    profileBox.setBounds(row.removeFromLeft(112).reduced(2));
+
+    applyButton.setBounds(row.removeFromLeft(84).reduced(2));
 }
