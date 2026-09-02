@@ -12,6 +12,9 @@ constexpr float kMinFrequencyHz = 20.0f;
 constexpr float kMaxFrequencyHz = 20000.0f;
 constexpr float kRolloffFraction = 0.85f;
 constexpr double kOscIntervalMs = 100.0; // 10 Hz network update rate
+constexpr double kReducedAnalysisIntervalMs = 100.0;
+constexpr double kSemanticAnalysisIntervalMs = 200.0;
+constexpr double kPerformanceWindowMs = 1000.0;
 constexpr float kTemporalLowBandMinHz = 40.0f;
 constexpr float kTemporalLowBandMaxHz = 160.0f;
 constexpr float kStereoLowBandMaxHz = 120.0f;
@@ -28,6 +31,16 @@ constexpr float kSignalCloseDb = -50.0f;
 constexpr float kSignalOpenDb = -48.0f;
 constexpr double kSignalHoldSeconds = 0.4;
 constexpr double kShortTermInvalidSilenceSeconds = 3.0;
+
+AnalysisProfile profileFromInt(int value) noexcept
+{
+    return static_cast<AnalysisProfile>(juce::jlimit(0, 3, value));
+}
+
+bool hasFeature(AnalysisProfile profile, AnalysisFeature feature) noexcept
+{
+    return (analysisFeatureMask(profile) & static_cast<std::uint32_t>(feature)) != 0u;
+}
 
 float bandCenterHz(int index)
 {
@@ -122,6 +135,17 @@ bool AnalysisWorker::pushAudio(const float* left, const float* right, int numSam
     return fifo.push(left, right, numSamples);
 }
 
+void AnalysisWorker::setAnalysisProfile(AnalysisProfile profile) noexcept
+{
+    requestedProfile.store(juce::jlimit(0, 3, static_cast<int>(profile)), std::memory_order_release);
+    notify();
+}
+
+AnalysisProfile AnalysisWorker::getAnalysisProfile() const noexcept
+{
+    return profileFromInt(requestedProfile.load(std::memory_order_acquire));
+}
+
 void AnalysisWorker::setOscConfig(juce::String instanceId, juce::String host, int port)
 {
     instanceId = instanceId.trim();
@@ -187,6 +211,15 @@ void AnalysisWorker::resetTemporalAccumulator() noexcept
     temporalLowBandPowerCount = 0;
 }
 
+void AnalysisWorker::resetSemanticCache() noexcept
+{
+    cachedChroma.fill(0.0f);
+    cachedChromaEnergyRatio = 0.0f;
+    cachedSingleF0HarmonicEnergyRatio = 0.0f;
+    cachedHarmonicF0CandidateHz = 0.0f;
+    lastSemanticAnalysisMs = 0.0;
+}
+
 void AnalysisWorker::resetAnalysisState()
 {
     std::fill(windowLeft.begin(), windowLeft.end(), 0.0f);
@@ -202,10 +235,72 @@ void AnalysisWorker::resetAnalysisState()
     detectorPeakDb = kFloorDb;
     silenceSeconds = 0.0;
 
+    activeProfile = profileFromInt(requestedProfile.load(std::memory_order_acquire));
     hasPreviousTemporalFrame = false;
     previousWindowRmsDb = kFloorDb;
     resetTemporalAccumulator();
-    resetLoudnessState();
+    resetSemanticCache();
+
+    if (hasFeature(activeProfile, FeatureLoudness))
+    {
+        resetLoudnessState();
+    }
+    else
+    {
+        if (loudnessState != nullptr)
+            ebur128_destroy(&loudnessState);
+        latestLufsShortTerm = kFloorDb;
+        latestLufsIntegrated = kFloorDb;
+        latestTruePeakDbtp = kFloorDb;
+        maxTruePeakDbtp = kFloorDb;
+    }
+
+    lastReducedAnalysisMs = 0.0;
+    performanceWindowStartMs = juce::Time::getMillisecondCounterHiRes();
+    performanceBusyMs = 0.0;
+    fftRunsInWindow = 0;
+    semanticRunsInWindow = 0;
+    workerLoadRatio = 0.0f;
+    fftRunsPerSecond = 0.0f;
+    semanticRunsPerSecond = 0.0f;
+}
+
+void AnalysisWorker::applyProfileChangeIfNeeded()
+{
+    const auto next = profileFromInt(requestedProfile.load(std::memory_order_acquire));
+    if (next == activeProfile)
+        return;
+
+    const auto oldMask = analysisFeatureMask(activeProfile);
+    const auto newMask = analysisFeatureMask(next);
+
+    const bool oldLoudness = (oldMask & FeatureLoudness) != 0u;
+    const bool newLoudness = (newMask & FeatureLoudness) != 0u;
+    if (oldLoudness != newLoudness)
+    {
+        if (newLoudness)
+            resetLoudnessState();
+        else if (loudnessState != nullptr)
+            ebur128_destroy(&loudnessState);
+    }
+
+    const bool oldTemporal = (oldMask & FeatureTemporal) != 0u;
+    const bool newTemporal = (newMask & FeatureTemporal) != 0u;
+    if (oldTemporal != newTemporal)
+    {
+        resetTemporalAccumulator();
+        hasPreviousTemporalFrame = false;
+        previousWindowRmsDb = kFloorDb;
+        std::fill(previousMidMagnitudes.begin(), previousMidMagnitudes.end(), 0.0f);
+    }
+
+    const bool oldSemantic = (oldMask & FeatureSemantic) != 0u;
+    const bool newSemantic = (newMask & FeatureSemantic) != 0u;
+    if (oldSemantic != newSemantic)
+        resetSemanticCache();
+
+    activeProfile = next;
+    lastReducedAnalysisMs = 0.0;
 }
 
 float AnalysisWorker::amplitudeToDb(float value) noexcept
@@ -315,14 +410,149 @@ void AnalysisWorker::processLoudnessHop()
     }
 }
 
+void AnalysisWorker::attachRuntimeMetadata(AnalysisFrame& frame) const noexcept
+{
+    frame.analysisProfile = static_cast<int>(activeProfile);
+    frame.analysisFeatureMask = analysisFeatureMask(activeProfile);
+    frame.workerLoadRatio = workerLoadRatio;
+    frame.fifoFillRatio = juce::jlimit(
+        0.0f,
+        1.0f,
+        static_cast<float>(fifo.available()) / static_cast<float>(SpscStereoFifo::capacity));
+    frame.fftRunsPerSecond = fftRunsPerSecond;
+    frame.semanticRunsPerSecond = semanticRunsPerSecond;
+}
+
+void AnalysisWorker::updatePerformanceTelemetry(double busyMilliseconds,
+                                                double nowMilliseconds) noexcept
+{
+    if (performanceWindowStartMs <= 0.0)
+        performanceWindowStartMs = nowMilliseconds;
+
+    performanceBusyMs += std::max(0.0, busyMilliseconds);
+    const auto elapsed = nowMilliseconds - performanceWindowStartMs;
+    if (elapsed < kPerformanceWindowMs)
+        return;
+
+    workerLoadRatio = juce::jlimit(
+        0.0f,
+        1.0f,
+        static_cast<float>(performanceBusyMs / std::max(1.0, elapsed)));
+    fftRunsPerSecond = static_cast<float>(
+        static_cast<double>(fftRunsInWindow) * 1000.0 / std::max(1.0, elapsed));
+    semanticRunsPerSecond = static_cast<float>(
+        static_cast<double>(semanticRunsInWindow) * 1000.0 / std::max(1.0, elapsed));
+
+    performanceWindowStartMs = nowMilliseconds;
+    performanceBusyMs = 0.0;
+    fftRunsInWindow = 0;
+    semanticRunsInWindow = 0;
+}
+
+void AnalysisWorker::processCoreWindow()
+{
+    AnalysisFrame frame;
+    frame.sampleRate = sampleRate.load(std::memory_order_acquire);
+    frame.timestampSeconds = juce::Time::getMillisecondCounterHiRes() / 1000.0;
+    frame.signalPresent = signalPresent;
+    frame.detectorPeakDb = detectorPeakDb;
+    frame.silenceSeconds = static_cast<float>(silenceSeconds);
+
+    double sumSquares = 0.0;
+    float peak = 0.0f;
+    for (int i = 0; i < kFftSize; ++i)
+    {
+        const auto l = windowLeft[static_cast<std::size_t>(i)];
+        const auto r = windowRight[static_cast<std::size_t>(i)];
+        peak = std::max(peak, std::max(std::abs(l), std::abs(r)));
+        sumSquares += static_cast<double>(l) * l + static_cast<double>(r) * r;
+    }
+
+    const auto rms = static_cast<float>(std::sqrt(sumSquares / (2.0 * kFftSize)));
+    frame.peakDb = amplitudeToDb(peak);
+    frame.rmsDb = amplitudeToDb(rms);
+    frame.crestDb = frame.peakDb - frame.rmsDb;
+    frame.lufsShortTerm = kFloorDb;
+    frame.lufsIntegrated = kFloorDb;
+    frame.truePeakDbtp = kFloorDb;
+    frame.maxTruePeakDbtp = kFloorDb;
+    frame.stereoCorrelation = 0.0f;
+    frame.stereoWidth = 0.0f;
+    frame.midRmsDb = kFloorDb;
+    frame.sideRmsDb = kFloorDb;
+    frame.sideToMidDb = 0.0f;
+    frame.lowBandEnergyDb = kFloorDb;
+    frame.lowBandSideToMidDb = 0.0f;
+    frame.bandsDb.fill(kFloorDb);
+    frame.sideBandsDb.fill(kFloorDb);
+    frame.bandStereoCorrelation.fill(0.0f);
+    frame.bandSideToMidDb.fill(0.0f);
+
+    publishFrame(frame, false);
+}
+
+void AnalysisWorker::publishFrame(AnalysisFrame frame, bool temporalEnabled)
+{
+    attachRuntimeMetadata(frame);
+
+    {
+        const std::scoped_lock lock(latestMutex);
+        latestFrame = frame;
+        hasLatestFrame = true;
+    }
+
+    const auto nowMs = juce::Time::getMillisecondCounterHiRes();
+    if (nowMs - lastOscSendMs < kOscIntervalMs)
+        return;
+
+    AnalysisFrame outgoing = frame;
+    if (temporalEnabled && signalPresent && temporalSpectralFluxCount > 0)
+    {
+        outgoing.temporalWindowSeconds = static_cast<float>(temporalAccumulatedSeconds);
+        outgoing.spectralFluxMean = static_cast<float>(
+            temporalSpectralFluxSum / temporalSpectralFluxCount);
+        outgoing.spectralFluxPeak = temporalSpectralFluxPeak;
+        outgoing.rmsRisePeakDb = temporalRmsRisePeakDb;
+        outgoing.lowBandEnergyDb = temporalLowBandPowerCount > 0
+            ? amplitudeToDb(static_cast<float>(std::sqrt(
+                temporalLowBandPowerSum / temporalLowBandPowerCount)))
+            : kFloorDb;
+    }
+    else
+    {
+        outgoing.temporalWindowSeconds = 0.0f;
+        outgoing.spectralFluxMean = 0.0f;
+        outgoing.spectralFluxPeak = 0.0f;
+        outgoing.rmsRisePeakDb = 0.0f;
+        outgoing.lowBandEnergyDb = kFloorDb;
+    }
+
+    attachRuntimeMetadata(outgoing);
+    refreshOscConnectionIfNeeded();
+    if (oscConnected)
+        sendFrame(outgoing);
+
+    if (temporalEnabled)
+        resetTemporalAccumulator();
+    lastOscSendMs = nowMs;
+}
+
 void AnalysisWorker::processWindow()
 {
     const auto currentSampleRate = sampleRate.load(std::memory_order_acquire);
     const auto hopSeconds = static_cast<double>(kHopSize) / std::max(1.0, currentSampleRate);
+    const bool loudnessEnabled = hasFeature(activeProfile, FeatureLoudness);
+    const bool temporalEnabled = hasFeature(activeProfile, FeatureTemporal);
+    const bool semanticEnabled = hasFeature(activeProfile, FeatureSemantic);
+    const auto nowMs = juce::Time::getMillisecondCounterHiRes();
+    const bool semanticDue = semanticEnabled
+        && signalPresent
+        && (lastSemanticAnalysisMs <= 0.0
+            || nowMs - lastSemanticAnalysisMs >= kSemanticAnalysisIntervalMs);
 
     AnalysisFrame frame;
     frame.sampleRate = currentSampleRate;
-    frame.timestampSeconds = juce::Time::getMillisecondCounterHiRes() / 1000.0;
+    frame.timestampSeconds = nowMs / 1000.0;
     frame.signalPresent = signalPresent;
     frame.detectorPeakDb = detectorPeakDb;
     frame.silenceSeconds = static_cast<float>(silenceSeconds);
@@ -360,17 +590,20 @@ void AnalysisWorker::processWindow()
     windowFunction.multiplyWithWindowingTable(fftRightData.data(), kFftSize);
     fft.performRealOnlyForwardTransform(fftLeftData.data());
     fft.performRealOnlyForwardTransform(fftRightData.data());
+    ++fftRunsInWindow;
 
     const auto rms = static_cast<float>(std::sqrt(sumSquares / (2.0 * kFftSize)));
     frame.peakDb = amplitudeToDb(peak);
     frame.rmsDb = amplitudeToDb(rms);
     frame.crestDb = frame.peakDb - frame.rmsDb;
-    frame.lufsShortTerm = (!signalPresent && silenceSeconds >= kShortTermInvalidSilenceSeconds)
-        ? kFloorDb
-        : latestLufsShortTerm;
-    frame.lufsIntegrated = latestLufsIntegrated;
-    frame.truePeakDbtp = latestTruePeakDbtp;
-    frame.maxTruePeakDbtp = maxTruePeakDbtp;
+    frame.lufsShortTerm = loudnessEnabled
+        ? ((!signalPresent && silenceSeconds >= kShortTermInvalidSilenceSeconds)
+            ? kFloorDb
+            : latestLufsShortTerm)
+        : kFloorDb;
+    frame.lufsIntegrated = loudnessEnabled ? latestLufsIntegrated : kFloorDb;
+    frame.truePeakDbtp = loudnessEnabled ? latestTruePeakDbtp : kFloorDb;
+    frame.maxTruePeakDbtp = loudnessEnabled ? maxTruePeakDbtp : kFloorDb;
 
     const auto denom = std::sqrt(std::max(1.0e-20, sumL2 * sumR2));
     frame.stereoCorrelation = denom > 0.0
@@ -434,75 +667,86 @@ void AnalysisWorker::processWindow()
             std::sqrt(sideRe * sideRe + sideIm * sideIm) / normalization;
     }
 
-    const bool hadPreviousTemporalFrame = hasPreviousTemporalFrame;
-    double currentMagnitudeSum = 0.0;
-    double previousMagnitudeSum = 0.0;
-    double lowBandPower = 0.0;
-    int lowBandBins = 0;
-
-    for (int k = firstBin; k <= lastBin; ++k)
+    if (temporalEnabled)
     {
-        const auto magnitude = std::max(0.0f, midMagnitudes[static_cast<std::size_t>(k)]);
-        currentMagnitudeSum += magnitude;
-        if (hadPreviousTemporalFrame)
-            previousMagnitudeSum += std::max(0.0f, previousMidMagnitudes[static_cast<std::size_t>(k)]);
+        const bool hadPreviousTemporalFrame = hasPreviousTemporalFrame;
+        double currentMagnitudeSum = 0.0;
+        double previousMagnitudeSum = 0.0;
+        double lowBandPower = 0.0;
+        int lowBandBins = 0;
 
-        const auto frequency = static_cast<float>(static_cast<double>(k) * currentSampleRate / kFftSize);
-        if (frequency >= kTemporalLowBandMinHz && frequency < kTemporalLowBandMaxHz)
-        {
-            lowBandPower += static_cast<double>(magnitude) * magnitude;
-            ++lowBandBins;
-        }
-    }
-
-    float spectralFlux = 0.0f;
-    if (hadPreviousTemporalFrame && currentMagnitudeSum > 1.0e-12 && previousMagnitudeSum > 1.0e-12)
-    {
-        double positiveDifference = 0.0;
         for (int k = firstBin; k <= lastBin; ++k)
         {
-            const auto currentNormalized =
-                static_cast<double>(midMagnitudes[static_cast<std::size_t>(k)]) / currentMagnitudeSum;
-            const auto previousNormalized =
-                static_cast<double>(previousMidMagnitudes[static_cast<std::size_t>(k)]) / previousMagnitudeSum;
-            positiveDifference += std::max(0.0, currentNormalized - previousNormalized);
+            const auto magnitude = std::max(0.0f, midMagnitudes[static_cast<std::size_t>(k)]);
+            currentMagnitudeSum += magnitude;
+            if (hadPreviousTemporalFrame)
+                previousMagnitudeSum += std::max(0.0f, previousMidMagnitudes[static_cast<std::size_t>(k)]);
+
+            const auto frequency = static_cast<float>(static_cast<double>(k) * currentSampleRate / kFftSize);
+            if (frequency >= kTemporalLowBandMinHz && frequency < kTemporalLowBandMaxHz)
+            {
+                lowBandPower += static_cast<double>(magnitude) * magnitude;
+                ++lowBandBins;
+            }
         }
-        spectralFlux = juce::jlimit(0.0f, 1.0f, static_cast<float>(positiveDifference));
-    }
 
-    const auto rmsRiseDb = hadPreviousTemporalFrame
-        ? std::max(0.0f, frame.rmsDb - previousWindowRmsDb)
-        : 0.0f;
-    const auto lowBandEnergyDb = lowBandBins > 0
-        ? amplitudeToDb(static_cast<float>(std::sqrt(lowBandPower / lowBandBins)))
-        : kFloorDb;
-
-    frame.temporalWindowSeconds = static_cast<float>(hopSeconds);
-    frame.spectralFluxMean = spectralFlux;
-    frame.spectralFluxPeak = spectralFlux;
-    frame.rmsRisePeakDb = rmsRiseDb;
-    frame.lowBandEnergyDb = lowBandEnergyDb;
-
-    std::copy_n(midMagnitudes.begin(), numBins, previousMidMagnitudes.begin());
-    hasPreviousTemporalFrame = true;
-    previousWindowRmsDb = frame.rmsDb;
-
-    if (signalPresent)
-    {
-        temporalAccumulatedSeconds += hopSeconds;
-        temporalSpectralFluxSum += spectralFlux;
-        ++temporalSpectralFluxCount;
-        temporalSpectralFluxPeak = std::max(temporalSpectralFluxPeak, spectralFlux);
-        temporalRmsRisePeakDb = std::max(temporalRmsRisePeakDb, rmsRiseDb);
-        if (lowBandBins > 0)
+        float spectralFlux = 0.0f;
+        if (hadPreviousTemporalFrame && currentMagnitudeSum > 1.0e-12 && previousMagnitudeSum > 1.0e-12)
         {
-            temporalLowBandPowerSum += lowBandPower / lowBandBins;
-            ++temporalLowBandPowerCount;
+            double positiveDifference = 0.0;
+            for (int k = firstBin; k <= lastBin; ++k)
+            {
+                const auto currentNormalized =
+                    static_cast<double>(midMagnitudes[static_cast<std::size_t>(k)]) / currentMagnitudeSum;
+                const auto previousNormalized =
+                    static_cast<double>(previousMidMagnitudes[static_cast<std::size_t>(k)]) / previousMagnitudeSum;
+                positiveDifference += std::max(0.0, currentNormalized - previousNormalized);
+            }
+            spectralFlux = juce::jlimit(0.0f, 1.0f, static_cast<float>(positiveDifference));
+        }
+
+        const auto rmsRiseDb = hadPreviousTemporalFrame
+            ? std::max(0.0f, frame.rmsDb - previousWindowRmsDb)
+            : 0.0f;
+        const auto lowBandEnergyDb = lowBandBins > 0
+            ? amplitudeToDb(static_cast<float>(std::sqrt(lowBandPower / lowBandBins)))
+            : kFloorDb;
+
+        frame.temporalWindowSeconds = static_cast<float>(hopSeconds);
+        frame.spectralFluxMean = spectralFlux;
+        frame.spectralFluxPeak = spectralFlux;
+        frame.rmsRisePeakDb = rmsRiseDb;
+        frame.lowBandEnergyDb = lowBandEnergyDb;
+
+        std::copy_n(midMagnitudes.begin(), numBins, previousMidMagnitudes.begin());
+        hasPreviousTemporalFrame = true;
+        previousWindowRmsDb = frame.rmsDb;
+
+        if (signalPresent)
+        {
+            temporalAccumulatedSeconds += hopSeconds;
+            temporalSpectralFluxSum += spectralFlux;
+            ++temporalSpectralFluxCount;
+            temporalSpectralFluxPeak = std::max(temporalSpectralFluxPeak, spectralFlux);
+            temporalRmsRisePeakDb = std::max(temporalRmsRisePeakDb, rmsRiseDb);
+            if (lowBandBins > 0)
+            {
+                temporalLowBandPowerSum += lowBandPower / lowBandBins;
+                ++temporalLowBandPowerCount;
+            }
+        }
+        else
+        {
+            resetTemporalAccumulator();
         }
     }
     else
     {
-        resetTemporalAccumulator();
+        frame.temporalWindowSeconds = 0.0f;
+        frame.spectralFluxMean = 0.0f;
+        frame.spectralFluxPeak = 0.0f;
+        frame.rmsRisePeakDb = 0.0f;
+        frame.lowBandEnergyDb = kFloorDb;
     }
 
     for (int k = firstBin; k <= lastBin; ++k)
@@ -533,7 +777,7 @@ void AnalysisWorker::processWindow()
         logMagnitude += std::log(static_cast<double>(magnitude));
         ++flatnessBins;
 
-        if (frequency >= kChromaMinFrequencyHz && frequency <= kChromaMaxFrequencyHz)
+        if (semanticDue && frequency >= kChromaMinFrequencyHz && frequency <= kChromaMaxFrequencyHz)
         {
             const auto pitchClass = pitchClassForFrequency(frequency);
             chromaPower[static_cast<std::size_t>(pitchClass)] += power;
@@ -565,112 +809,141 @@ void AnalysisWorker::processWindow()
         }
     }
 
-    if (chromaPowerTotal > 1.0e-18)
+    if (semanticDue)
     {
-        for (int pitchClass = 0; pitchClass < kNumChromaBins; ++pitchClass)
+        std::array<float, kNumChromaBins> nextChroma {};
+        if (chromaPowerTotal > 1.0e-18)
         {
-            frame.chroma[static_cast<std::size_t>(pitchClass)] = juce::jlimit(
+            for (int pitchClass = 0; pitchClass < kNumChromaBins; ++pitchClass)
+            {
+                nextChroma[static_cast<std::size_t>(pitchClass)] = juce::jlimit(
+                    0.0f,
+                    1.0f,
+                    static_cast<float>(chromaPower[static_cast<std::size_t>(pitchClass)] / chromaPowerTotal));
+            }
+        }
+
+        float nextChromaEnergyRatio = totalPower > 1.0e-18
+            ? juce::jlimit(0.0f, 1.0f, static_cast<float>(chromaPowerTotal / totalPower))
+            : 0.0f;
+        float nextHarmonicRatio = 0.0f;
+        float nextF0Hz = 0.0f;
+
+        const auto semanticMaxHz = std::min(
+            static_cast<double>(kChromaMaxFrequencyHz),
+            currentSampleRate * 0.5);
+        const int semanticFirstBin = std::max(
+            firstBin,
+            static_cast<int>(std::ceil(kChromaMinFrequencyHz * kFftSize / currentSampleRate)));
+        const int semanticLastBin = std::min(
+            lastBin,
+            static_cast<int>(std::floor(semanticMaxHz * kFftSize / currentSampleRate)));
+        const int firstF0Bin = std::max(
+            1,
+            static_cast<int>(std::ceil(kHarmonicFundamentalMinHz * kFftSize / currentSampleRate)));
+        const int lastF0Bin = std::min(
+            numBins - 1,
+            static_cast<int>(std::floor(std::min(
+                static_cast<double>(kHarmonicFundamentalMaxHz),
+                semanticMaxHz * 0.5) * kFftSize / currentSampleRate)));
+
+        double bestHarmonicScore = 0.0;
+        int bestF0Bin = 0;
+        for (int candidateBin = firstF0Bin; candidateBin <= lastF0Bin; ++candidateBin)
+        {
+            const auto f0Hz = static_cast<double>(candidateBin) * currentSampleRate / kFftSize;
+            double weightedPeakPower = 0.0;
+            double totalWeight = 0.0;
+            int harmonicCount = 0;
+
+            for (int harmonic = 1; harmonic <= kMaxSemanticHarmonics; ++harmonic)
+            {
+                const auto targetHz = f0Hz * harmonic;
+                if (targetHz > semanticMaxHz)
+                    break;
+                if (targetHz < kChromaMinFrequencyHz)
+                    continue;
+
+                const auto targetBin = static_cast<int>(std::lround(targetHz * kFftSize / currentSampleRate));
+                double localPeakPower = 0.0;
+                for (int delta = -kHarmonicToleranceBins; delta <= kHarmonicToleranceBins; ++delta)
+                {
+                    const auto bin = targetBin + delta;
+                    if (bin < semanticFirstBin || bin > semanticLastBin)
+                        continue;
+                    const auto value = static_cast<double>(midMagnitudes[static_cast<std::size_t>(bin)]);
+                    localPeakPower = std::max(localPeakPower, value * value);
+                }
+
+                const auto weight = 1.0 / static_cast<double>(harmonic);
+                weightedPeakPower += localPeakPower * weight;
+                totalWeight += weight;
+                ++harmonicCount;
+            }
+
+            if (harmonicCount < 2 || totalWeight <= 0.0)
+                continue;
+
+            const auto score = weightedPeakPower / totalWeight;
+            if (score > bestHarmonicScore)
+            {
+                bestHarmonicScore = score;
+                bestF0Bin = candidateBin;
+            }
+        }
+
+        if (bestF0Bin > 0 && chromaPowerTotal > 1.0e-18)
+        {
+            const auto f0Hz = static_cast<double>(bestF0Bin) * currentSampleRate / kFftSize;
+            double matchedHarmonicPower = 0.0;
+
+            for (int harmonic = 1; harmonic <= kMaxSemanticHarmonics; ++harmonic)
+            {
+                const auto targetHz = f0Hz * harmonic;
+                if (targetHz > semanticMaxHz)
+                    break;
+                if (targetHz < kChromaMinFrequencyHz)
+                    continue;
+
+                const auto targetBin = static_cast<int>(std::lround(targetHz * kFftSize / currentSampleRate));
+                for (int delta = -kHarmonicToleranceBins; delta <= kHarmonicToleranceBins; ++delta)
+                {
+                    const auto bin = targetBin + delta;
+                    if (bin < semanticFirstBin || bin > semanticLastBin)
+                        continue;
+                    const auto value = static_cast<double>(midMagnitudes[static_cast<std::size_t>(bin)]);
+                    matchedHarmonicPower += value * value;
+                }
+            }
+
+            nextHarmonicRatio = juce::jlimit(
                 0.0f,
                 1.0f,
-                static_cast<float>(chromaPower[static_cast<std::size_t>(pitchClass)] / chromaPowerTotal));
-        }
-    }
-    frame.chromaEnergyRatio = totalPower > 1.0e-18
-        ? juce::jlimit(0.0f, 1.0f, static_cast<float>(chromaPowerTotal / totalPower))
-        : 0.0f;
-
-    const auto semanticMaxHz = std::min(
-        static_cast<double>(kChromaMaxFrequencyHz),
-        currentSampleRate * 0.5);
-    const int semanticFirstBin = std::max(
-        firstBin,
-        static_cast<int>(std::ceil(kChromaMinFrequencyHz * kFftSize / currentSampleRate)));
-    const int semanticLastBin = std::min(
-        lastBin,
-        static_cast<int>(std::floor(semanticMaxHz * kFftSize / currentSampleRate)));
-    const int firstF0Bin = std::max(
-        1,
-        static_cast<int>(std::ceil(kHarmonicFundamentalMinHz * kFftSize / currentSampleRate)));
-    const int lastF0Bin = std::min(
-        numBins - 1,
-        static_cast<int>(std::floor(std::min(
-            static_cast<double>(kHarmonicFundamentalMaxHz),
-            semanticMaxHz * 0.5) * kFftSize / currentSampleRate)));
-
-    double bestHarmonicScore = 0.0;
-    int bestF0Bin = 0;
-    for (int candidateBin = firstF0Bin; candidateBin <= lastF0Bin; ++candidateBin)
-    {
-        const auto f0Hz = static_cast<double>(candidateBin) * currentSampleRate / kFftSize;
-        double weightedPeakPower = 0.0;
-        double totalWeight = 0.0;
-        int harmonicCount = 0;
-
-        for (int harmonic = 1; harmonic <= kMaxSemanticHarmonics; ++harmonic)
-        {
-            const auto targetHz = f0Hz * harmonic;
-            if (targetHz > semanticMaxHz)
-                break;
-            if (targetHz < kChromaMinFrequencyHz)
-                continue;
-
-            const auto targetBin = static_cast<int>(std::lround(targetHz * kFftSize / currentSampleRate));
-            double localPeakPower = 0.0;
-            for (int delta = -kHarmonicToleranceBins; delta <= kHarmonicToleranceBins; ++delta)
-            {
-                const auto bin = targetBin + delta;
-                if (bin < semanticFirstBin || bin > semanticLastBin)
-                    continue;
-                const auto value = static_cast<double>(midMagnitudes[static_cast<std::size_t>(bin)]);
-                localPeakPower = std::max(localPeakPower, value * value);
-            }
-
-            const auto weight = 1.0 / static_cast<double>(harmonic);
-            weightedPeakPower += localPeakPower * weight;
-            totalWeight += weight;
-            ++harmonicCount;
+                static_cast<float>(matchedHarmonicPower / chromaPowerTotal));
+            nextF0Hz = static_cast<float>(f0Hz);
         }
 
-        if (harmonicCount < 2 || totalWeight <= 0.0)
-            continue;
-
-        const auto score = weightedPeakPower / totalWeight;
-        if (score > bestHarmonicScore)
-        {
-            bestHarmonicScore = score;
-            bestF0Bin = candidateBin;
-        }
+        cachedChroma = nextChroma;
+        cachedChromaEnergyRatio = nextChromaEnergyRatio;
+        cachedSingleF0HarmonicEnergyRatio = nextHarmonicRatio;
+        cachedHarmonicF0CandidateHz = nextF0Hz;
+        lastSemanticAnalysisMs = nowMs;
+        ++semanticRunsInWindow;
     }
 
-    if (bestF0Bin > 0 && chromaPowerTotal > 1.0e-18)
+    if (semanticEnabled)
     {
-        const auto f0Hz = static_cast<double>(bestF0Bin) * currentSampleRate / kFftSize;
-        double matchedHarmonicPower = 0.0;
-
-        for (int harmonic = 1; harmonic <= kMaxSemanticHarmonics; ++harmonic)
-        {
-            const auto targetHz = f0Hz * harmonic;
-            if (targetHz > semanticMaxHz)
-                break;
-            if (targetHz < kChromaMinFrequencyHz)
-                continue;
-
-            const auto targetBin = static_cast<int>(std::lround(targetHz * kFftSize / currentSampleRate));
-            for (int delta = -kHarmonicToleranceBins; delta <= kHarmonicToleranceBins; ++delta)
-            {
-                const auto bin = targetBin + delta;
-                if (bin < semanticFirstBin || bin > semanticLastBin)
-                    continue;
-                const auto value = static_cast<double>(midMagnitudes[static_cast<std::size_t>(bin)]);
-                matchedHarmonicPower += value * value;
-            }
-        }
-
-        frame.singleF0HarmonicEnergyRatio = juce::jlimit(
-            0.0f,
-            1.0f,
-            static_cast<float>(matchedHarmonicPower / chromaPowerTotal));
-        frame.harmonicF0CandidateHz = static_cast<float>(f0Hz);
+        frame.chroma = cachedChroma;
+        frame.chromaEnergyRatio = cachedChromaEnergyRatio;
+        frame.singleF0HarmonicEnergyRatio = cachedSingleF0HarmonicEnergyRatio;
+        frame.harmonicF0CandidateHz = cachedHarmonicF0CandidateHz;
+    }
+    else
+    {
+        frame.chroma.fill(0.0f);
+        frame.chromaEnergyRatio = 0.0f;
+        frame.singleF0HarmonicEnergyRatio = 0.0f;
+        frame.harmonicF0CandidateHz = 0.0f;
     }
 
     frame.negativeCrossEnergyRatio = totalCrossWeight > 1.0e-18
@@ -737,10 +1010,8 @@ void AnalysisWorker::processWindow()
         frame.bandSideToMidDb[b] = powerRatioToDb(bandSidePower[b], bandMidPower[b]);
     }
 
-    // Once the signal gate has closed, spectral/stereo/temporal/semantic values
-    // are explicitly treated as invalid machine features instead of leaving
-    // random near-noise values in the stream. Peak/RMS, LUFS-I and session max
-    // TP are retained because they still describe detector/session state.
+    // Once the signal gate has closed, content-dependent values are explicitly
+    // invalid rather than leaving random near-noise values in the stream.
     if (!signalPresent)
     {
         frame.spectralCentroidHz = 0.0f;
@@ -767,46 +1038,11 @@ void AnalysisWorker::processWindow()
         frame.bandStereoCorrelation.fill(0.0f);
         frame.sideBandsDb.fill(kFloorDb);
         frame.bandSideToMidDb.fill(0.0f);
+        if (semanticEnabled)
+            resetSemanticCache();
     }
 
-    {
-        const std::scoped_lock lock(latestMutex);
-        latestFrame = frame;
-        hasLatestFrame = true;
-    }
-
-    const auto nowMs = juce::Time::getMillisecondCounterHiRes();
-    if (nowMs - lastOscSendMs >= kOscIntervalMs)
-    {
-        AnalysisFrame outgoing = frame;
-        if (signalPresent && temporalSpectralFluxCount > 0)
-        {
-            outgoing.temporalWindowSeconds = static_cast<float>(temporalAccumulatedSeconds);
-            outgoing.spectralFluxMean = static_cast<float>(
-                temporalSpectralFluxSum / temporalSpectralFluxCount);
-            outgoing.spectralFluxPeak = temporalSpectralFluxPeak;
-            outgoing.rmsRisePeakDb = temporalRmsRisePeakDb;
-            outgoing.lowBandEnergyDb = temporalLowBandPowerCount > 0
-                ? amplitudeToDb(static_cast<float>(std::sqrt(
-                    temporalLowBandPowerSum / temporalLowBandPowerCount)))
-                : kFloorDb;
-        }
-        else
-        {
-            outgoing.temporalWindowSeconds = 0.0f;
-            outgoing.spectralFluxMean = 0.0f;
-            outgoing.spectralFluxPeak = 0.0f;
-            outgoing.rmsRisePeakDb = 0.0f;
-            outgoing.lowBandEnergyDb = kFloorDb;
-        }
-
-        refreshOscConnectionIfNeeded();
-        if (oscConnected)
-            sendFrame(outgoing);
-
-        resetTemporalAccumulator();
-        lastOscSendMs = nowMs;
-    }
+    publishFrame(frame, temporalEnabled);
 }
 
 void AnalysisWorker::refreshOscConnectionIfNeeded()
@@ -840,13 +1076,10 @@ void AnalysisWorker::sendFrame(const AnalysisFrame& frame)
     message.addFloat32(frame.stereoCorrelation);
     message.addFloat32(frame.stereoWidth);
 
-    // Preserve the V0.1 prefix so older bridges can still read the first
-    // 11 scalar fields plus 32 spectrum bands. Historical bandsDb is the Mid
-    // spectrum; V0.8 appends the Side spectrum separately.
+    // Preserve the historical prefix. bandsDb remains the Mid spectrum.
     for (const auto bandDb : frame.bandsDb)
         message.addFloat32(bandDb);
 
-    // V0.2 extras.
     message.addFloat32(frame.lufsShortTerm);
     message.addFloat32(frame.lufsIntegrated);
     message.addFloat32(frame.truePeakDbtp);
@@ -855,16 +1088,11 @@ void AnalysisWorker::sendFrame(const AnalysisFrame& frame)
     for (const auto correlation : frame.bandStereoCorrelation)
         message.addFloat32(correlation);
 
-    // V0.3 extras. Keep these appended so V0.1/V0.2 bridges can ignore them.
     message.addInt32(frame.signalPresent ? 1 : 0);
     message.addFloat32(frame.detectorPeakDb);
     message.addFloat32(frame.silenceSeconds);
     message.addString(runtimeUuid);
 
-    // V0.6 temporal extras. The schema remains append-only so older bridges can
-    // safely ignore these fields. Flux is normalized spectral redistribution;
-    // RMS rise is the largest positive window-to-window rise during this OSC
-    // aggregate; low-band energy is an FFT-derived 40-160 Hz feature.
     message.addFloat32(frame.temporalWindowSeconds);
     message.addFloat32(frame.spectralFluxMean);
     message.addFloat32(frame.spectralFluxPeak);
@@ -872,10 +1100,6 @@ void AnalysisWorker::sendFrame(const AnalysisFrame& frame)
     message.addFloat32(frame.lowBandEnergyDb);
     message.addString("0.6");
 
-    // V0.8 Mid/Side + stereo extras. Indices 0..64 are untouched. These fields
-    // separate Side energy and negative cross-spectrum evidence from ordinary
-    // correlation so downstream models can distinguish decorrelation from
-    // strong phase opposition without relying on a single width number.
     message.addFloat32(frame.midRmsDb);
     message.addFloat32(frame.sideRmsDb);
     message.addFloat32(frame.sideToMidDb);
@@ -888,16 +1112,23 @@ void AnalysisWorker::sendFrame(const AnalysisFrame& frame)
         message.addFloat32(sideToMidDb);
     message.addString("0.8");
 
-    // V0.9 music-semantic evidence. Existing indices 0..111 remain unchanged.
-    // Chroma is normalized pitch-class power from the 80 Hz-5 kHz Mid spectrum;
-    // the single-F0 harmonic ratio/candidate are explicit heuristics rather than
-    // note/key ground truth.
     for (const auto chromaValue : frame.chroma)
         message.addFloat32(chromaValue);
     message.addFloat32(frame.chromaEnergyRatio);
     message.addFloat32(frame.singleF0HarmonicEnergyRatio);
     message.addFloat32(frame.harmonicF0CandidateHz);
     message.addString("0.9");
+
+    // Adaptive-analysis/runtime telemetry. Existing indexes 0..127 remain
+    // unchanged. The feature mask tells the Bridge which older fields are
+    // intentionally disabled rather than merely numerically zero.
+    message.addInt32(frame.analysisProfile);
+    message.addInt32(static_cast<juce::int32>(frame.analysisFeatureMask));
+    message.addFloat32(frame.workerLoadRatio);
+    message.addFloat32(frame.fifoFillRatio);
+    message.addFloat32(frame.fftRunsPerSecond);
+    message.addFloat32(frame.semanticRunsPerSecond);
+    message.addString("1.1");
 
     oscSender.send(message);
 }
@@ -922,6 +1153,8 @@ void AnalysisWorker::run()
         if (resetRequested.exchange(false, std::memory_order_acq_rel))
             resetAnalysisState();
 
+        applyProfileChangeIfNeeded();
+
         // Identify must work even while the transport is stopped and no audio
         // is reaching the plugin. Keep the request pending until OSC is ready.
         refreshOscConnectionIfNeeded();
@@ -937,21 +1170,23 @@ void AnalysisWorker::run()
             continue;
         }
 
+        const auto busyStartMs = juce::Time::getMillisecondCounterHiRes();
+
         if (!fifo.pop(hopLeft.data(), hopRight.data(), kHopSize))
             continue;
 
         updateSignalState();
-        processLoudnessHop();
+        if (hasFeature(activeProfile, FeatureLoudness))
+            processLoudnessHop();
 
+        bool windowReady = true;
         if (filledSamples < kFftSize)
         {
             const auto toCopy = std::min(kHopSize, kFftSize - filledSamples);
             std::copy_n(hopLeft.begin(), toCopy, windowLeft.begin() + filledSamples);
             std::copy_n(hopRight.begin(), toCopy, windowRight.begin() + filledSamples);
             filledSamples += toCopy;
-
-            if (filledSamples < kFftSize)
-                continue;
+            windowReady = filledSamples >= kFftSize;
         }
         else
         {
@@ -961,7 +1196,38 @@ void AnalysisWorker::run()
             std::copy(hopRight.begin(), hopRight.end(), windowRight.end() - kHopSize);
         }
 
-        processWindow();
+        if (windowReady)
+        {
+            const auto nowMs = juce::Time::getMillisecondCounterHiRes();
+            if (activeProfile == AnalysisProfile::Eco)
+            {
+                if (lastReducedAnalysisMs <= 0.0
+                    || nowMs - lastReducedAnalysisMs >= kReducedAnalysisIntervalMs)
+                {
+                    processCoreWindow();
+                    lastReducedAnalysisMs = nowMs;
+                }
+            }
+            else if (activeProfile == AnalysisProfile::Balanced)
+            {
+                if (lastReducedAnalysisMs <= 0.0
+                    || nowMs - lastReducedAnalysisMs >= kReducedAnalysisIntervalMs)
+                {
+                    processWindow();
+                    lastReducedAnalysisMs = nowMs;
+                }
+            }
+            else
+            {
+                // Mix/Full preserve hop-level FFT because Temporal evidence
+                // depends on adjacent internal windows. Full adds lower-rate
+                // Semantic analysis inside processWindow().
+                processWindow();
+            }
+        }
+
+        const auto busyEndMs = juce::Time::getMillisecondCounterHiRes();
+        updatePerformanceTelemetry(busyEndMs - busyStartMs, busyEndMs);
     }
 }
 } // namespace aianalyzer
