@@ -6,31 +6,81 @@ on:
   pull_request:
 
 jobs:
-  build:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [macos-latest, windows-latest]
-
-    runs-on: ${{ matrix.os }}
-
+  changes:
+    name: Detect changed components
+    runs-on: ubuntu-latest
+    outputs:
+      plugin: ${{ steps.filter.outputs.plugin }}
+      bridge: ${{ steps.filter.outputs.bridge }}
+      workflow: ${{ steps.filter.outputs.workflow }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Configure (macOS universal)
-        if: runner.os == 'macOS'
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 "-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64"
+      - name: Detect changed paths
+        id: filter
+        shell: bash
+        run: |
+          set -euo pipefail
 
-      - name: Configure (Windows)
-        if: runner.os == 'Windows'
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE="${{ github.event.pull_request.base.sha }}"
+          else
+            BASE="${{ github.event.before }}"
+          fi
 
-      - name: Build
-        run: cmake --build build --config Release --parallel 2
+          # The first push in a history may not have a usable 'before' SHA.
+          if [ -z "$BASE" ] || [ "$BASE" = "0000000000000000000000000000000000000000" ] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
+            BASE="$(git rev-parse HEAD^ 2>/dev/null || true)"
+          fi
+
+          if [ -n "$BASE" ]; then
+            CHANGED="$(git diff --name-only "$BASE" "$GITHUB_SHA")"
+          else
+            CHANGED="$(git ls-tree -r --name-only "$GITHUB_SHA")"
+          fi
+
+          echo "Changed files:"
+          printf '%s\n' "$CHANGED"
+
+          plugin=false
+          bridge=false
+          workflow=false
+
+          while IFS= read -r file; do
+            [ -z "$file" ] && continue
+            case "$file" in
+              Source/*|CMakeLists.txt|cmake/*|Resources/*|assets/*)
+                plugin=true
+                ;;
+              bridge/*)
+                bridge=true
+                ;;
+              .github/workflows/build.yml)
+                workflow=true
+                ;;
+            esac
+          done <<< "$CHANGED"
+
+          echo "plugin=$plugin" >> "$GITHUB_OUTPUT"
+          echo "bridge=$bridge" >> "$GITHUB_OUTPUT"
+          echo "workflow=$workflow" >> "$GITHUB_OUTPUT"
+
+          echo "plugin=$plugin bridge=$bridge workflow=$workflow"
+
+  bridge:
+    name: Validate and package MCP v2 bridge
+    needs: changes
+    if: needs.changes.outputs.bridge == 'true' || needs.changes.outputs.workflow == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
 
       - name: Validate Python MCP v2 bridge
         shell: bash
         run: |
+          set -euo pipefail
           python -m pip install --upgrade pip
           python -m pip install -r bridge/requirements.txt
           python -m py_compile bridge/server.py
@@ -63,6 +113,51 @@ jobs:
           print(f"AI Analyzer MCP v{mcp_version}: {len(names)} tools registered")
           PY
 
+      - name: Package bridge
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf dist
+          mkdir -p dist
+          (
+            cd bridge
+            zip -9 -r ../dist/bridge.zip \
+              server.py \
+              requirements.txt \
+              cherry-studio.example.json
+          )
+
+      - name: Upload bridge artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AI-Analyzer-Bridge
+          path: dist/bridge.zip
+          if-no-files-found: error
+
+  plugin:
+    name: Build VST3 (${{ matrix.os }})
+    needs: changes
+    if: needs.changes.outputs.plugin == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure (macOS universal)
+        if: runner.os == 'macOS'
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 "-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64"
+
+      - name: Configure (Windows)
+        if: runner.os == 'Windows'
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build VST3
+        run: cmake --build build --config Release --parallel 2
+
       - name: Package macOS
         if: runner.os == 'macOS'
         shell: bash
@@ -87,21 +182,15 @@ jobs:
             show && count >= 7 { show=0 }
           '
 
-          # JUCE generates moduleinfo.json near the end of the VST3 build. Re-sign
-          # the final bundle after all resources exist, then fail CI if the bundle
-          # is not internally valid.
           xattr -cr "$VST3_PATH" || true
           codesign --force --deep --sign - --timestamp=none "$VST3_PATH"
           codesign --verify --deep --strict --verbose=4 "$VST3_PATH"
 
-          # Preserve the macOS bundle layout, executable bits, metadata and final
-          # ad-hoc signature inside an inner ZIP. Users unzip this file and copy
-          # AI Analyzer.vst3 to ~/Library/Audio/Plug-Ins/VST3/.
           ditto -c -k --sequesterRsrc --keepParent \
             "$VST3_PATH" \
             "dist/AI-Analyzer-macOS.vst3.zip"
 
-          # The bridge is a separate archive so users can place it anywhere.
+          # Plugin artifacts also carry the current bridge for a complete download.
           (
             cd bridge
             zip -9 -r ../dist/bridge.zip \
@@ -126,8 +215,6 @@ jobs:
             throw 'AI Analyzer.vst3 bundle not found'
           }
 
-          # Package the complete VST3 directory to avoid any transport layer
-          # changing the bundle layout or file attributes.
           Compress-Archive -Path $vst3.FullName -DestinationPath 'dist/AI-Analyzer-Windows.vst3.zip' -CompressionLevel Optimal
 
           $bridgeFiles = @(
