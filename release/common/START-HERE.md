@@ -1,4 +1,4 @@
-# AI Audio Analyzer 1.0 — Start Here / 从这里开始
+# AI Audio Analyzer 1.1 — Start Here / 从这里开始
 
 [English guide](INSTALL.en.md) | [中文教程](INSTALL.zh-CN.md)
 
@@ -14,7 +14,7 @@ You only need to **unzip the downloaded Release once** and run the installer ins
 4. Double-click `Install.cmd`.
 5. Approve the Windows permission prompt if it appears.
 6. Wait until the installer says **Installation completed successfully**.
-7. Restart FL Studio and rescan plugins.
+7. Restart FL Studio and rescan plugins if needed.
 
 ## macOS Apple Silicon
 
@@ -24,7 +24,7 @@ You only need to **unzip the downloaded Release once** and run the installer ins
 4. Double-click `Install.command`.
 5. If macOS blocks it, right-click `Install.command` and choose **Open**.
 6. Wait until the installer says **Installation completed successfully**.
-7. Restart FL Studio and rescan plugins.
+7. Restart FL Studio and rescan plugins if needed.
 
 Current macOS Release supports **Apple Silicon (arm64) only**. Intel Macs are not supported by the packaged Release.
 
@@ -42,14 +42,11 @@ INSTALL.zh-CN.md
 VERSION.txt
 ```
 
-There is **no MCP source code** in the user Release. There is also no Python environment, package manager, requirements file, PyInstaller `_internal` tree, or nested Release ZIP inside the package.
+There is **no MCP source code** in the user Release. There is also no Python environment, requirements file, PyInstaller `_internal` tree, or nested Release ZIP.
 
-After installation, the installer tells you where to find:
+After installation, the installer tells you where to find the generated Cherry Studio MCP configuration and installed Skill folder.
 
-- the generated Cherry Studio MCP configuration;
-- the installed Cherry Studio Skill folder.
-
-AI Audio Analyzer 1.0 adds a more reliable Before/After verification workflow for AI-controlled DAW changes. Installation remains exactly the same: no additional software or programming setup is required.
+AI Audio Analyzer 1.1 can use different **Analysis Profiles** to reduce unnecessary analyzer work in projects with many plugin instances. This does not change the audio and requires no extra installation. The AI workflow can request deeper analysis only when a task needs it.
 
 ---
 
@@ -67,7 +64,7 @@ AI Audio Analyzer 1.0 adds a more reliable Before/After verification workflow fo
 4. 双击 `Install.cmd`；
 5. Windows 弹出权限确认时点击允许；
 6. 等待显示 **Installation completed successfully**；
-7. 重启 FL Studio，并重新扫描插件。
+7. 重启 FL Studio，需要时重新扫描插件。
 
 ## macOS Apple Silicon
 
@@ -77,10 +74,10 @@ AI Audio Analyzer 1.0 adds a more reliable Before/After verification workflow fo
 4. 双击 `Install.command`；
 5. 如果 macOS 阻止运行，右键 `Install.command` → **打开**；
 6. 等待显示安装成功；
-7. 重启 FL Studio，并重新扫描插件。
+7. 重启 FL Studio，需要时重新扫描插件。
 
 当前 macOS Release **只支持 Apple Silicon / arm64**，不提供 Intel Mac 包。
 
-安装完成后，安装器会直接告诉你 Cherry Studio 的 MCP 配置文件位置和 Skill 文件夹位置。
+安装完成后，安装器会直接告诉你 Cherry Studio MCP 配置文件和 Skill 文件夹的位置。
 
-AI Audio Analyzer 1.0 新增了用于 AI 修改 DAW 后进行可靠 Before/After 验证的能力，但安装方式没有增加任何额外步骤或依赖。
+AI Audio Analyzer 1.1 增加了不同的 **Analysis Profile**，用于在插件实例很多的工程里减少不必要的 Analyzer 计算。它不会改变声音，也不需要增加任何安装步骤；AI 只会在确实需要更深测量时启用对应分析层级。

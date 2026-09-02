@@ -2,11 +2,113 @@
 
 This reference explains technical meaning, validity, and common misreadings. It does **not** prescribe a mixing, mastering, harmony, arrangement, tuning, or processing action.
 
+## Adaptive Analysis / performance
+
+### `Analysis Profile` host parameter
+
+```text
+Parameter ID: analysis_profile
+Display name: Analysis Profile
+0 Eco
+1 Balanced
+2 Mix
+3 Full
+```
+
+Feature groups:
+
+```text
+Eco       Core
+Balanced  Core + Loudness + Spectrum + Stereo
+Mix       Balanced + Temporal
+Full      Mix + Semantic
+```
+
+This changes Analyzer computation only. It does not process the audio or define an artistic mode.
+
+`Full` is the default for backward compatibility.
+
+### `analysis_profile` / `analysis_profile_index`
+
+Bridge-reported active profile name/index received from the VST3 telemetry tail. Use this to verify what the Analyzer instance is actually computing after the DAW-control MCP changes the host parameter.
+
+### `analysis_feature_mask`
+
+Bit mask describing enabled analysis groups:
+
+```text
+1   Core
+2   Loudness
+4   Spectrum
+8   Stereo
+16  Temporal
+32  Semantic
+```
+
+The feature mask is authoritative for adaptive-analysis frames. Append-only OSC compatibility positions remain present even when a feature family is disabled; disabled values are converted to unavailable state by the Bridge.
+
+### `analysis_features`
+
+Decoded Boolean map of the feature mask:
+
+```text
+core
+loudness
+spectrum
+stereo
+temporal
+semantic
+```
+
+### `worker_load_ratio`
+
+Approximate fraction of elapsed monitoring time spent doing work inside the Analyzer **background analysis worker**.
+
+It is not:
+
+```text
+DAW realtime audio-thread CPU
+whole-plugin CPU percentage
+system CPU percentage
+dropout probability
+```
+
+Use as relative implementation telemetry, especially when comparing profiles on the same environment.
+
+### `fifo_fill_ratio`
+
+Fraction of the preallocated SPSC input FIFO currently queued.
+
+A transient nonzero value is normal. Sustained growth or high fill indicates that the analysis worker may be falling behind incoming audio, so measurement timing can become stale.
+
+### `fft_runs_per_second`
+
+Observed number of internal FFT executions per second over the recent telemetry interval.
+
+Expected scheduling character:
+
+```text
+Eco       approximately 0
+Balanced  reduced, approximately network-update scale
+Mix       hop-level FFT
+Full      hop-level FFT
+```
+
+Actual rate also depends on sample rate, transport/audio flow, scheduling, and measurement state.
+
+### `semantic_runs_per_second`
+
+Observed Chroma/single-F0 semantic-analysis executions per second.
+
+It should be approximately zero when Semantic is disabled. Full intentionally runs semantic work at a lower rate than hop-level FFT.
+
+Detailed usage: `performance-evidence.md`.
+
 ## Signal / validity
 
 ### `signal_present`
 
-Boolean indicating whether the Analyzer currently considers the input valid.
+Boolean indicating whether the Analyzer currently considers the input active.
 
 Approximate detector behavior:
 
@@ -15,23 +117,21 @@ close   below -50 dBFS for ~0.4 s
 reopen  above -48 dBFS
 ```
 
-When false, content-dependent spectrum/stereo/temporal/semantic fields are unavailable.
-
 ### `detector_peak_db`
 
-Current detector peak in dBFS. It is a gate-state measurement, not RMS, LUFS, or True Peak.
+Current detector peak in dBFS. It is not RMS, LUFS, or True Peak.
 
 ### `silence_seconds`
 
-Continuous time accumulated below the gate's closing condition.
+Continuous time accumulated under the gate's silence condition.
 
 ### `analysis_valid`
 
-Whether a window/summary contains usable active frames for content analysis.
+Whether a returned window/summary contains usable active measurement data.
 
 ### `active_frames`
 
-Number of valid active analysis frames in a requested window.
+Number of active analysis frames in a requested window.
 
 ### `active_ratio`
 
@@ -39,27 +139,43 @@ Fraction of requested frames considered active. It is time coverage, not loudnes
 
 ### `null`
 
-`null` means no valid/available measurement for that field. Never reinterpret it as numeric zero.
+`null` means unavailable. Never reinterpret it as numeric zero.
+
+Adaptive-profile rule: if the required feature group is disabled, its fields are unavailable even though append-only protocol positions physically exist.
 
 ## Level / dynamics
 
 ### `peak_db`
 
-Sample Peak in dBFS. It measures discrete sample amplitude and is not True Peak.
+Sample Peak in dBFS. Not True Peak.
 
 ### `rms_db`
 
-RMS level in dBFS. It is an energy statistic and is not LUFS.
+RMS level in dBFS. Not LUFS.
 
 ### `crest_db`
 
-Approximate peak-to-average relation:
+Approximate:
 
 ```text
-Crest ≈ Peak - RMS
+Peak - RMS
 ```
 
-It is descriptive, not a quality score.
+Descriptive only; not a quality score.
+
+## Loudness
+
+Requires the Loudness feature group (`Balanced` or higher).
+
+### `lufs_s`
+
+Short-Term LUFS, approximately a 3-second time scale. May become unavailable after sustained silence.
+
+### `lufs_i`
+
+Integrated LUFS accumulated during the Analyzer loudness session using EBU R128 gating.
+
+It does not automatically represent the whole song unless the whole program was measured in the relevant session. Snapshot/verification windows do not independently reset LUFS-I.
 
 ### `true_peak_dbtp`
 
@@ -67,27 +183,17 @@ Current True Peak estimate in dBTP.
 
 ### `max_true_peak_dbtp`
 
-Maximum True Peak observed since the current Analyzer session/reset state began. It is session cumulative.
-
-## Loudness
-
-### `lufs_s`
-
-Short-Term LUFS, roughly a 3-second time scale. It may become unavailable after sustained silence.
-
-### `lufs_i`
-
-Integrated LUFS accumulated since the Analyzer loudness state was reset/prepared, using EBU R128 gating.
-
-It does not automatically represent an entire song unless the entire program has been measured in that session. Snapshot A/B does not independently reset LUFS-I for each snapshot.
+Maximum True Peak observed during the current Analyzer loudness session/reset state.
 
 ## Spectrum
 
+Requires Spectrum (`Balanced` or higher).
+
 ### `bands_db`
 
-32 log-spaced 20 Hz–20 kHz FFT-derived **Mid-spectrum** machine features in dB-like relative level units.
+32 log-spaced 20 Hz–20 kHz FFT-derived **Mid-spectrum** machine features.
 
-The underlying signal is:
+Underlying signal:
 
 ```text
 Mid = (L + R) / 2
@@ -97,57 +203,43 @@ Useful for spectral-shape comparison; not calibrated SPL.
 
 ### `spectral_regions`
 
-Project-level broad-band summaries:
-
-```text
-sub_20_120_db
-low_mid_120_500_db
-mid_500_2000_db
-presence_2000_5000_db
-high_5000_20000_db
-```
-
-These are organizational labels, not automatic tonal-problem labels.
+Project-level broad groups such as sub/low-mid/mid/presence/high. These are organizational summaries, not automatic problem labels.
 
 ### `centroid_hz`
 
-Frequency-weighted center of spectral magnitude. Higher/lower is descriptive, not inherently better/worse.
+Frequency-weighted center of spectral magnitude. Descriptive, not better/worse.
 
 ### `rolloff_hz`
 
-Approximately 85% spectral rolloff: the frequency below which about 85% of spectral power is accumulated.
+Approximately the frequency below which ~85% of measured spectral power accumulates.
 
 ### `flatness`
 
-Spectral Flatness describing concentrated/tonal versus distributed/noise-like spectral shape. It is not distortion or quality.
+Spectral Flatness describing concentrated/tonal versus distributed/noise-like shape. Not distortion or quality.
 
-## Legacy stereo measurements
+## Stereo / Mid-Side
+
+Requires Stereo (`Balanced` or higher).
 
 ### `stereo_correlation`
 
 Full-band L/R correlation:
 
 ```text
-+1  highly similar L/R
++1  highly similar
  0  weak linear relation
 -1  strongly anti-correlated
 ```
 
-It is a statistical relation, not a good/bad score.
+Not a quality score and not a Side-energy measurement.
 
 ### `stereo_width`
 
-Legacy ratio-style scalar:
-
-```text
-Side RMS / Mid RMS
-```
-
-It is clamped for historical continuity. Prefer V0.8 `side_to_mid_db` for explicit energy-ratio semantics.
+Historical ratio-style scalar based on Side RMS / Mid RMS, retained for compatibility. Prefer explicit `side_to_mid_db` for energy-ratio semantics.
 
 ### `band_stereo_correlation`
 
-Eight L/R correlation regions:
+Eight correlation regions:
 
 ```text
 20–60 Hz
@@ -162,167 +254,12 @@ Eight L/R correlation regions:
 
 Very low-energy bands should not be overinterpreted.
 
-## V0.6 temporal measurements
-
-### `temporal_supported`
-
-Whether the frame contains the V0.6 append-only temporal tail.
-
-### `temporal_valid`
-
-Whether temporal descriptors are valid, typically requiring active signal and nonzero temporal coverage.
-
-### `temporal_window_seconds`
-
-Internal analysis time represented by the current emitted temporal aggregate. Do not hard-code it as exactly 0.1 s.
-
-### `spectral_flux_mean`
-
-Mean positive change in normalized spectral distribution across adjacent internal FFT windows. It emphasizes spectral redistribution rather than simple gain scaling.
-
-### `spectral_flux_peak`
-
-Largest normalized spectral-flux value within the emitted aggregate. It is change evidence, not proof of a musical onset.
-
-### `rms_rise_peak_db`
-
-Largest positive adjacent-window RMS increase in dB. It is rapid level-rise evidence, not Crest Factor or attack time.
-
-### `low_band_energy_db`
-
-FFT-derived 40–160 Hz energy feature. It is not calibrated SPL and does not identify an instrument.
-
-### `onset_candidate_frames`
-
-Threshold-based change candidates returned by `audio_temporal_profile()`.
-
-Current defaults:
-
-```text
-rms_rise_peak_db >= 3.0
-OR
-spectral_flux_peak >= 0.18
-```
-
-These are not annotated onset ground truth.
-
-### `onset_candidate_density_hz`
-
-Candidate count divided by temporally valid observed seconds. It is not BPM or note density.
-
-### `band_envelope_correlation`
-
-Pearson correlation of aligned selected-band energy envelopes. It describes co-variation, not which source should be changed.
-
-### `normalized_band_temporal_overlap`
-
-Average relative simultaneous occupancy after each source's selected-band envelope is normalized to its own peak. It is not a masking probability.
-
-### `coactive_ratio`
-
-Fraction of aligned frames where both sources report active signal.
-
-### `alignment_tolerance_ms` / `mean_abs_alignment_offset_ms`
-
-Alignment tolerance and actual mean timestamp mismatch. Large offsets weaken timing conclusions.
-
-## V0.7 masking-evidence measurements
-
-Detailed model notes are in `masking-evidence.md`.
-
-### `auditory_band_model.type`
-
-Current value:
-
-```text
-equal-erb-rate-rebinning
-```
-
-Existing 32 Analyzer spectrum features are re-binned into 16 equal ERB-rate regions.
-
-### `auditory_band_model.filterbank`
-
-Current value:
-
-```text
-false
-```
-
-This is not a gammatone/cochlear filterbank.
-
-### `source_feature_count`
-
-Number of original spectrum feature centers contributing to the ERB region.
-
-### `a_db` / `b_db`
-
-Power-domain mean of source Analyzer spectral features in the ERB region. Machine-feature levels, not SPL.
-
-### `level_delta_a_minus_b_db`
-
-```text
-a_db - b_db
-```
-
-Positive means A is stronger in that region; negative means B is stronger.
-
-### `relative_spectral_overlap`
-
-Each source is normalized to its own strongest ERB-region power; regional overlap uses the minimum. It describes relative spectral coexistence, not audibility.
-
-### `level_direction_weight_a_over_b` / `...b_over_a`
-
-Bounded logistic descriptors from regional relative level. They are not probabilities or hearing thresholds.
-
-### `spectral_level_evidence_*`
-
-Transparent combination of relative spectral overlap and directional level weighting.
-
-### `combined_evidence_*`
-
-When temporal overlap exists, spectral/level evidence is weighted by temporal co-occupancy. This is still heuristic evidence.
-
-### `dominant_direction`
-
-Which direction currently has stronger measured evidence. It is not a processing instruction.
-
-### `masking_evidence_score`
-
-Compact candidate-ranking summary. It is not audible-masking probability, universal pass/fail, or mix-quality score.
-
-### `evidence_formula`
-
-Machine-readable description of the heuristic formula so downstream interpretation remains auditable.
-
-### `spectral_overlap_score` / `audio_detect_masking()`
-
-Older spectrum-only heuristics. Prefer `audio_masking_evidence()` for stronger current evidence, but neither is an audible-masking probability.
-
-## V0.8 Mid/Side and stereo measurements
-
-Detailed notes are in `stereo-evidence.md`.
-
-### `stereo_v08_supported`
-
-Whether the current frame contains the V0.8 append-only stereo tail.
-
-### `stereo_v08_valid`
-
-Whether V0.8 fields are valid for the current frame. Active signal is required.
-
-### `mid_rms_db`
+### `mid_rms_db` / `side_rms_db`
 
 RMS of:
 
 ```text
-Mid = (L + R) / 2
-```
-
-### `side_rms_db`
-
-RMS of:
-
-```text
+Mid  = (L + R) / 2
 Side = (L - R) / 2
 ```
 
@@ -334,19 +271,21 @@ Side = (L - R) / 2
 
 Equivalent to `20 * log10(Side RMS / Mid RMS)`.
 
-```text
-negative → Mid power exceeds Side
-0        → equal Mid and Side power
-positive → Side power exceeds Mid
-```
-
 No universal target is defined.
 
 ### `negative_cross_energy_ratio`
 
-Range `0..1`. Weighted fraction of bilateral FFT-bin evidence whose real L/R cross-spectrum is negative.
+Range approximately `0..1`. Weighted fraction of bilateral FFT evidence whose real L/R cross-spectrum is negative.
 
-This is phase-opposition evidence, not phase-angle histogram, sample-sign ratio, mono-cancellation percentage, audibility probability, or quality score.
+It is phase-opposition evidence, not:
+
+```text
+phase-angle histogram
+sample-sign ratio
+mono-cancellation percentage
+audibility probability
+quality score
+```
 
 ### `low_band_20_120_correlation`
 
@@ -354,7 +293,7 @@ Signed L/R correlation over approximately 20–120 Hz.
 
 ### `low_band_20_120_side_to_mid_db`
 
-Integrated Side/Mid power relation over approximately 20–120 Hz. Not a mono-compatibility pass/fail score.
+Integrated Side/Mid power relation over approximately 20–120 Hz. Not a mono-compatibility pass/fail result.
 
 ### `side_bands_db`
 
@@ -362,257 +301,188 @@ Integrated Side/Mid power relation over approximately 20–120 Hz. Not a mono-co
 
 ### `band_side_to_mid_db`
 
-Eight integrated Side/Mid power ratios using the same regions as band stereo correlation.
+Eight integrated Side/Mid power ratios over the same regions as band correlation.
 
 ### `decorrelation_proxy_mean`
 
-Derived by `audio_stereo_profile()`:
+Derived by stereo profile:
 
 ```text
 1 - abs(stereo_correlation)
 ```
 
-Both `+1` and `-1` correlation yield a value near zero. Read it with correlation sign. It is not perceptual spaciousness.
+Both `+1` and `-1` correlation produce a value near zero. Read it with the correlation sign. It is not perceptual spaciousness.
 
-### `mid_spectrum_db` / `side_spectrum_db`
+## Temporal
 
-Window-averaged Mid/Side spectral feature arrays.
+Requires Temporal (`Mix` or `Full`).
 
-### `frequency_dependent_stereo`
+### `temporal_supported`
 
-Eight regions, each containing `range`, `correlation`, and `side_to_mid_db`. Correlation and Side/Mid answer different questions.
+Whether the plugin/frame supports the temporal append-only fields.
 
-## V0.9 tonal / music-semantic measurements
+### `temporal_valid`
 
-Detailed interpretation is in `tonal-evidence.md`.
+Whether temporal evidence is usable in the current frame/window. A supported feature can still be invalid due to profile state, silence, or insufficient data.
 
-### `semantic_v09_supported`
+### `temporal_window_seconds`
 
-Whether the current frame contains the append-only V0.9 music-semantic tail.
+Internal analysis time represented by the current temporal aggregate. Do not assume it is always exactly 0.1 s.
 
-Older plugins can still provide all previous measurements while this is false/absent.
+### `spectral_flux_mean`
 
-### `semantic_v09_valid`
+Mean positive redistribution in normalized spectral shape across adjacent internal FFT windows. It emphasizes spectral change rather than simple gain scaling.
 
-Whether V0.9 chroma evidence is valid for the current frame. Current requirements include active input plus nonzero usable chroma-range energy.
+### `spectral_flux_peak`
+
+Largest normalized spectral-flux value in the aggregate. Change evidence, not proof of a musical onset.
+
+### `rms_rise_peak_db`
+
+Largest positive adjacent-window RMS increase in dB. Not Crest Factor or attack time.
+
+### `low_band_energy_db`
+
+FFT-derived approximately 40–160 Hz energy feature. Not calibrated SPL and does not identify an instrument.
+
+### Onset/change candidates
+
+Current temporal profile derives heuristic candidates using thresholds such as RMS rise or spectral flux. They are not annotated onset ground truth, BPM, or note density.
+
+### `band_envelope_correlation`
+
+Pearson correlation of aligned selected-band energy envelopes. Describes co-variation, not which source should be changed.
+
+### `normalized_band_temporal_overlap`
+
+Relative simultaneous occupancy after each source's selected-band envelope is normalized. Not a masking probability.
+
+### `alignment_tolerance_ms` / `mean_abs_alignment_offset_ms`
+
+Requested timestamp-alignment tolerance and actual mean mismatch. Large offsets weaken timing conclusions.
+
+## Masking evidence
+
+Spectrum is required; Temporal strengthens the interaction evidence when enabled.
+
+Detailed model: `masking-evidence.md`.
+
+### `auditory_band_model.type`
+
+Current model:
+
+```text
+equal-erb-rate-rebinning
+```
+
+Existing 32 Analyzer spectrum features are re-binned into 16 equal ERB-rate regions.
+
+### `auditory_band_model.filterbank`
+
+```text
+false
+```
+
+This is not a gammatone/cochlear filterbank.
+
+### `relative_spectral_overlap`
+
+Relative coexistence after normalizing each source to its own strongest region. Not audible probability.
+
+### `level_delta_a_minus_b_db`
+
+```text
+a_db - b_db
+```
+
+Positive means A is numerically stronger in that region.
+
+### Directional / combined evidence
+
+Directional level weights and temporal overlap are combined transparently for candidate ranking. They remain heuristic evidence, not automatic EQ/sidechain instructions.
+
+### `masking_evidence_score`
+
+Compact ranking summary. Not a probability of audible masking, pass/fail result, or mix-quality score.
+
+## Tonal / music-semantic evidence
+
+Requires Semantic (`Full`). Detailed interpretation: `tonal-evidence.md`.
 
 ### `chroma`
 
-Twelve normalized Mid-spectrum pitch-class power bins in fixed order:
+Twelve normalized Mid-spectrum pitch-class power bins:
 
 ```text
 C C# D D# E F F# G G# A A# B
 ```
 
-Analysis range is approximately:
+Approximate analysis band:
 
 ```text
-80 Hz – 5 kHz
+80 Hz–5 kHz
 ```
 
-FFT-bin frequencies are mapped to the nearest 12-TET pitch class and accumulated in the power domain; octave identity is collapsed.
+FFT frequencies map to nearest 12-TET pitch class and octave information is collapsed.
 
-It is **not** note probability, MIDI transcription, note count, chord-membership probability, or note confidence.
-
-### `chroma_pitch_class_order`
-
-Explicit pitch-class order accompanying the vector. Do not assume a different ordering.
+Chroma is not note probability, MIDI transcription, note count, or chord-membership probability.
 
 ### `chroma_energy_ratio`
 
-Per-frame fraction of Analyzer Mid-spectrum power represented inside the chroma analysis range relative to the wider spectral analysis power.
+Fraction/context describing how much measured Mid-spectrum power lies in the chroma-analysis range. Not correctness probability.
 
-Use as coverage context. It is not probability that the chroma is correct.
+### `normalized_pitch_class_entropy`
 
-Windowed `audio_tonal_profile()` exposes:
-
-```text
-evidence_quality.mean_chroma_energy_ratio
-```
-
-### `chroma.normalized_entropy` / `normalized_pitch_class_entropy`
-
-Normalized Shannon entropy of the 12-bin distribution:
+Approximate distribution concentration:
 
 ```text
-approximately 0 → more concentrated pitch-class power
-approximately 1 → more uniformly distributed pitch-class power
+0  more concentrated
+1  more uniform
 ```
 
-It is not quality, consonance, complexity, or confidence by itself.
+Not quality, consonance, complexity, or confidence by itself.
 
-### `tonal_center_evidence.method`
+### Tonal-center candidates
 
-Current method:
+Aggregated chroma is compared against 24 major/minor Krumhansl-Kessler templates using Pearson correlation.
 
-```text
-Krumhansl-Kessler major/minor profile Pearson correlation
-```
+`profile_correlation` is template similarity, not key probability.
 
-The aggregated chroma is compared with 24 templates: 12 tonics × major/minor.
-
-### `profile_correlation`
-
-Pearson correlation between aggregated chroma shape and one tonal template. This is template similarity, not probability.
-
-Do not report a value such as `0.82` as “82% probability”.
-
-### `tonal_center_evidence.top_candidates`
-
-Highest-ranking major/minor template correlations. The first candidate is the strongest current template match, **not a ground-truth key label**.
-
-Short, modal, chromatic, changing, sparse, percussion-heavy, atonal, or mixed-source passages can be ambiguous.
-
-### `tonal_center_evidence.top2_margin` / `tonal_center_top2_margin`
+### `top2_margin`
 
 ```text
 best profile correlation - second-best profile correlation
 ```
 
-Larger means stronger separation between the two top candidates within this 24-template set. It is not calibrated confidence probability and has no universal threshold.
+Candidate separation within the template set, not calibrated confidence.
 
 ### `single_f0_harmonic_energy_ratio`
 
-Single-F0 spectral harmonic-alignment heuristic. The plugin searches a candidate fundamental approximately within `55–1000 Hz` and evaluates spectral energy near up to eight integer harmonics. The final matched-energy numerator and semantic denominator both use the approximately `80 Hz–5 kHz` semantic band.
-
-It is not:
-
-- probability that the source is harmonic;
-- calibrated harmonic-to-noise ratio;
-- harmonic/percussive source separation;
-- pitch-tracker confidence;
-- note/chord confidence;
-- quality score.
+Single-F0 spectral harmonic-alignment heuristic. Not probability that the source is harmonic, source separation, pitch confidence, note confidence, or quality.
 
 ### `harmonic_f0_candidate_hz`
 
-Candidate fundamental used by the single-F0 heuristic.
+Candidate fundamental used by the heuristic. It can octave/subharmonic-jump, especially for polyphonic/noisy/inharmonic material. Do not directly convert it to a note and claim note detection.
 
-It can octave/subharmonic-jump or reflect a common divisor in polyphonic material. Do not convert it directly to a note label and claim that note was detected.
+### Pitch-class comparison
 
-Windowed outputs expose median/min/max candidate Hz to show stability over time.
+Cosine similarity / Jensen-Shannon divergence describe distribution similarity/difference, not harmonic compatibility, consonance, correctness, or required editing.
 
-### `pitch_class_comparison.cosine_similarity`
-
-Cosine similarity between two normalized chroma vectors. Higher means more similar pitch-class distribution; it does not prove harmonic compatibility or consonance.
-
-### `pitch_class_comparison.jensen_shannon_divergence`
-
-Symmetric distribution divergence, implementation-bounded approximately to `0..1`. Lower means more similar distributions; higher means more different. Not music-theory correctness.
-
-### `pitch_class_comparison.normalized_power_delta_b_minus_a`
-
-Twelve pitch-class deltas:
-
-```text
-B - A
-```
-
-They describe normalized distribution differences only and do not imply note/harmony/tuning/arrangement edits.
-
-### Exact symbolic data rule
-
-If exact note events, key metadata, chords, or tuning data are available through DAW/MIDI/project tools, prefer those sources for exact symbolic claims. V0.9 remains an audio-domain inference layer.
-
-## V1.0 closed-loop verification semantics
-
-Detailed workflow semantics are in `verification-evidence.md`.
-
-V1.0 is a Bridge-side measurement-orchestration layer. It adds no OSC fields and does not control the DAW.
-
-### `verification_id`
-
-Session-scoped identifier for one Before/change/readback/After verification record. It is not a permanent project ID, DAW undo ID, or plugin UUID.
-
-### `ready_for_external_change`
-
-Whether the captured Before baseline passed the current technical readiness checks. It does not mean the proposed DAW change is appropriate.
-
-### `baseline_blockers`
-
-Reasons the Before baseline should not be treated as ready, such as incomplete Analyzer mapping, missing requested selectors, stale/incomplete project readiness, or invalid active measurements.
-
-### `topology_fingerprint`
-
-Short SHA-256-derived consistency marker over sorted live Analyzer identity/binding metadata.
-
-It is not an audio fingerprint, persistent FL Studio project hash, or proof that every host parameter is unchanged.
-
-### `active_ratio_tolerance`
-
-Current V1.0 value:
-
-```text
-0.15 absolute difference
-```
-
-Used only as a transparent Before/After passage-coverage comparability guardrail. It is not a quality, audibility, loudness, or psychoacoustic threshold.
-
-### `controlled_comparison`
-
-True only when current V1.0 guardrails pass: at least one compared target, same measurement-window duration, unchanged Analyzer topology, no missing requested targets, valid active analysis in both windows, and active-ratio difference within tolerance.
-
-It is a **measurement-comparability Boolean**, not a claim that After is better, correct, preferred, or more professional.
-
-### `same_window_seconds`
-
-Whether Before and After requested measurement-window durations match. `audio_complete_verification(seconds=0)` reuses the baseline duration.
-
-### `topology_unchanged`
-
-Whether the live Analyzer topology/identity consistency marker and captured identity set remained unchanged.
-
-### `missing_targets`
-
-Requested verification selectors absent from Before or After.
-
-### `invalid_targets`
-
-Requested targets without valid active analysis in one or both windows.
-
-### `coverage_mismatch_targets`
-
-Requested targets whose Before/After active coverage cannot be compared within the current tolerance.
-
-### `change_summary`
-
-Caller-supplied factual description of the external DAW change attempted. Analyzer does not independently prove that the described control write occurred.
-
-### `host_readback`
-
-Caller-supplied actual post-write host-state report from the external DAW-control MCP. Analyzer stores it for auditability but does not independently query or validate FL Studio state.
-
-### `readback_supplied`
-
-Whether non-empty caller-supplied host readback was recorded. This means readback evidence was supplied, not that Analyzer independently verified it.
-
-### Verification delta convention
-
-Basic V1.0 measurement deltas use:
-
-```text
-After - Before
-```
-
-Positive means numerically higher in After, not better.
-
-### Verification persistence
-
-Verification sessions exist only in Bridge memory and disappear when the Analyzer MCP process exits.
+When exact DAW/MIDI note/key/chord/tuning data exists, prefer it for exact symbolic claims.
 
 ## Identity / topology
 
-### `id` / `runtime_id`
+### `runtime_id`
 
 Live plugin-instance UUID. Session-scoped, not a permanent project identifier.
 
-### `track` / `analyzer_name`
+### Analyzer name
 
-Human-readable Analyzer name. It can be duplicated and is not guaranteed unique.
+Human-readable name. It may be duplicated and is not guaranteed unique.
 
 ### `binding`
 
-V0.4 deterministic runtime UUID ↔ FL Studio host location relation:
+Deterministic runtime UUID ↔ FL Studio host-location relation:
 
 ```text
 fl_track_index
@@ -621,40 +491,60 @@ slot
 runtime_id
 ```
 
-### `selector`
-
-Preferred deterministic selector after binding:
+### Preferred selector
 
 ```text
 mixer:<track_index>/slot:<slot>
 ```
 
-## Freshness
+### `age_seconds` / stale state
 
-### `age_seconds`
-
-Time since the Bridge received the latest frame from that instance.
-
-### `stale`
-
-Whether data exceeds the Bridge freshness threshold. Stale values are not current state.
-
-### `duplicate_name`
-
-Another live Analyzer shares the display name. Use deterministic binding selector or runtime UUID.
+Time/freshness of the latest Bridge frame. Stale values are not current state.
 
 ## Snapshot A/B
 
 ### `audio_capture_snapshot(name, seconds)`
 
-Stores a project-level recent measurement state in the current Bridge session only.
+Stores a project-level recent measurement state in the current Bridge session.
 
 ### `audio_compare_snapshots(before, after)`
 
 Delta convention:
 
 ```text
-Delta = After - Before
+After - Before
 ```
 
-Check passage comparability, window length, and `active_ratio` before interpretation. For agent-coordinated DAW changes, prefer V1.0 verification when topology/readback/comparability auditing is needed.
+Check passage, window, active coverage, and relevant Analysis Profile/feature availability before strong interpretation.
+
+## Controlled verification
+
+Detailed semantics: `verification-evidence.md`.
+
+### `ready_for_external_change`
+
+Whether the Before baseline passed current workflow checks. Not a statement that the planned change is artistically appropriate.
+
+### `baseline_blockers`
+
+Reasons a Before baseline should be corrected/restarted before an externally controlled change.
+
+### topology fingerprint
+
+Live Analyzer identity/binding consistency marker. Not a complete persistent DAW-project hash.
+
+### `controlled_comparison`
+
+Technical comparability gate. Current guardrails include baseline readiness, same window duration, stable live Analyzer topology, requested target presence/validity, and active-ratio comparability.
+
+It does not mean After is better/correct/preferred.
+
+### `closed_loop_complete`
+
+True only when the measurement comparison is controlled **and** caller-supplied actual host readback is present.
+
+Still not an artistic quality judgment.
+
+### `host_readback`
+
+Text supplied from the external DAW-control MCP's actual post-write readback. Analyzer stores it but does not independently validate the host state.

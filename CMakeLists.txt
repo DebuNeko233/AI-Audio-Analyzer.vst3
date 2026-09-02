@@ -9,7 +9,7 @@ if(APPLE AND NOT CMAKE_OSX_DEPLOYMENT_TARGET)
     set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Minimum supported macOS version")
 endif()
 
-project(AIAnalyzer VERSION 1.0.0 LANGUAGES C CXX)
+project(AIAnalyzer VERSION 1.1.0 LANGUAGES C CXX)
 
 include(FetchContent)
 

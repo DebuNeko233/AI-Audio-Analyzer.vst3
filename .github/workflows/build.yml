@@ -3,7 +3,47 @@ name: build
 on:
   push:
     branches: [main]
+    paths:
+      - 'Source/**'
+      - 'CMakeLists.txt'
+      - 'cmake/**'
+      - 'Resources/**'
+      - 'assets/**'
+      - 'bridge/**'
+      - 'skills/ai-analyzer-flstudio/**'
+      - 'release/common/START-HERE.md'
+      - 'release/common/INSTALL.en.md'
+      - 'release/common/INSTALL.zh-CN.md'
+      - 'release/windows/Install.ps1'
+      - 'release/windows/Install.cmd'
+      - 'release/macos/install.sh'
+      - 'release/macos/Install.command'
+      - '.github/workflows/build.yml'
+      - '.github/workflows/release.yml'
   pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'Source/**'
+      - 'CMakeLists.txt'
+      - 'cmake/**'
+      - 'Resources/**'
+      - 'assets/**'
+      - 'bridge/**'
+      - 'skills/ai-analyzer-flstudio/**'
+      - 'release/common/START-HERE.md'
+      - 'release/common/INSTALL.en.md'
+      - 'release/common/INSTALL.zh-CN.md'
+      - 'release/windows/Install.ps1'
+      - 'release/windows/Install.cmd'
+      - 'release/macos/install.sh'
+      - 'release/macos/Install.command'
+      - '.github/workflows/build.yml'
+      - '.github/workflows/release.yml'
+
+concurrency:
+  group: build-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   changes:
@@ -25,11 +65,20 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
+          # PR synchronize runs compare only the previous and current PR heads.
+          # This prevents an older plugin change elsewhere in the PR from
+          # forcing another VST3 build after a later docs/MCP-only commit.
           if [ "${{ github.event_name }}" = "pull_request" ]; then
-            BASE="${{ github.event.pull_request.base.sha }}"
+            if [ "${{ github.event.action }}" = "synchronize" ] && [ -n "${{ github.event.before }}" ]; then
+              BASE="${{ github.event.before }}"
+            else
+              BASE="${{ github.event.pull_request.base.sha }}"
+            fi
           else
             BASE="${{ github.event.before }}"
           fi
+
           if [ -z "$BASE" ] || [ "$BASE" = "0000000000000000000000000000000000000000" ] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
             BASE="$(git rev-parse HEAD^ 2>/dev/null || true)"
           fi
@@ -52,7 +101,7 @@ jobs:
               Source/*|CMakeLists.txt|cmake/*|Resources/*|assets/*) plugin=true ;;
               bridge/*) bridge=true ;;
               skills/ai-analyzer-flstudio/*) skill=true ;;
-              release/*|.github/workflows/release.yml) release=true ;;
+              release/common/START-HERE.md|release/common/INSTALL.en.md|release/common/INSTALL.zh-CN.md|release/windows/Install.ps1|release/windows/Install.cmd|release/macos/install.sh|release/macos/Install.command|.github/workflows/release.yml) release=true ;;
               .github/workflows/build.yml) workflow=true ;;
             esac
           done <<< "$CHANGED"
@@ -107,7 +156,7 @@ jobs:
           cache: pip
           cache-dependency-path: bridge/requirements.txt
 
-      - name: Validate MCP 1.0 source and regressions
+      - name: Validate MCP 1.1 source and regressions
         shell: bash
         run: |
           set -euo pipefail
@@ -121,6 +170,7 @@ jobs:
             bridge/masking_tools.py \
             bridge/stereo_tools.py \
             bridge/semantic_tools.py \
+            bridge/performance_tools.py \
             bridge/verification_tools.py \
             bridge/ci_regression.py
           AI_ANALYZER_SELF_TEST=1 python bridge/server.py
@@ -139,6 +189,7 @@ jobs:
           cp bridge/masking_tools.py dist/mcp/
           cp bridge/stereo_tools.py dist/mcp/
           cp bridge/semantic_tools.py dist/mcp/
+          cp bridge/performance_tools.py dist/mcp/
           cp bridge/verification_tools.py dist/mcp/
           cp bridge/requirements.txt dist/mcp/
           cp bridge/cherry-studio.example.json dist/mcp/
@@ -155,7 +206,7 @@ jobs:
   plugin:
     name: Build VST3 (${{ matrix.os }})
     needs: changes
-    if: needs.changes.outputs.plugin == 'true'
+    if: needs.changes.outputs.plugin == 'true' || needs.changes.outputs.workflow == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -163,6 +214,17 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+
+      # Cache the platform-specific CMake tree, not just the JUCE checkout. This
+      # preserves FetchContent state and reusable JUCE module object files while
+      # every run still reconfigures and rebuilds the current source tree.
+      - name: Restore CMake / JUCE incremental build cache
+        uses: actions/cache@v4
+        with:
+          path: build
+          key: ${{ runner.os }}-${{ runner.arch }}-juce-cmake-${{ hashFiles('CMakeLists.txt', '.github/workflows/build.yml') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-juce-cmake-
 
       - name: Configure macOS arm64
         if: runner.os == 'macOS'

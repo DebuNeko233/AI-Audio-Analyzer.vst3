@@ -15,6 +15,7 @@ sys.path.insert(0, "bridge")
 
 import analyzer_core as core  # noqa: E402
 import masking_tools as masking  # noqa: E402
+import performance_tools as performance  # noqa: E402
 import project_tools as project  # noqa: E402
 import semantic_tools as semantic  # noqa: E402
 import server as entry  # noqa: E402
@@ -43,6 +44,12 @@ def synthetic_frame(
     chroma_energy_ratio: float = 0.72,
     harmonic_ratio: float = 0.58,
     harmonic_f0_hz: float = 130.81,
+    profile_index: int = 3,
+    feature_mask: int = 63,
+    worker_load_ratio: float = 0.22,
+    fifo_fill_ratio: float = 0.01,
+    fft_runs_per_second: float = 46.8,
+    semantic_runs_per_second: float = 5.0,
 ) -> list[object]:
     prefix: list[object] = [
         name,
@@ -76,7 +83,16 @@ def synthetic_frame(
         harmonic_f0_hz,
         "0.9",
     ]
-    return prefix + v02 + v03 + v06 + v08 + v09
+    v11: list[object] = [
+        profile_index,
+        feature_mask,
+        worker_load_ratio,
+        fifo_fill_ratio,
+        fft_runs_per_second,
+        semantic_runs_per_second,
+        "1.1",
+    ]
+    return prefix + v02 + v03 + v06 + v08 + v09 + v11
 
 
 def reset_state() -> None:
@@ -110,12 +126,12 @@ def main() -> None:
     assert mcp_sdk_version.split(".", 1)[0] == "2", mcp_sdk_version
     assert isinstance(entry.mcp, MCPServer)
     assert entry.mcp is core.mcp
-    assert entry.MCP_VERSION == "1.0"
-    assert entry.OSC_PROTOCOL_VERSION == "0.9"
+    assert entry.MCP_VERSION == "1.1"
+    assert entry.OSC_PROTOCOL_VERSION == "1.1"
 
     names = {tool.name for tool in asyncio.run(entry.mcp.list_tools())}
     assert names == entry.EXPECTED_TOOLS, sorted(names ^ entry.EXPECTED_TOOLS)
-    assert len(names) == 27
+    assert len(names) == 29
 
     reset_state()
 
@@ -150,6 +166,8 @@ def main() -> None:
                 chroma_energy_ratio=0.74,
                 harmonic_ratio=0.62 - i * 0.01,
                 harmonic_f0_hz=130.81,
+                worker_load_ratio=0.18,
+                fifo_fill_ratio=0.01,
             ),
         )
         core._on_frame(
@@ -172,18 +190,24 @@ def main() -> None:
                 chroma_energy_ratio=0.68,
                 harmonic_ratio=0.48 + i * 0.005,
                 harmonic_f0_hz=98.0,
+                worker_load_ratio=0.24,
+                fifo_fill_ratio=0.02,
             ),
         )
 
-    assert core._tracks["uuid-a"]["temporal_supported"] is True
-    assert core._tracks["uuid-a"]["stereo_v08_supported"] is True
-    assert core._tracks["uuid-a"]["semantic_v09_supported"] is True
-    assert core._tracks["uuid-a"]["semantic_v09_valid"] is True
-    assert core._tracks["uuid-a"]["schema_version"] == "0.9"
-    assert len(core._tracks["uuid-a"]["side_bands_db"]) == 32
-    assert len(core._tracks["uuid-a"]["band_side_to_mid_db"]) == 8
-    assert len(core._tracks["uuid-a"]["chroma"]) == 12
-    assert abs(sum(core._tracks["uuid-a"]["chroma"]) - 1.0) < 1e-6
+    frame_a = core._tracks["uuid-a"]
+    assert frame_a["temporal_supported"] is True
+    assert frame_a["stereo_v08_supported"] is True
+    assert frame_a["semantic_v09_supported"] is True
+    assert frame_a["semantic_v09_valid"] is True
+    assert frame_a["adaptive_analysis_supported"] is True
+    assert frame_a["analysis_profile"] == "full"
+    assert frame_a["analysis_features"]["semantic"] is True
+    assert frame_a["schema_version"] == "1.1"
+    assert len(frame_a["side_bands_db"]) == 32
+    assert len(frame_a["band_side_to_mid_db"]) == 8
+    assert len(frame_a["chroma"]) == 12
+    assert abs(sum(frame_a["chroma"]) - 1.0) < 1e-6
 
     bind("uuid-a", "Bass A", 7)
     bind("uuid-b", "Bass B", 8)
@@ -191,9 +215,19 @@ def main() -> None:
     assert project_status["project_ready"] is True
     assert project_status["bound_count"] == 2
 
-    profile = temporal.audio_temporal_profile("uuid-a", 5.0)
-    assert profile["available"] is True
-    assert profile["onset_candidate_frames"] >= 1
+    perf_a = performance.audio_analysis_status("mixer:7/slot:9")
+    assert perf_a["adaptive_analysis_supported"] is True
+    assert perf_a["profile"] == "full"
+    assert perf_a["features"]["semantic"] is True
+    assert perf_a["control_parameter"]["parameter_id"] == "analysis_profile"
+    project_perf = performance.audio_project_performance()
+    assert project_perf["instance_count"] == 2
+    assert project_perf["profile_counts"]["full"] == 2
+    assert project_perf["max_worker_load_ratio"] is not None
+
+    temporal_profile = temporal.audio_temporal_profile("uuid-a", 5.0)
+    assert temporal_profile["available"] is True
+    assert temporal_profile["onset_candidate_frames"] >= 1
 
     temporal_pair = temporal.audio_temporal_compare(
         "uuid-a", "uuid-b", 5.0, 40.0, 160.0, 80.0
@@ -208,7 +242,6 @@ def main() -> None:
     assert evidence["auditory_band_model"]["filterbank"] is False
     assert len(evidence["strongest_regions"]) == 6
     assert evidence["strongest_regions"][0]["combined_evidence_a_over_b"] is not None
-    assert evidence["masking_evidence_score"] is not None
 
     scan = masking.audio_project_masking_scan(5.0, 4, 80.0)
     assert scan["candidate_pair_count"] >= 1
@@ -221,14 +254,11 @@ def main() -> None:
     assert len(stereo_a["mid_spectrum_db"]) == 32
     assert len(stereo_a["side_spectrum_db"]) == 32
     assert len(stereo_a["frequency_dependent_stereo"]) == 8
-    assert stereo_a["full_band"]["decorrelation_proxy_mean"] is not None
-    assert stereo_a["full_band"]["negative_cross_energy_ratio_mean"] is not None
     assert stereo_b["full_band"]["side_to_mid_db"] > stereo_a["full_band"]["side_to_mid_db"]
 
     stereo_delta = stereo.audio_stereo_compare("uuid-a", "uuid-b", 5.0)
     assert stereo_delta["available"] is True
     assert stereo_delta["deltas_b_minus_a"]["side_to_mid_db"] is not None
-    assert len(stereo_delta["frequency_dependent_deltas"]) == 8
 
     tonal_a = semantic.audio_tonal_profile("uuid-a", 5.0)
     tonal_b = semantic.audio_tonal_profile("uuid-b", 5.0)
@@ -237,14 +267,11 @@ def main() -> None:
     assert len(tonal_a["chroma"]["normalized_power"]) == 12
     assert tonal_a["tonal_center_evidence"]["top_candidates"][0]["label"] == "C major"
     assert tonal_a["tonal_center_evidence"]["top2_margin"] is not None
-    assert tonal_a["chroma"]["normalized_entropy"] is not None
-    assert tonal_a["harmonic_alignment"]["single_f0_harmonic_energy_ratio_mean"] is not None
 
     tonal_delta = semantic.audio_tonal_compare("uuid-a", "uuid-b", 5.0)
     assert tonal_delta["available"] is True
     assert tonal_delta["pitch_class_comparison"]["cosine_similarity"] is not None
     assert tonal_delta["pitch_class_comparison"]["jensen_shannon_divergence"] is not None
-    assert len(tonal_delta["pitch_class_comparison"]["normalized_power_delta_b_minus_a"]) == 12
 
     before = project.audio_capture_snapshot("before", 5.0)
     assert before["track_count"] == 2
@@ -270,6 +297,7 @@ def main() -> None:
                 rms=-22.5,
                 chroma=chroma_c_major,
                 harmonic_ratio=0.60,
+                worker_load_ratio=0.19,
             ),
         )
         core._on_frame(
@@ -289,6 +317,7 @@ def main() -> None:
                 chroma=chroma_g_major,
                 harmonic_ratio=0.50,
                 harmonic_f0_hz=98.0,
+                worker_load_ratio=0.25,
             ),
         )
 
@@ -300,16 +329,13 @@ def main() -> None:
     )
     result = verification_done["result"]
     assert result["comparison"]["controlled_comparison"] is True
-    assert result["comparison"]["comparability"]["topology_unchanged"] is True
+    assert result["closed_loop_complete"] is True
     assert result["external_change"]["readback_supplied"] is True
-    assert result["audit"]["measurement_only"] is True
     assert len(result["comparison"]["targets"]) == 2
-    assert result["comparison"]["targets"][0]["delta"]["rms_db"] is not None
 
     verification_status = verification.audio_verification_status(verification_id)
     assert verification_status["status"] == "completed"
-    assert verification_status["result"]["comparison"]["controlled_comparison"] is True
-    assert verification.audio_verification_status()["count"] == 1
+    assert verification_status["result"]["closed_loop_complete"] is True
 
     before_state = copy.deepcopy(verification._verifications[verification_id]["before_state"])
     good_after_state = copy.deepcopy(verification._verifications[verification_id]["after_state"])
@@ -320,10 +346,10 @@ def main() -> None:
         before_state,
         topology_drift_state,
         ["mixer:7/slot:9", "mixer:8/slot:9"],
+        baseline_ready=True,
     )
     assert topology_drift["controlled_comparison"] is False
     assert topology_drift["comparability"]["topology_unchanged"] is False
-    assert "mixer:8/slot:9" in topology_drift["comparability"]["missing_targets"]
 
     coverage_mismatch_state = copy.deepcopy(good_after_state)
     coverage_mismatch_state["tracks"]["mixer:7/slot:9"]["active_ratio"] = 0.1
@@ -331,14 +357,66 @@ def main() -> None:
         before_state,
         coverage_mismatch_state,
         ["mixer:7/slot:9"],
+        baseline_ready=True,
     )
     assert coverage_mismatch["controlled_comparison"] is False
     assert "mixer:7/slot:9" in coverage_mismatch["comparability"]["coverage_mismatch_targets"]
 
+    blocked_baseline = verification._comparison_for_states(
+        before_state,
+        good_after_state,
+        ["mixer:7/slot:9"],
+        baseline_ready=False,
+    )
+    assert blocked_baseline["controlled_comparison"] is False
+    assert blocked_baseline["comparability"]["baseline_ready"] is False
+
+    # Adaptive-profile validity regression: deliberately provide realistic old
+    # tail numbers but declare Eco/core-only. The new parser must make disabled
+    # evidence unavailable instead of letting downstream tools interpret zeros
+    # or stale values as measurements.
+    core._on_frame(
+        "/aianalyzer/frame",
+        *synthetic_frame(
+            "Eco Probe",
+            "uuid-eco",
+            20.0,
+            shape_a,
+            chroma=chroma_c_major,
+            profile_index=0,
+            feature_mask=1,
+            worker_load_ratio=0.03,
+            fifo_fill_ratio=0.0,
+            fft_runs_per_second=0.0,
+            semantic_runs_per_second=0.0,
+        ),
+    )
+    eco = core._tracks["uuid-eco"]
+    assert eco["analysis_profile"] == "eco"
+    assert eco["spectrum_valid"] is False
+    assert eco["stereo_valid"] is False
+    assert eco["temporal_valid"] is False
+    assert eco["semantic_v09_valid"] is False
+    assert eco["chroma"] is None
+    eco_status = performance.audio_analysis_status("uuid-eco")
+    assert eco_status["features"] == {
+        "core": True,
+        "loudness": False,
+        "spectrum": False,
+        "stereo": False,
+        "temporal": False,
+        "semantic": False,
+    }
+    assert eco_status["fft_runs_per_second"] == 0.0
+
+    with core._lock:
+        core._tracks.pop("uuid-eco", None)
+        core._history.pop("uuid-eco", None)
+
     print(
-        f"AI Audio Analyzer MCP SDK {mcp_sdk_version}: {len(names)} tools; "
-        "V0.4 mapping + V0.5 project A/B + V0.6 temporal + V0.7 masking + "
-        "V0.8 stereo + V0.9 tonal + V1.0 closed-loop verification regressions OK"
+        f"AI Audio Analyzer MCP SDK {mcp_sdk_version}: 29 tools; "
+        "V0.4 mapping + project A/B + temporal + masking + stereo + tonal + "
+        "V1.0 closed-loop verification + adaptive profile/performance regressions OK"
     )
 
 

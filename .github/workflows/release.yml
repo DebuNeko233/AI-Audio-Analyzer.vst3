@@ -50,6 +50,7 @@ jobs:
             bridge/masking_tools.py \
             bridge/stereo_tools.py \
             bridge/semantic_tools.py \
+            bridge/performance_tools.py \
             bridge/verification_tools.py
 
   mcp-runtime:
@@ -86,7 +87,7 @@ jobs:
           python -m pip install -r bridge/requirements.txt
           python -m pip install 'pyinstaller>=6.10,<7'
 
-      - name: Validate source MCP 1.0
+      - name: Validate source MCP 1.1
         shell: bash
         run: AI_ANALYZER_SELF_TEST=1 python bridge/server.py
 
@@ -187,8 +188,8 @@ jobs:
           @"
           AI Audio Analyzer $version
           Platform: Windows x64
-          MCP: 1.0 standalone one-file executable
-          OSC protocol: 0.9 append-only
+          MCP: 1.1 standalone one-file executable
+          OSC protocol: 1.1 append-only
           Release commit: $env:GITHUB_SHA
           "@ | Set-Content 'package/VERSION.txt' -Encoding UTF8
 
@@ -266,8 +267,8 @@ jobs:
           cat > package/VERSION.txt <<EOF
           AI Audio Analyzer ${VERSION}
           Platform: macOS Apple Silicon arm64
-          MCP: 1.0 standalone one-file executable
-          OSC protocol: 0.9 append-only
+          MCP: 1.1 standalone one-file executable
+          OSC protocol: 1.1 append-only
           Release commit: ${GITHUB_SHA}
           EOF
 
@@ -380,10 +381,11 @@ jobs:
           - Windows: download AI-Audio-Analyzer-*-Windows.zip, unzip it, then double-click Install.cmd.
           - macOS Apple Silicon: download AI-Audio-Analyzer-*-macOS.zip, unzip it, then double-click Install.command.
           - No Python, source code, package manager, or programming setup is included or required.
-          - MCP 1.0 adds controlled closed-loop verification sessions around changes made by an external DAW-control MCP.
-          - audio_begin_verification captures the Before measurement/topology baseline; audio_complete_verification captures After evidence and comparability guards; audio_verification_status preserves the session audit trail.
-          - MCP 1.0 exposes 27 measurement/verification tools. OSC remains protocol 0.9 because 1.0 adds no new VST3 frame fields.
-          - Controlled-comparison status is a measurement-reliability guardrail, not a claim that an artistic change is better or worse.
+          - Adaptive Analysis adds Eco, Balanced, Mix, and Full performance profiles through the host-visible Analysis Profile parameter.
+          - Full remains the default for backward compatibility; lower profiles skip or decimate analysis work when those evidence families are not needed.
+          - MCP 1.1 exposes 29 tools, including audio_analysis_status and audio_project_performance for profile/worker telemetry readback.
+          - Runtime telemetry reports background Analyzer worker load, FIFO fill, FFT rate, and semantic-analysis rate; it is not DAW audio-thread CPU usage.
+          - Analyzer MCP still does not write DAW parameters. Use the actual DAW-control MCP to change Analysis Profile, then verify the resulting Analyzer status.
           - The Skill remains measurement/tool oriented and does not prescribe a mixing, mastering, stereo, key, harmony, or processing style.
           - macOS Release is Apple Silicon arm64 only and is currently ad-hoc signed rather than Apple-notarized.
 

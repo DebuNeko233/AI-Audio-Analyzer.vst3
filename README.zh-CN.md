@@ -4,17 +4,17 @@
 
 **AI Audio Analyzer** 是一个面向 AI / LLM 音乐制作工作流的 JUCE VST3 机器可读音频测量层。
 
-插件在 DAW 内直接测量音频，通过 OSC 把紧凑数据发送给 Analyzer MCP Bridge，再由 Cherry Studio 或其他 MCP 客户端结构化读取电平、响度、频谱、立体声、时间关系、工程概览、A/B、遮蔽相关证据、音频域调性证据，以及闭环修改验证信息。
+插件直接在 DAW 内测量音频，通过 OSC 将紧凑数据发送给 Analyzer MCP Bridge，再由 Cherry Studio 或其他 MCP 客户端结构化读取电平、响度、频谱、立体声、时间关系、遮蔽、调性、工程概览、A/B、性能状态和闭环验证证据。
 
-当前产品版本：**1.0.0**。
+当前产品版本：**1.1.0**。
 
 ## 项目组成
 
 ```text
 AI Audio Analyzer
 ├─ VST3    DAW 内的实时安全测量探针
-├─ MCP     结构化测量 / 比较 / 验证工具
-└─ Skill   英文 LLM 使用说明：正确调用 MCP、理解参数和证据语义
+├─ MCP     结构化测量 / 比较 / 验证 / 性能工具
+└─ Skill   面向 LLM 的英文 MCP 调用和参数语义说明
 ```
 
 Skill **不是风格化混音/和声教程**，不会内置固定 LUFS、EQ、压缩、Sidechain、Stereo、转调、和声修改或母带处理配方。
@@ -30,21 +30,7 @@ AI Audio Analyzer MCP   → 观察 / 测量 / 比较 / 验证
 FL Studio MCP           → 读取 / 控制 / 修改 / 回读 FL Studio
 ```
 
-闭环流程为：
-
-```text
-工程发现
-→ Analyzer 确定性映射
-→ Before 测量
-→ 根据用户目标进行外部推理
-→ 通过真实 DAW-control MCP 修改
-→ 回读宿主实际状态
-→ After 测量
-→ 检查 Before/After 是否可比
-→ 需要时再下钻 Temporal / Masking / Stereo / Tonal 证据
-```
-
-Analyzer MCP 本身**不负责写入 DAW 参数**。
+Analyzer MCP 本身**不写入 DAW 参数**。需要修改 Analyzer 的宿主参数时，应由真实 FL Studio Control MCP 完成写入和回读，再由 Analyzer MCP 验证插件实际状态。
 
 ## 架构
 
@@ -61,8 +47,8 @@ FL Studio / DAW
                  ├─ Live Instance Registry
                  ├─ FL Track/Slot 确定性映射
                  ├─ Project Overview / Snapshot A-B
-                 ├─ Temporal Evidence
-                 ├─ Masking Evidence
+                 ├─ Adaptive Analysis / Performance Telemetry
+                 ├─ Temporal / Masking Evidence
                  ├─ Mid/Side + Stereo Evidence
                  ├─ Tonal / Music-Semantic Evidence
                  └─ Closed-loop Verification Sessions
@@ -77,18 +63,17 @@ FL Studio / DAW
 
 ## 当前测量能力
 
-基础测量包括：
+主要能力包括：
 
-- 4096 点 FFT、Hann Window、1024 Sample Hop；
-- 20 Hz–20 kHz 的 32 个对数 **Mid Spectrum** 特征；
 - Sample Peak、RMS、Crest Factor；
-- `libebur128` 提供 LUFS-S / LUFS-I 和 Current / Session Max True Peak；
+- `libebur128` 提供 LUFS-S / LUFS-I、Current / Session Max True Peak；
+- 4096 点 FFT、Hann Window、20 Hz–20 kHz 的 32 个对数 Mid Spectrum 特征；
 - Spectral Centroid、约 85% Rolloff、Flatness；
-- Full-band L/R Correlation 和历史 Mid/Side Width Ratio；
-- 8 个分频段 L/R Correlation；
+- Full-band 和 8-band L/R Correlation；
 - Spectral Flux、RMS Rise、40–160 Hz Temporal Energy；
 - Mid RMS、Side RMS、Side/Mid dB、Side Spectrum、分频段 Side/Mid、低频 Stereo Relation 和 Negative Cross-Spectrum Evidence；
-- 12-bin Mid-spectrum Chroma、Chroma 分析覆盖率、Tonal-center Profile Ranking 和 Single-F0 Harmonic-alignment Evidence。
+- 12-bin Mid-spectrum Chroma、Tonal-center Profile Ranking 和 Single-F0 Harmonic-alignment Evidence；
+- Project Overview、Snapshot A/B、Masking Evidence、Controlled Before/After Verification 和 Analyzer Performance Telemetry。
 
 ### Signal Validity
 
@@ -97,7 +82,7 @@ FL Studio / DAW
 重开   高于 -48 dBFS
 ```
 
-`signal_present=false` 时，依赖真实音频内容的字段会变成 unavailable，而不是返回误导性的 0。`null` 表示**当前没有有效测量**，不是数值 0。
+`signal_present=false` 时，依赖音频内容的字段会变成 unavailable，而不是返回误导性的 0。`null` 表示**当前没有有效测量**，不是数值 0。
 
 ### Analyzer ↔ FL Mixer 确定性映射
 
@@ -108,15 +93,82 @@ Parameter ID: identify
 Display name: Identify
 ```
 
-每次 Identify 状态翻转都会发送 `/aianalyzer/identify`，Transport 停止时同样有效。Bridge 可把 Runtime UUID 绑定到真实 FL Mixer Track / Slot，之后优先用：
+每次 Identify 翻转都会发送 `/aianalyzer/identify`，Transport 停止时同样有效。Bridge 可把 Runtime UUID 绑定到真实 FL Mixer Track / Slot，之后优先使用：
 
 ```text
 mixer:7/slot:9
 ```
 
+### 自适应分析与性能控制
+
+大型工程可能在很多 Mixer Track 上都插入 Analyzer，没有必要让每个实例永久运行全部分析。因此插件新增一个真实的宿主参数：
+
+```text
+Parameter ID: analysis_profile
+Display name: Analysis Profile
+
+0 Eco
+1 Balanced
+2 Mix
+3 Full
+```
+
+Profile 只控制**测量计算量**，不会处理或改变声音：
+
+```text
+Eco       Core
+Balanced  Core + Loudness + Spectrum + Stereo
+Mix       Balanced + Temporal
+Full      Mix + Semantic
+```
+
+`Full` 仍是默认值，以保证旧工程兼容。旧工程状态没有 `analysisProfile` 字段时也按 Full 恢复。
+
+不同 Profile 的调度策略：
+
+```text
+Eco       不运行 FFT / Loudness 分析
+Balanced  降低 FFT 调度频率，约为网络更新尺度
+Mix       为 Temporal 恢复 hop-level FFT
+Full      Mix + 更低频率的 Semantic 分析
+```
+
+实际运行频率还会受 Sample Rate、Transport、音频流和宿主调度影响。
+
+Analyzer MCP 新增：
+
+```text
+audio_analysis_status(track)
+audio_project_performance()
+```
+
+它们会读取插件真正上报的 Profile / Feature Mask，并提供：
+
+```text
+worker_load_ratio
+fifo_fill_ratio
+fft_runs_per_second
+semantic_runs_per_second
+```
+
+`worker_load_ratio` 只是 **Analyzer 后台 Worker 的忙碌比例**，不是 FL Studio Realtime Audio CPU。`fifo_fill_ratio` 更关键：如果持续升高，说明后台分析跟不上输入音频，Analyzer 数据可能逐渐落后于 DAW 当前播放位置。
+
+推荐按需使用：
+
+```text
+读取 audio_analysis_status()
+→ 只有确实需要更深证据时，通过 FL Studio MCP 提高 Analysis Profile
+→ 回读真实宿主参数
+→ 再读 Analyzer 状态确认已生效
+→ 完成所需测量
+→ 需要时恢复原 Profile
+```
+
+为了保持 append-only OSC 兼容，被关闭的功能仍然保留字段位置，但 Bridge 会依据 Feature Mask 将其显式标记为 unavailable，旧工具不会把占位值当成真实测量。
+
 ### Project Intelligence / Snapshot A-B
 
-提供工程准备度、最近窗口概览，以及当前 Bridge Session 内的 Before / After Snapshot。
+提供工程准备度、最近窗口概览和当前 Bridge Session 内的 Before / After Snapshot。
 
 ### Temporal Evidence
 
@@ -125,7 +177,7 @@ audio_temporal_profile()
 audio_temporal_compare()
 ```
 
-Temporal overlap / correlation 是时间共现和共变证据，不是遮蔽概率，也不是处理指令。
+Temporal overlap / correlation 是时间共现和共变证据，不是遮蔽概率或处理指令。Temporal 工具需要启用 Temporal 的 Profile。
 
 ### Masking Evidence
 
@@ -134,7 +186,7 @@ Temporal overlap / correlation 是时间共现和共变证据，不是遮蔽概�
 → 16 个 equal ERB-rate 区间
 → 相对频谱占用
 → 相对电平方向权重
-→ 时间重叠
+→ 可用时加入时间重叠
 → Region-level Masking Evidence
 ```
 
@@ -147,38 +199,25 @@ audio_project_masking_scan()
 
 ### Mid/Side 与 Stereo Evidence
 
-这一层将 Signed L/R Correlation、Side/Mid Energy、Decorrelation Proxy、Negative Cross-Spectrum、低频 Stereo Relation、Mid/Side Spectrum 和分频段 Stereo 关系拆开测量。
-
 ```text
 audio_stereo_profile(track, seconds=5)
 audio_stereo_compare(track_a, track_b, seconds=5)
 ```
 
-Skill 不定义统一的 Width、Correlation、Side/Mid 或低频 Stereo 目标。
+Signed L/R Correlation、Side/Mid Energy、Decorrelation Proxy、Negative Cross-Spectrum、低频 Stereo Relation 和分频段 Stereo 关系保持独立，不定义统一的 Stereo 目标。
 
 ### 音频域调性 / Music-semantic Evidence
-
-Analyzer 提供：
-
-```text
-12-bin normalized chroma: C..B
-chroma_energy_ratio
-single_f0_harmonic_energy_ratio
-harmonic_f0_candidate_hz
-```
-
-Chroma 来自大约 `80 Hz–5 kHz` 的 Mid Spectrum Power，并映射到最近的 12-TET Pitch Class、折叠 Octave。Single-F0 Harmonic Ratio 的最终能量分子和分母也使用约 `80 Hz–5 kHz` 的语义频段，而候选 F0 搜索范围约为 `55–1000 Hz`。
 
 ```text
 audio_tonal_profile(track, seconds=8)
 audio_tonal_compare(track_a, track_b, seconds=8)
 ```
 
-Tonal-center 使用 24 个 Major/Minor Krumhansl-Kessler Profile Correlation。它们是音频域证据，不是精确 Key / Note 概率。涉及精确 Note、Key、Chord、Tuning 时，如果 DAW/MIDI MCP 有真实符号数据，应优先用该数据。
+Analyzer 提供 normalized 12-bin Chroma、Chroma Energy Coverage、Tonal-center Template Correlation 和 Single-F0 Harmonic-alignment Evidence。Chroma 主要使用约 `80 Hz–5 kHz` 的 Mid Spectrum；候选 F0 搜索约 `55–1000 Hz`。
+
+这些都是音频域证据，不是精确 Key / Note 概率。涉及精确 Note、Key、Chord、Tuning 时，如果 DAW/MIDI MCP 有真实符号数据，应优先用该数据。Tonal 工具需要 Semantic，通常使用 Full。
 
 ### 可靠闭环验证
-
-这是 **Bridge 侧 Verification Orchestration**，没有新增 DSP 或 OSC 字段：
 
 ```text
 audio_begin_verification(label, seconds=5, target_selectors=None)
@@ -197,25 +236,22 @@ Before Baseline
 → 返回 After - Before 测量差值
 ```
 
-Verification 会显式检查：Before/After 测量窗口是否一致、Analyzer 拓扑是否一致、目标是否缺失或无效、Active Coverage 是否接近。当前 `active_ratio` 的绝对差容差为 `0.15`。
+`controlled_comparison=true` 只表示当前透明技术 Guardrails 通过，不代表 After 更好、设置正确或应该保留修改。
 
-`controlled_comparison=true` 只代表**这次 A/B 的技术测量条件满足当前透明 Guardrails**，不代表 After 更好、设置正确、更加专业，也不代表应该保留修改。
+`closed_loop_complete=true` 还要求调用方提供真实宿主回读。Analyzer 会保存该回读用于审计，但不会独立查询 FL Studio 控制状态。
 
-`host_readback` 是调用方从外部 Control MCP 获得的实际宿主回读文本；Analyzer 会把它保存进审计结果，但不会独立验证 FL Studio 控制状态。
-
-Verification Session 只保存在当前 Bridge 内存中，重启 MCP 后不会保留。
+Verification Session 只保存在当前 Bridge 内存中。
 
 ## MCP 工具
 
-MCP 1.0 共 **27 个工具**。在之前 24 个测量/证据工具基础上新增：
+MCP **1.1 共 29 个工具**。性能层新增：
 
 ```text
-audio_begin_verification(...)
-audio_complete_verification(...)
-audio_verification_status(...)
+audio_analysis_status(track)
+audio_project_performance()
 ```
 
-不要为了“完整”机械调用所有工具。先从工程级工具开始，只选择当前问题真正需要的 Evidence Family；如果任务要求修改 DAW 并验证结果，就用 Verification 包住外部写入和宿主回读。
+不要为了“完整”机械调用全部工具。先检查工程和性能状态，再只启用当前问题需要的最低分析层级。
 
 ## 用户安装
 
@@ -230,9 +266,7 @@ macOS Apple Silicon arm64
 
 不提供 Intel / x86_64 macOS 包。
 
-每个平台只提供一个最终 ZIP。用户只需要解压一次，里面不会再套另一个 Release ZIP。
-
-解压后的结构：
+每个平台只提供一个最终 ZIP，用户只需要解压一次，不会 ZIP 套 ZIP。
 
 ```text
 AI Audio Analyzer.vst3
@@ -248,25 +282,9 @@ VERSION.txt
 
 用户 Release **不会包含 MCP Python 源码**、`requirements.txt`、venv、PyInstaller `_internal`、开发者配置示例或嵌套 ZIP。
 
-### Windows
+Windows：全部解压后双击 `Install.cmd`。
 
-下载 Windows ZIP → **全部解压缩** → 双击：
-
-```text
-Install.cmd
-```
-
-### macOS Apple Silicon
-
-下载 macOS ZIP → 解压 → 双击：
-
-```text
-Install.command
-```
-
-如果 Gatekeeper 阻止运行，右键 `Install.command` → **打开**。
-
-当前 macOS 包是 ad-hoc 签名，**不是 Apple Developer ID Notarization**。
+macOS Apple Silicon：解压后双击 `Install.command`。如果 Gatekeeper 阻止运行，右键 → **打开**。当前 macOS 包是 ad-hoc 签名，不是 Apple Developer ID Notarization。
 
 ## 仓库 MCP 架构
 
@@ -276,20 +294,19 @@ Install.command
 bridge/server.py
 ```
 
-版本关系：
+当前版本关系：
 
 ```text
-Product version       1.0.0
-MCP version           1.0
-OSC protocol version  0.9
+Product version       1.1.0
+MCP version           1.1
+OSC protocol version  1.1
+MCP tools             29
 ```
-
-1.0 没有改 VST3 Frame，因此 OSC Protocol 故意保持 0.9。
 
 内部模块：
 
 ```text
-bridge/server.py             启动 / self-test / 共享 Tool Registry
+bridge/server.py             启动 / Self-test / Tool Registry
 bridge/analyzer_core.py      OSC 状态、身份映射、基础工具
 bridge/project_tools.py      Project Overview / Snapshot A-B
 bridge/temporal_tools.py     Temporal Layer
@@ -297,67 +314,76 @@ bridge/masking_tools.py      Masking Evidence Layer
 bridge/stereo_tools.py       Mid/Side + Stereo Layer
 bridge/semantic_tools.py     Chroma / Tonal-center / Harmonic Evidence
 bridge/verification_tools.py Closed-loop Verification
+bridge/performance_tools.py  Adaptive Profile / Worker Telemetry
+bridge/ci_regression.py      仓库专用 Synthetic Regression
 ```
 
-`bridge/ci_regression.py` 只用于仓库 CI，不进入普通用户 Release。
+`bridge/ci_regression.py` 不进入普通用户 Release。
 
 ## Skill
 
-LLM-facing Skill 统一使用英文：
+LLM-facing Skill 统一使用英文，主要参考：
 
 ```text
 skills/ai-analyzer-flstudio/SKILL.md
 skills/ai-analyzer-flstudio/README-CHERRY-STUDIO.md
 skills/ai-analyzer-flstudio/references/analyzer-mcp.md
 skills/ai-analyzer-flstudio/references/parameters.md
+skills/ai-analyzer-flstudio/references/performance-evidence.md
 skills/ai-analyzer-flstudio/references/masking-evidence.md
 skills/ai-analyzer-flstudio/references/stereo-evidence.md
 skills/ai-analyzer-flstudio/references/tonal-evidence.md
 skills/ai-analyzer-flstudio/references/verification-evidence.md
 ```
 
-Skill 只负责工具调用、selector / mapping、有效性、参数与证据语义，不预设混音审美、转调、和声修改或处理动作。
+Skill 只负责工具调用、Selector / Mapping、Profile 选择、有效性和参数/证据语义，不预设混音审美或处理动作。
 
 ## OSC 协议
 
 Analysis 地址：`/aianalyzer/frame`。
 
-MCP 1.0 继续使用 append-only **OSC Protocol 0.9**：
+OSC **1.1** 继续保持 append-only：
 
 ```text
-0..58      V0.1–V0.4 兼容字段
-59..64     V0.6 Temporal
-65..111    V0.8 Mid/Side + Stereo
+0..58      历史 Core / Signal / Identity 字段
+59..64     Temporal + schema marker
+65..111    Mid/Side + Stereo + schema marker
 112..123   12 Chroma Bins：C..B
 124        chroma_energy_ratio
 125        single_f0_harmonic_energy_ratio
 126        harmonic_f0_candidate_hz
-127        V0.9 schema marker = "0.9"
+127        schema marker = "0.9"
+128        analysis_profile
+129        analysis_feature_mask
+130        worker_load_ratio
+131        fifo_fill_ratio
+132        fft_runs_per_second
+133        semantic_runs_per_second
+134        schema marker = "1.1"
 ```
 
-历史 `11..42` 仍是 32-band **Mid Spectrum**。1.0 不会在 127 后面继续追加字段。
-
-Identify 地址仍是 `/aianalyzer/identify`。
+已有 `0..127` 不重新解释。历史 `11..42` 仍是 32-band Mid Spectrum。Identify 地址仍是 `/aianalyzer/identify`。
 
 ## 实时线程原则
 
-Audio Callback 不执行 FFT、响度、Music-semantic Analysis、OSC、MCP、Verification Orchestration、文件或网络 I/O，也不执行重量级分配。Audio Sample 只写入预分配 SPSC FIFO，其余分析在后台线程完成。
+Audio Callback 不执行 FFT、响度、Semantic、OSC、MCP、Verification、文件或网络 I/O。Audio Sample 只写入预分配 SPSC FIFO，其余分析在后台线程完成。
+
+只有 Analysis Profile 真正变化时才会通知后台 Worker；普通 Audio Block 不会反复唤醒 Worker 重申当前 Profile。
+
+功能重新开启时，跨越“未分析空档”会造成语义污染的状态会被重置：Loudness 会重建 ebur128 状态，Temporal 会清理 previous spectrum / accumulator，Semantic 会清缓存。
 
 ## 当前限制
 
-- ERB 仍是 feature re-binning，不是真正 auditory filterbank；
-- Masking Evidence 仍是 heuristic；
-- Negative Cross Evidence 不是 phase-angle histogram 或 mono-cancellation 百分比；
-- Side/Mid 与 Correlation 都是测量，不是 Stereo Quality Score；
-- Chroma 是 FFT-derived 12-TET Pitch-class Evidence，不是 Transcription；
-- Tonal-center Ranking 是 Profile Correlation，不是精确 Key Detection；
-- Single-F0 Harmonic Evidence 是 Heuristic，在 Polyphonic / Noisy / Inharmonic Material 上可能不稳定；
-- Topology Fingerprint 只代表当前 Live Analyzer 的一致性，不是完整、永久的 FL Studio Project Hash；
+- Performance Telemetry 是 Analyzer Worker 自身遥测，不是校准后的 DAW/System CPU Profiler；
+- Adaptive Profile 可以减少 Analyzer 计算，但不承诺所有宿主和 Sample Rate 都得到固定比例的 CPU 降幅；
+- ERB 仍是 feature re-binning，Masking Evidence 仍是 heuristic；
+- Stereo、Temporal、Tonal 指标都是测量/证据，不是 Quality Score；
+- Chroma 不是 Transcription，Tonal-center Ranking 不是精确 Key Detection；
+- Single-F0 Harmonic Evidence 在 Polyphonic / Noisy / Inharmonic Material 上可能不稳定；
+- Topology Fingerprint 不是永久 DAW Project Hash；
 - `host_readback` 由调用方/外部 Control MCP 提供，Analyzer 不独立验证；
-- Verification Session 是内存态，Bridge 退出后消失；
-- Temporal 对齐受独立 OSC Stream 和更新分辨率限制；
-- LUFS-I / Session Max True Peak 是 Session 累积量；
-- FL Mixer Binding 是 Session-scoped，重新打开工程后可能需要重新 Identify；
+- Verification Session 和 FL Mixer Binding 都是 Session-scoped；
+- LUFS-I / Session Max True Peak 只在 Loudness 启用期间累计；Loudness 关闭后重新开启会开始新的 Loudness 测量状态；
 - macOS Release 仅支持 Apple Silicon，且当前未 Notarize。
 
 ## 仓库结构
@@ -367,12 +393,12 @@ Source/                         JUCE VST3
 bridge/server.py                唯一 MCP 入口
 bridge/analyzer_core.py         稳定内部 MCP/OSC Core
 bridge/*_tools.py               功能模块
-bridge/ci_regression.py         仓库内部 MCP 回归测试
+bridge/ci_regression.py         仓库专用 MCP Regression
 skills/ai-analyzer-flstudio/    英文 LLM-facing Skill
-release/                        面向普通用户的安装器 / 文档
+release/                        普通用户 Release 安装器/说明
 .github/workflows/build.yml     开发 CI
 .github/workflows/release.yml   手动 Release 打包
-AGENT.md                        Agent / Maintainer 历史与规则
+AGENT.md                        Agent / Maintainer 约束与历史
 ```
 
-修改仓库前先阅读 `AGENT.md`。
+修改仓库前请先阅读 `AGENT.md`。

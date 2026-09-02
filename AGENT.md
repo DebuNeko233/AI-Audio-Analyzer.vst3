@@ -11,7 +11,7 @@ AI Audio Analyzer is a machine-readable audio measurement layer for AI/LLM-assis
 ```text
 AI Audio Analyzer
 ├─ VST3    measures audio inside the DAW
-├─ MCP     exposes structured measurements / comparisons / verification evidence
+├─ MCP     exposes structured measurement / comparison / verification / performance evidence
 └─ Skill   teaches correct MCP use and parameter semantics
 ```
 
@@ -19,25 +19,62 @@ Analyzer MCP is the measurement/perception/verification channel. DAW control is 
 
 https://github.com/rosasynthesiz/flstudio-mcp
 
-The Analyzer must remain measurement-oriented. Do not encode one artistic mixing, mastering, harmony, arrangement, or stereo style into MCP or Skill.
+The Analyzer must remain measurement-oriented. Do not encode one artistic mixing, mastering, harmony, arrangement, tuning, or stereo style into MCP or Skill.
 
 ## 2. Current architecture
 
 ### VST3
 
 - JUCE 8.0.8, C++20, CMake.
-- Current public/product version: **1.0.0**.
+- Current development/product version: **1.1.0**.
 - Visible product name: `AI Audio Analyzer`.
 - Internal target: `AIAnalyzer`.
 - Bundle ID: `com.debuneko.aianalyzer`.
 - Manufacturer/plugin IDs remain stable for DAW-project compatibility.
 - Default OSC endpoint: `127.0.0.1:9855`.
-- Audio callback only writes to a preallocated SPSC FIFO.
-- FFT, loudness, temporal, stereo, music-semantic analysis and OSC run off the realtime audio thread.
-- V1.0 verification orchestration is Bridge-side only; it does not add realtime DSP work.
+- Audio callback writes to a preallocated SPSC FIFO and does not run FFT, loudness, semantic analysis, OSC, MCP, file/network I/O, or verification orchestration.
+- Background worker owns analysis and OSC.
 - `libebur128` provides LUFS / True Peak measurement.
+- Historical host-visible `Identify` remains the first parameter.
+- Host-visible `Analysis Profile` is the second parameter.
 
-Do not casually change host/plugin identity fields.
+Do not casually change host/plugin identity fields or reorder historical host parameters.
+
+### Adaptive analysis profiles
+
+Host parameter:
+
+```text
+Parameter ID: analysis_profile
+Display name: Analysis Profile
+
+0 Eco
+1 Balanced
+2 Mix
+3 Full
+```
+
+Feature groups:
+
+```text
+Eco       Core
+Balanced  Core + Loudness + Spectrum + Stereo
+Mix       Balanced + Temporal
+Full      Mix + Semantic
+```
+
+`Full` is the default for backward compatibility. Saved states without an `analysisProfile` attribute restore as Full.
+
+Scheduling intent:
+
+```text
+Eco       no FFT / loudness work
+Balanced  reduced FFT scheduling around network-update scale
+Mix       hop-level FFT for temporal evidence
+Full      Mix + lower-rate semantic analysis
+```
+
+These are performance profiles, not sonic modes. They must never alter the audio signal.
 
 ### MCP
 
@@ -47,30 +84,30 @@ There is exactly **one supported source/PyInstaller entrypoint**:
 bridge/server.py
 ```
 
-Do not create `server_v10.py`, `server_v11.py`, or any other version-named startup file. Versions are metadata, not filenames.
+Do not create version-named startup files.
 
 Current internal layout:
 
 ```text
-bridge/server.py             startup, self-test, version metadata, tool registration
+bridge/server.py             startup / self-test / version metadata / tool registration
 bridge/analyzer_core.py      OSC/runtime state, identity/binding, base tools
-bridge/project_tools.py      V0.5 project overview / Snapshot A-B
-bridge/temporal_tools.py     V0.6 temporal parsing/tools
-bridge/masking_tools.py      V0.7 masking evidence
-bridge/stereo_tools.py       V0.8 Mid/Side and stereo evidence
-bridge/semantic_tools.py     V0.9 chroma / tonal-center / harmonic evidence
-bridge/verification_tools.py V1.0 controlled closed-loop verification sessions
+bridge/project_tools.py      project overview / Snapshot A-B
+bridge/temporal_tools.py     temporal parsing/tools
+bridge/masking_tools.py      masking evidence
+bridge/stereo_tools.py       Mid/Side and stereo evidence
+bridge/semantic_tools.py     chroma / tonal-center / harmonic evidence
+bridge/verification_tools.py controlled closed-loop verification sessions
+bridge/performance_tools.py  adaptive-profile / worker-performance telemetry
 bridge/ci_regression.py      repository-only synthetic MCP regression suite
 ```
 
-Current MCP tool count: **27**.
+Current metadata:
 
 ```text
-MCP_VERSION = "1.0"
-OSC_PROTOCOL_VERSION = "0.9"
+MCP_VERSION = "1.1"
+OSC_PROTOCOL_VERSION = "1.1"
+MCP tool count = 29
 ```
-
-V1.0 intentionally keeps OSC protocol at `0.9` because no new VST3 frame fields were added.
 
 ### Skill
 
@@ -86,361 +123,168 @@ README-CHERRY-STUDIO.md
 references/*.md
 ```
 
-Skill scope is limited to MCP calling strategy, selector/mapping rules, measurement validity, parameter semantics, temporal evidence, masking evidence, Mid/Side/stereo evidence, V0.9 audio-domain tonal evidence, V1.0 closed-loop verification semantics, and limitations.
+Skill scope is MCP calling strategy, selector/mapping rules, profile selection, measurement validity, parameter semantics, performance telemetry, temporal/masking/stereo/tonal evidence, closed-loop verification, and limitations.
 
 Do not add fixed genre EQ recipes, LUFS targets, mandatory sidechain rules, stereo recipes, mastering chains, key-change rules, harmony-edit rules, tuning recipes, or “metric X always means processor/action Y”.
 
-## 3. Implemented milestones
+## 3. Implemented evolution
 
-### 0.2 — loudness / True Peak / stereo bands
+The current product incorporates these milestones:
 
-Implemented LUFS-S, LUFS-I, current/session-max True Peak and 8-band L/R correlation.
+- loudness / True Peak / 8-band stereo correlation;
+- signal validity and one runtime UUID per live instance;
+- deterministic `Identify` mapping to FL Mixer Track/Slot;
+- project overview and Snapshot A/B;
+- temporal flux/RMS-rise/low-band evidence;
+- 16-region equal-ERB-rate masking evidence;
+- one stable MCP entrypoint;
+- beginner Release packaging with PyInstaller `-F` and no developer source;
+- deeper Mid/Side, Side-spectrum and negative-cross evidence;
+- 12-bin chroma, tonal-center profile ranking and single-F0 harmonic evidence;
+- controlled Before/After verification around external DAW writes/readback;
+- adaptive analysis profiles and worker/FIFO performance telemetry.
 
-### 0.3 — signal validity and runtime identity
-
-Implemented approximately:
-
-```text
-signal gate close   -50 dBFS
-signal gate reopen  -48 dBFS
-hold                0.4 s
-```
-
-Added `signal_present`, detector peak, silence duration, active-frame validity, and one runtime UUID per live instance. Invalid content-dependent measurements become unavailable instead of misleading zeroes.
-
-### 0.4 — deterministic FL Mixer mapping
-
-Added host-visible Boolean `Identify`. Every transition emits `/aianalyzer/identify`, including while transport is stopped. Runtime UUIDs can be bound to known FL Mixer Track/Slot locations and addressed with selectors such as:
+Protocol evolution remains append-only. Current tail after the existing semantic fields is:
 
 ```text
-mixer:7/slot:9
+128  analysis_profile
+129  analysis_feature_mask
+130  worker_load_ratio
+131  fifo_fill_ratio
+132  fft_runs_per_second
+133  semantic_runs_per_second
+134  schema marker = "1.1"
 ```
 
-Never guess Analyzer ↔ Mixer mapping from names or audio content when Identify mapping is available.
+Indexes `0..127` must not be silently repurposed.
 
-### 0.4.1 — packaging / installation foundation
+## 4. Why the adaptive-analysis milestone exists
 
-Added automatic installers, bilingual user instructions, PyInstaller standalone MCP, Release workflow, and macOS quarantine/signature handling.
+This milestone is driven by a real multi-instance performance need: a project may contain many Analyzer instances, and every instance does not need every evidence family continuously.
 
-Historical packages contained developer material. Current user Release policy is stricter: **no MCP source or developer fallback files are shipped**.
+This is a valid scoped post-1.0 milestone, not version-number momentum.
 
-### 0.5 — project intelligence / Snapshot A-B
+There is **no predefined next numbered roadmap**. Do not invent 1.2, 2.0, or another stage merely to advance numbering. Future milestones require an observed reliability gap, real workflow need, compatibility issue, validated measurement improvement, or Release/install problem.
 
-Implemented:
+## 5. Measurement and compatibility rules
 
-```text
-audio_project_status()
-audio_mix_overview()
-audio_capture_snapshot()
-audio_list_snapshots()
-audio_compare_snapshots()
-```
+### Preserve semantics
 
-### 0.6 — temporal interaction evidence
-
-Append-only OSC fields:
-
-```text
-59  temporal_window_seconds
-60  spectral_flux_mean
-61  spectral_flux_peak
-62  rms_rise_peak_db
-63  low_band_energy_db
-64  V0.6 schema marker = "0.6"
-```
-
-MCP adds:
-
-```text
-audio_temporal_profile()
-audio_temporal_compare()
-```
-
-Temporal results are evidence of time co-occurrence/co-variation, not masking probability or processing instructions.
-
-### 0.7 — stronger masking evidence
-
-V0.7 reuses the V0.6 OSC frame and adds Bridge/MCP evidence:
-
-```text
-32 Mid-spectrum features
-→ 16 equal ERB-rate regions
-→ relative spectral occupancy
-→ directional relative-level weighting
-→ V0.6 temporal overlap
-→ region-level masking evidence
-```
-
-Implemented:
-
-```text
-audio_masking_evidence()
-audio_project_masking_scan()
-```
-
-ERB is feature re-binning, not a gammatone/cochlear filterbank. Scores are transparent heuristic evidence, not probabilities of audible masking.
-
-### 0.7 — MCP entrypoint consolidation
-
-Removed historical `server_v05.py`, `server_v06.py`, and `server_v07.py`. `bridge/server.py` is permanently the single startup entrypoint.
-
-### 0.7 — beginner Release cleanup
-
-Current user Release policy:
-
-```text
-single final ZIP per platform
-no ZIP-inside-ZIP
-PyInstaller -F / --onefile MCP executable
-no MCP Python source in user package
-no requirements.txt / developer examples / venv / _internal
-click-oriented installers and guides
-```
-
-The Release is designed for people with **zero programming experience**.
-
-### 0.8 — deeper Mid/Side and stereo measurement
-
-V0.8 keeps OSC append-only and appends fields `65..111`.
-
-Measurements:
-
-```text
-mid_rms_db
-side_rms_db
-side_to_mid_db
-negative_cross_energy_ratio
-low_band_20_120_correlation
-low_band_20_120_side_to_mid_db
-32 Side-spectrum bands
-8 Side/Mid frequency-band ratios
-```
-
-Historical `bands_db` remains the 32-band **Mid spectrum**.
-
-MCP tools:
-
-```text
-audio_stereo_profile()
-audio_stereo_compare()
-```
-
-Keep signed L/R correlation, Side/Mid energy, decorrelation proxy, negative-cross evidence, and frequency-dependent stereo relation independent. No universal stereo target/action is encoded.
-
-### 0.9 — audio-domain music-semantic measurement
-
-V0.9 keeps OSC append-only: existing indexes `0..111` remain unchanged and fields `112..127` are appended.
-
-VST3 fields:
-
-```text
-112..123  chroma[12] = C..B
-124       chroma_energy_ratio
-125       single_f0_harmonic_energy_ratio
-126       harmonic_f0_candidate_hz
-127       V0.9 schema marker = "0.9"
-```
-
-Implementation characteristics:
-
-```text
-Chroma source        Mid spectrum
-Semantic band        approximately 80 Hz–5 kHz
-Pitch-class model    nearest 12-TET pitch class; octave-collapsed
-F0 search            approximately 55–1000 Hz
-Harmonics            up to 8 integer harmonics with narrow FFT-bin tolerance
-```
-
-The final harmonic matched-energy numerator and semantic-energy denominator use the same approximately `80 Hz–5 kHz` band.
-
-MCP adds:
-
-```text
-audio_tonal_profile()
-audio_tonal_compare()
-```
-
-Tonal-center candidates use 24 major/minor Krumhansl-Kessler profile Pearson correlations. Chroma, candidate ranking, top-2 margin, entropy, harmonic ratio and F0 candidate remain evidence, not exact symbolic truth/probabilities.
-
-When exact notes, chords, key, or tuning metadata are available through DAW/MIDI/project tooling, prefer that exact source for exact symbolic claims.
-
-### 1.0 — reliable closed-loop verification
-
-V1.0 consolidates the measurement system around a controlled experiment lifecycle without turning Analyzer MCP into a DAW controller.
-
-New tools:
-
-```text
-audio_begin_verification(label, seconds=5, target_selectors=None)
-audio_complete_verification(verification_id, seconds=0, change_summary="", host_readback="")
-audio_verification_status(verification_id="")
-```
-
-Canonical workflow:
-
-```text
-project discovery
-→ deterministic Analyzer mapping
-→ Before baseline
-→ external reasoning / user intent
-→ actual DAW change through external control MCP
-→ actual host readback through external control MCP
-→ After measurement
-→ transparent comparability checks
-→ After-minus-Before measurement deltas
-→ specialized Analyzer evidence only when needed
-```
-
-V1.0 records/guards:
-
-```text
-verification_id
-Before/After capture timestamps and window duration
-target selectors
-live Analyzer topology fingerprints
-requested target presence and analysis validity
-Before/After active-ratio comparability
-external change summary
-caller-supplied host readback
-basic measurement deltas
-```
-
-Current active-ratio comparability tolerance:
-
-```text
-0.15 absolute difference
-```
-
-`controlled_comparison=true` only when the current technical guardrails pass: at least one compared target, same window duration, unchanged Analyzer topology/identity set, no missing requested targets, valid active analysis in both windows, and active-ratio difference within tolerance.
-
-This Boolean is **not** an artistic quality score. It does not mean After is better, correct, preferred, or should be kept.
-
-`host_readback` is caller-supplied evidence from the external control MCP. Analyzer stores it for auditability but does not independently query/verify FL Studio control state.
-
-Verification sessions are Bridge-session memory only and disappear when the MCP process exits. Re-completing an already completed verification returns the stored completed result rather than silently replacing the After state.
-
-### 1.0 — regression-suite consolidation
-
-The large MCP synthetic regression was extracted from workflow YAML into:
-
-```text
-bridge/ci_regression.py
-```
-
-It preserves V0.4–V0.9 regressions and adds V1.0 positive/negative verification tests, including topology drift and active-coverage mismatch.
-
-This file is development/test code and must not be shipped in beginner Releases.
-
-### 0.9 Release-pipeline validation note
-
-The complete 0.9 beginner Release pipeline was successfully exercised on both supported platforms, including PyInstaller `-F`, native packaged-runtime self-tests, VST3 builds, source/_internal/nested-ZIP rejection, single final compression, checksums and asset upload.
-
-That run was intentionally/accidentally created with `draft=true`, so the resulting `v0.9.0` is a Draft Release and does not become public/Latest merely because packaging succeeded.
-
-V1.0 fixes update semantics so rerunning an existing tag with Draft OFF explicitly synchronizes draft/prerelease state rather than only replacing assets/notes.
-
-## 4. Current roadmap/status
-
-**1.0 is the current scoped product milestone. There is no predefined post-1.0 numbered roadmap.**
-
-Do not invent `1.1`, `1.2`, `2.0`, or another stage merely to advance numbering. Add a future milestone only when there is a real scoped need with a defensible implementation plan.
-
-Post-1.0 work should normally be driven by observed reliability gaps, real user workflows, compatibility issues, validated measurement improvements, or Release/installation problems rather than version-number momentum.
-
-## 5. MCP / measurement rules
-
-### Preserve semantics and compatibility
-
-Do not silently change metric meaning. If semantics must change, document the reason, update tests/docs/Skill, preserve compatibility when practical, and explicitly call out breaks.
-
-OSC evolution should remain append-only when practical. Existing indexes must not be silently repurposed.
-
-### One entrypoint only
-
-`bridge/server.py` is the only source/PyInstaller entrypoint.
+Do not silently change metric meaning. If semantics must change, update implementation, regression tests, Skill, README, Release docs, and AGENT together.
 
 ### `null` is not zero
 
 Unavailable measurements remain unavailable.
 
-### Prefer stable windows
+### Feature mask is authoritative
 
-Use window/project tools for observations requiring temporal stability. `audio_snapshot()` is current-state data, not a stable-window substitute.
+The append-only OSC frame retains older field positions even when a profile disables their computation. Bridge-side adaptive parsing must invalidate disabled families so old tools cannot consume compatibility placeholders as real evidence.
 
-### Evidence quality must be visible
+Expected behavior includes:
 
-Expose enough context to judge reliability: window length, active coverage, valid frame count, aligned pair count when applicable, frequency/ERB/stereo/pitch-class region, alignment tolerance/offset, usable temporal pairs, chroma coverage, tonal candidate separation, and V1.0 verification comparability fields.
-
-### Heuristics must be labeled
-
-Spectral overlap, onset/change candidates, temporal overlap, ERB-rebinned evidence, negative-cross evidence, decorrelation proxies, tonal-center rankings, single-F0 harmonic alignment, candidate rankings, and verification guardrails are measurement/heuristic/technical evidence unless replaced by a validated stronger model.
-
-### Prefer exact symbolic project data for exact symbolic facts
-
-If MIDI/DAW/project tooling exposes exact notes, chords, key metadata, tuning, or other symbolic state, use that source for exact symbolic claims. Analyzer audio inference may complement it but must not silently override exact project data.
+```text
+Loudness off  → LUFS / True Peak unavailable
+Spectrum off  → spectrum validity false / spectral arrays unavailable
+Stereo off    → stereo validity false / deep stereo fields unavailable
+Temporal off  → temporal validity false / temporal descriptors unavailable
+Semantic off  → semantic validity false / chroma/harmonic fields unavailable
+```
 
 ### Keep independent concepts independent
 
 Do not collapse correlation, Side/Mid energy, decorrelation proxy and negative-cross evidence into one opaque stereo score.
 
-Do not collapse chroma coverage, entropy, tonal profile correlation, top-2 margin, harmonic ratio and candidate F0 into one opaque music-confidence/correctness score.
+Do not collapse chroma coverage, entropy, tonal profile correlation, top-2 margin, harmonic ratio and F0 candidate into one opaque music-confidence score.
 
-Do not collapse topology consistency, active coverage, target validity and host readback into one opaque “change quality” score.
+Do not collapse topology consistency, active coverage, target validity and host readback into a “change quality” score.
 
-### A/B is measurement-oriented
+Do not collapse worker load, FIFO fill and FFT rate into one opaque “performance quality” score.
 
-Snapshot/stereo/tonal/verification comparisons return measurements and deltas, not subjective claims such as “better”, “warmer”, “wider”, “more musical”, “in key”, “professional”, or “correct”.
+### Heuristics must be labeled
 
-## 6. V1.0 closed-loop rules
+Spectral overlap, onset/change candidates, temporal overlap, ERB-rebinned evidence, negative-cross evidence, decorrelation proxies, tonal-center rankings, single-F0 harmonic alignment, and verification guardrails are evidence/heuristics unless replaced by a validated stronger model.
 
-### Analyzer does not control the DAW
+### Prefer exact project data for exact symbolic facts
 
-Analyzer MCP owns:
+If DAW/MIDI/project tooling exposes exact notes, chords, key metadata, tuning, or other symbolic state, use it for exact claims. Audio inference may complement it but must not silently override exact project data.
 
-```text
-measurement
-identity/binding evidence
-Before/After capture
-comparability checks
-measurement deltas
-audit context
-```
+## 6. Performance and realtime rules
 
-External FL Studio control MCP owns:
+Any change to profiles, scheduling, FIFO behavior, or telemetry must review all of the following before merge:
 
 ```text
-project/host inspection
-actual parameter/control writes
-actual host state readback
+1. realtime callback work
+2. host parameter compatibility / state restoration
+3. actual feature computation skipped, not merely hidden
+4. Bridge validity/null behavior for disabled families
+5. profile-transition state reset semantics
+6. FIFO backlog / measurement staleness behavior
+7. Windows x64 + macOS arm64 compilation
+8. MCP synthetic regressions
+9. Skill / README / Release documentation impact
 ```
 
-Never invent FL Studio MCP tool names. Inspect the actual exposed tools/parameters.
+### Realtime profile handoff is atomic-only
 
-### Begin before write
+The audio callback may cheaply read the host parameter and update atomic profile state when the value changes. It must not call `Thread::notify()`, take a lock, allocate, perform network I/O, run FFT, or execute heavyweight control work for profile changes.
 
-If measured Before/After verification is required, call `audio_begin_verification()` before the external DAW change. Do not perform the change first and then label a later capture as the Before baseline.
+The worker observes the requested profile asynchronously on its own loop. Non-realtime control/state-restoration paths may use the normal worker setter when an immediate wake-up is useful.
 
-### Host readback must be actual readback
+### Profile transitions must not bridge unmeasured gaps
 
-After an external write, use the control MCP to read the real host state. The `host_readback` string should represent that returned state, not the intended setting or an assumption that the write succeeded.
+When a disabled family is re-enabled:
 
-Analyzer does not independently validate caller-supplied readback text.
+- Loudness state is rebuilt so LUFS-I/True Peak history does not pretend the disabled interval was measured;
+- Temporal previous-spectrum/RMS and aggregate state are cleared so flux/rise does not compare frames across a disabled gap;
+- Semantic cache is cleared before new semantic evidence is considered current.
 
-### `controlled_comparison` semantics are strict
+If new stateful analysis families are added later, define equivalent transition semantics explicitly.
 
-Treat it as a technical comparability gate only.
+### Telemetry semantics
 
-If false, report the specific comparability failure before making a strong A/B interpretation.
+`worker_load_ratio` is the Analyzer background-worker busy ratio. It is **not** DAW realtime CPU, system CPU, whole-plugin CPU, or dropout probability.
 
-If topology changed intentionally, the result can still be useful evidence, but it is intentionally not labelled a controlled comparison.
+`fifo_fill_ratio` is queued Analyzer input capacity. Sustained growth is a measurement-lag warning because the worker may be falling behind the DAW.
 
-### Verification sessions are in-memory
+`fft_runs_per_second` and `semantic_runs_per_second` are observed scheduler rates, not guaranteed constants.
 
-Do not imply verification persistence across MCP restarts. `verification_id` is not a permanent project identifier.
+### Control boundary
 
-## 7. Release and platform rules
+Analyzer MCP reads/verifies `Analysis Profile`; it does not write the DAW parameter.
 
-### Supported user platforms
+Canonical profile-change flow:
+
+```text
+audio_analysis_status()
+→ inspect actual DAW parameter through FL Studio control MCP
+→ write Analysis Profile through the real control MCP
+→ read actual host state back
+→ audio_analysis_status() again
+→ collect required evidence
+→ restore previous profile when appropriate
+```
+
+Never invent FL Studio MCP tool names.
+
+## 7. Closed-loop verification rules
+
+Analyzer MCP owns measurement, identity/binding evidence, Before/After capture, comparability checks, deltas and audit context.
+
+External FL Studio control MCP owns project/host inspection, actual writes and actual host-state readback.
+
+`audio_begin_verification()` must occur before an externally controlled change when a measured Before/After experiment is requested.
+
+`host_readback` must represent actual returned host state, not the intended value.
+
+`controlled_comparison=true` is a technical comparability gate only. It does not mean After is better, correct, preferred, professional, or should be kept.
+
+`closed_loop_complete=true` additionally requires caller-supplied host readback. It still does not imply artistic success.
+
+Verification sessions are in-memory and not permanent project identifiers.
+
+## 8. Release and platform rules
+
+Supported user platforms:
 
 ```text
 Windows x64
@@ -449,232 +293,114 @@ macOS Apple Silicon arm64 only
 
 Do not re-add Intel/x86_64 macOS unless explicitly requested.
 
-### Release audience — mandatory
-
-The GitHub Release is for ordinary end users, including people who have never programmed.
+The GitHub Release is for ordinary users, including people who have never programmed.
 
 Normal flow:
 
 ```text
-download ZIP
+download one ZIP
 → extract once
 → double-click installer
 → restart FL Studio
-→ use generated Cherry Studio config / Skill
+→ use generated configuration / Skill
 ```
 
-Do not require users to install or understand Python, pip, venv, PyPI, source code, CMake, compilers, package managers, or shell commands.
+User packages must contain only the product/plugin runtime, standalone MCP runtime, Skill and beginner-facing install material.
 
-User-facing docs should explain **what to click**, not how the software is built.
-
-### User package contents
-
-Windows:
+Mandatory invariants:
 
 ```text
-AI Audio Analyzer.vst3
-mcp/ai-audio-analyzer-mcp.exe
-skill/
-Install.cmd
-Install.ps1
-START-HERE.md
-INSTALL.en.md
-INSTALL.zh-CN.md
-VERSION.txt
+one final ZIP per platform
+no ZIP-inside-ZIP
+PyInstaller -F / --onefile MCP executable
+no MCP Python source
+no requirements.txt
+no developer examples/config
+no venv
+no _internal
 ```
 
-macOS:
+Windows package includes `Install.cmd` / `Install.ps1`. macOS package includes `Install.command` / `install.sh`.
+
+Do not require end users to understand Python, pip, venv, PyPI, CMake, compilers, package managers, source code, or shell commands.
+
+Current macOS package is arm64 and ad-hoc signed, not Apple-notarized.
+
+## 9. CI and regression rules
+
+Do not claim a plugin change is complete until the relevant **latest PR head** has passed:
 
 ```text
-AI Audio Analyzer.vst3
-mcp/ai-audio-analyzer-mcp
-skill/
-Install.command
-install.sh
-START-HERE.md
-INSTALL.en.md
-INSTALL.zh-CN.md
-VERSION.txt
-```
-
-Forbidden in user Releases:
-
-```text
-mcp/source/
-*.py
-requirements.txt
-cherry-studio.example.json
-venv/
-_internal/
-nested *.zip
+MCP source/self-test
+exact expected tool registry
 bridge/ci_regression.py
+release installer validation
+Windows x64 VST3 build
+macOS arm64 VST3 build
 ```
 
-Repository source/test files remain in the repository only.
+Do not substitute an older green run after the head has moved.
 
-### PyInstaller policy
+### Development workflow scope
 
-Release MCP uses:
+`.github/workflows/build.yml` is intentionally path-scoped. Changes unrelated to plugin source/build files, Bridge, Analyzer Skill, Release installer material, or the build/release workflows should not start the development workflow.
 
-```text
--F / --onefile
-```
+For `pull_request` `synchronize` events, component detection compares the previous PR head (`github.event.before`) with the new head instead of repeatedly comparing the PR base with the full current head. This is deliberate: a plugin change earlier in a PR must not force Windows/macOS VST3 rebuilds after a later docs-only, Skill-only, or Bridge-only commit.
 
-The native packaged runtime must pass self-test before package assembly. If `_internal/` appears in staging/final user content, treat the package as invalid.
+A build-workflow change itself is treated as requiring all validation families, including both plugin builds, so CI infrastructure changes are tested by the workflow they modify.
 
-### Single-compression policy
+### CMake / JUCE build cache
 
-**Final user archives are compressed exactly once.**
+The VST3 jobs use `actions/cache` with separate OS/architecture keys to restore the CMake `build/` tree, including FetchContent JUCE/libebur128 state and reusable JUCE module objects.
 
-Required flow:
+Cache keys are tied to `CMakeLists.txt` and `.github/workflows/build.yml`, with platform-specific restore prefixes. Project `Source/` changes should normally reuse compatible JUCE compilation state rather than invalidating the whole dependency cache.
 
-```text
-stage Windows directory
-stage macOS directory
-→ upload unpacked directory artifacts
-→ publish downloads directories
-→ publish creates final Windows/macOS ZIPs once
-```
+The cache is only an acceleration mechanism. Every VST3 job still runs CMake configure and build, and a cache hit is never evidence that the latest source compiled successfully.
 
-Final Release ZIPs must be checked for nested `.zip` files before publication.
+The development workflow uses concurrency cancellation so a newer commit on the same PR/ref cancels an obsolete in-progress build run.
 
-### Draft / prerelease state must be explicit
+`bridge/ci_regression.py` must remain development-only and must not ship in beginner Releases.
 
-`draft=true` means the Release is intentionally not public and will not become Latest.
+Adaptive-analysis regressions must include at least:
 
-When updating an existing tag, workflow logic must synchronize draft/prerelease state as well as assets/notes. Do not assume replacing assets publishes an existing Draft.
+- Full-profile legacy evidence remains valid;
+- Eco/disabled families become unavailable, not misleading zeroes;
+- parser indices and feature mask are correct;
+- new MCP performance tools register correctly;
+- earlier mapping/project/temporal/masking/stereo/tonal/verification regressions remain intact.
 
-### Development CI
+## 10. Documentation impact review — mandatory
 
-Keep path-aware incremental behavior:
-
-```text
-Source/** / CMake/plugin files
-→ rebuild Windows x64 + macOS arm64 VST3
-
-bridge/**
-→ validate/package MCP + Skill
-→ no VST3 rebuild unless plugin/version files also changed
-
-skills/**
-→ validate/package MCP + Skill
-→ no VST3 rebuild
-
-release/** / release workflow
-→ validate installer/release logic
-
-README/docs only
-→ no VST3 rebuild
-```
-
-### macOS
-
-Current builds are ad-hoc signed, not Apple Developer ID notarized. Never claim notarization until the workflow performs and verifies it.
-
-## 8. Documentation synchronization — mandatory
-
-**Every repository change must include a documentation-impact review before it is complete**, even when the result is “no documentation change required”.
-
-At minimum inspect as relevant:
+For every code or workflow change, inspect whether these need updates:
 
 ```text
 README.md
 README.zh-CN.md
 AGENT.md
+skills/ai-analyzer-flstudio/SKILL.md
+skills/ai-analyzer-flstudio/README-CHERRY-STUDIO.md
+skills/ai-analyzer-flstudio/references/*.md
 release/README.md
 release/common/START-HERE.md
 release/common/INSTALL.en.md
 release/common/INSTALL.zh-CN.md
-release/windows/Install.ps1
-release/macos/install.sh
-skills/ai-analyzer-flstudio/README-CHERRY-STUDIO.md
-skills/ai-analyzer-flstudio/SKILL.md
-skills/ai-analyzer-flstudio/references/analyzer-mcp.md
-skills/ai-analyzer-flstudio/references/parameters.md
-skills/ai-analyzer-flstudio/references/masking-evidence.md
-skills/ai-analyzer-flstudio/references/stereo-evidence.md
-skills/ai-analyzer-flstudio/references/tonal-evidence.md
-skills/ai-analyzer-flstudio/references/verification-evidence.md
-bridge/cherry-studio.example.json
-bridge/requirements.txt
-bridge/ci_regression.py
 .github/workflows/build.yml
 .github/workflows/release.yml
+bridge/cherry-studio.example.json
+release installers
 ```
 
-For every change ask:
+“No behavior change required” after inspection is acceptable; skipping the review is not.
 
-```text
-Did public version change?
-Did MCP entrypoint/tool count/arguments/defaults/output change?
-Did OSC schema/indexes or metric semantics change?
-Did signal/temporal/masking/stereo/semantic validity change?
-Did tonal/chroma/harmonic evidence semantics change?
-Did verification lifecycle/comparability/readback semantics change?
-Did exact-symbolic-data preference or evidence limitations change?
-Did Identify/binding/selectors change?
-Did supported OS/architecture change?
-Did Release contents/layout change?
-Did PyInstaller behavior change?
-Did Draft/prerelease publication behavior change?
-Did installer behavior change?
-Did Gatekeeper/signing behavior change?
-Did Cherry Studio config change?
-Did Skill calling strategy/scope/language change?
-Did CI trigger/build/regression behavior change?
-Did current product status/history change?
-```
+README feature headings should describe the capability, not lead with historical version labels. Protocol/schema version numbers remain where they are semantically necessary.
 
-If yes, update every affected document in the same change whenever practical.
+## 11. Repository discipline
 
-`README.md` / `README.zh-CN.md` and `INSTALL.en.md` / `INSTALL.zh-CN.md` must describe the same current facts.
-
-When a planned milestone is implemented, move it into implemented history. Do not invent a new roadmap number without a real requirement.
-
-## 9. Agent change procedure
-
-```text
-1. Read AGENT.md.
-2. Inspect actual current files.
-3. Identify affected VST3 / MCP / Skill / CI / Release / docs layers.
-4. Make the smallest coherent implementation.
-5. Add/update regression tests when behavior changes.
-6. Perform mandatory documentation-impact review.
-7. Update affected English/Chinese docs and Skill references.
-8. Verify intended CI path: build vs skip.
-9. Inspect actual CI/runtime evidence before claiming success.
-10. Update AGENT.md for meaningful architecture/history/status changes.
-```
-
-Distinguish these states:
-
-```text
-source syntax/self-test
-MCP regression
-VST3 build
-PyInstaller build
-packaged-runtime self-test
-package staging
-final ZIP creation
-Release creation/update
-Draft/prerelease/publication state
-```
-
-One succeeding does not prove the others succeeded.
-
-## 10. Guardrails
-
-- Do not rename Bundle ID / plugin IDs casually.
-- Keep `bridge/server.py` as the only MCP entrypoint.
-- Do not reintroduce `server_vXX.py` startup files.
-- Keep Release MCP in PyInstaller one-file mode unless explicitly changing policy.
-- Do not ship MCP source/test code in user Releases.
-- Do not create nested Release ZIPs.
-- Keep user Releases understandable without programming knowledge.
-- Do not re-add macOS Intel/x86_64 packages unless explicitly requested.
-- Do not guess FL Studio MCP tool names; inspect actual exposed tools.
-- Do not guess Analyzer ↔ Mixer mapping when Identify is available.
-- Do not claim external DAW write success without actual host readback when readback is available/required.
-- Do not call `controlled_comparison=true` an artistic success signal.
-- Do not silently treat topology drift or active-coverage mismatch as a controlled A/B.
-- Do not invent a post-1.0 version roadmap merely for numbering.
+- Keep `bridge/server.py` as the only startup/PyInstaller entrypoint.
+- Preserve host/plugin identity fields.
+- Keep user-facing platform policy Windows x64 + macOS arm64 only.
+- Keep LLM-facing Skill content English-only.
+- Keep Release beginner-first and source-free.
+- Keep evidence transparent and measurement-oriented.
+- Do not claim CI, packaged-runtime, Release, or installer success without actual evidence.
+- Do not merge a PR while required latest-head CI is failing or still pending.

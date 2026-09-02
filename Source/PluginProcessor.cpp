@@ -35,11 +35,25 @@ AIAnalyzerAudioProcessor::AIAnalyzerAudioProcessor()
                          .withInput("Input", juce::AudioChannelSet::stereo(), true)
                          .withOutput("Output", juce::AudioChannelSet::stereo(), true))
 {
+    // Keep Identify first: it was historically the only host-visible parameter.
+    // Stable IDs remain authoritative, but preserving its index reduces risk in
+    // hosts that also retain parameter order/index information.
     addParameter(new IdentifyParameter([this]
     {
         analysisWorker.requestIdentify();
     }));
 
+    analysisProfileParameter = new juce::AudioParameterChoice(
+        juce::ParameterID { "analysis_profile", 1 },
+        "Analysis Profile",
+        juce::StringArray { "Eco", "Balanced", "Mix", "Full" },
+        static_cast<int>(aianalyzer::AnalysisProfile::Full));
+    addParameter(analysisProfileParameter);
+
+    lastWorkerProfileIndex.store(
+        static_cast<int>(aianalyzer::AnalysisProfile::Full),
+        std::memory_order_relaxed);
+    analysisWorker.setAnalysisProfile(aianalyzer::AnalysisProfile::Full);
     analysisWorker.setOscConfig(instanceId, oscHost, oscPort);
 }
 
@@ -50,6 +64,10 @@ AIAnalyzerAudioProcessor::~AIAnalyzerAudioProcessor()
 
 void AIAnalyzerAudioProcessor::prepareToPlay(double sampleRate, int)
 {
+    const auto currentProfileIndex = getAnalysisProfileIndex();
+    lastWorkerProfileIndex.store(currentProfileIndex, std::memory_order_relaxed);
+    analysisWorker.setAnalysisProfile(
+        static_cast<aianalyzer::AnalysisProfile>(currentProfileIndex));
     analysisWorker.prepare(sampleRate);
 
     juce::String currentInstance;
@@ -85,6 +103,18 @@ void AIAnalyzerAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer,
     if (numInputChannels <= 0 || buffer.getNumSamples() <= 0)
         return;
 
+    // Profile reads are cheap; hand the change to the worker only when the host
+    // parameter actually changes. The realtime-safe setter is atomic-only and
+    // never signals a condition variable from the audio callback.
+    const auto currentProfileIndex = getAnalysisProfileIndex();
+    if (currentProfileIndex
+        != lastWorkerProfileIndex.load(std::memory_order_relaxed))
+    {
+        lastWorkerProfileIndex.store(currentProfileIndex, std::memory_order_relaxed);
+        analysisWorker.setAnalysisProfileRealtimeSafe(
+            static_cast<aianalyzer::AnalysisProfile>(currentProfileIndex));
+    }
+
     const auto* left = buffer.getReadPointer(0);
     const auto* right = numInputChannels > 1 ? buffer.getReadPointer(1) : nullptr;
     analysisWorker.pushAudio(left, right, buffer.getNumSamples());
@@ -106,6 +136,7 @@ void AIAnalyzerAudioProcessor::getStateInformation(juce::MemoryBlock& destData)
     xml.setAttribute("instanceId", currentInstance);
     xml.setAttribute("oscHost", currentHost);
     xml.setAttribute("oscPort", currentPort);
+    xml.setAttribute("analysisProfile", getAnalysisProfileIndex());
     copyXmlToBinary(xml, destData);
 }
 
@@ -118,6 +149,12 @@ void AIAnalyzerAudioProcessor::setStateInformation(const void* data, int sizeInB
     setAnalyzerConfig(xml->getStringAttribute("instanceId", "Track"),
                       xml->getStringAttribute("oscHost", "127.0.0.1"),
                       xml->getIntAttribute("oscPort", 9855));
+
+    // Older project state does not contain this attribute. Full preserves the
+    // exact pre-adaptive-analysis behavior in that case.
+    setAnalysisProfileIndex(
+        xml->getIntAttribute("analysisProfile", static_cast<int>(aianalyzer::AnalysisProfile::Full)),
+        false);
 }
 
 void AIAnalyzerAudioProcessor::setAnalyzerConfig(const juce::String& newInstanceId,
@@ -152,6 +189,39 @@ void AIAnalyzerAudioProcessor::getAnalyzerConfig(juce::String& outInstanceId,
     outInstanceId = instanceId;
     outHost = oscHost;
     outPort = oscPort;
+}
+
+int AIAnalyzerAudioProcessor::getAnalysisProfileIndex() const noexcept
+{
+    if (analysisProfileParameter == nullptr)
+        return static_cast<int>(aianalyzer::AnalysisProfile::Full);
+    return juce::jlimit(0, 3, analysisProfileParameter->getIndex());
+}
+
+void AIAnalyzerAudioProcessor::setAnalysisProfileIndex(int profileIndex, bool notifyHost)
+{
+    profileIndex = juce::jlimit(0, 3, profileIndex);
+    if (analysisProfileParameter != nullptr)
+    {
+        const auto normalized = analysisProfileParameter->convertTo0to1(
+            static_cast<float>(profileIndex));
+        if (notifyHost)
+        {
+            analysisProfileParameter->setValueNotifyingHost(normalized);
+        }
+        else
+        {
+            // AudioParameterChoice narrows setValue() to private in JUCE 8.
+            // Call through the public AudioProcessorParameter interface so state
+            // restoration updates the parameter without emitting a host change.
+            static_cast<juce::AudioProcessorParameter*>(analysisProfileParameter)
+                ->setValue(normalized);
+        }
+    }
+
+    lastWorkerProfileIndex.store(profileIndex, std::memory_order_relaxed);
+    analysisWorker.setAnalysisProfile(
+        static_cast<aianalyzer::AnalysisProfile>(profileIndex));
 }
 
 bool AIAnalyzerAudioProcessor::getLatestAnalysis(aianalyzer::AnalysisFrame& frame) const
