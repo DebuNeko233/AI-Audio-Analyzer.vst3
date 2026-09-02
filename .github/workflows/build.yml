@@ -30,7 +30,6 @@ jobs:
             BASE="${{ github.event.before }}"
           fi
 
-          # The first push in a history may not have a usable 'before' SHA.
           if [ -z "$BASE" ] || [ "$BASE" = "0000000000000000000000000000000000000000" ] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
             BASE="$(git rev-parse HEAD^ 2>/dev/null || true)"
           fi
@@ -110,7 +109,7 @@ jobs:
           }
           missing = expected - names
           assert not missing, f"Missing MCP tools: {sorted(missing)}"
-          print(f"AI Analyzer MCP v{mcp_version}: {len(names)} tools registered")
+          print(f"AI Audio Analyzer MCP v{mcp_version}: {len(names)} tools registered")
           PY
 
       - name: Package bridge
@@ -130,7 +129,7 @@ jobs:
       - name: Upload bridge artifact
         uses: actions/upload-artifact@v4
         with:
-          name: AI-Analyzer-Bridge
+          name: AI-Audio-Analyzer-Bridge
           path: dist/bridge.zip
           if-no-files-found: error
 
@@ -166,13 +165,13 @@ jobs:
           rm -rf dist
           mkdir -p dist
 
-          VST3_PATH="$(find build/AIAnalyzer_artefacts -type d -name 'AI Analyzer.vst3' -print -quit)"
+          VST3_PATH="$(find build/AIAnalyzer_artefacts -type d -name 'AI Audio Analyzer.vst3' -print -quit)"
           if [ -z "$VST3_PATH" ]; then
-            echo "AI Analyzer.vst3 bundle not found" >&2
+            echo "AI Audio Analyzer.vst3 bundle not found" >&2
             exit 1
           fi
 
-          BINARY="$VST3_PATH/Contents/MacOS/AI Analyzer"
+          BINARY="$VST3_PATH/Contents/MacOS/AI Audio Analyzer"
 
           echo "Architectures: $(lipo -archs "$BINARY")"
           echo "Mach-O deployment info:"
@@ -188,9 +187,8 @@ jobs:
 
           ditto -c -k --sequesterRsrc --keepParent \
             "$VST3_PATH" \
-            "dist/AI-Analyzer-macOS.vst3.zip"
+            "dist/AI-Audio-Analyzer-macOS.vst3.zip"
 
-          # Plugin artifacts also carry the current bridge for a complete download.
           (
             cd bridge
             zip -9 -r ../dist/bridge.zip \
@@ -210,12 +208,12 @@ jobs:
           if (Test-Path dist) { Remove-Item dist -Recurse -Force }
           New-Item -ItemType Directory -Path dist | Out-Null
 
-          $vst3 = Get-ChildItem -Path build/AIAnalyzer_artefacts -Recurse -Directory -Filter 'AI Analyzer.vst3' | Select-Object -First 1
+          $vst3 = Get-ChildItem -Path build/AIAnalyzer_artefacts -Recurse -Directory -Filter 'AI Audio Analyzer.vst3' | Select-Object -First 1
           if (-not $vst3) {
-            throw 'AI Analyzer.vst3 bundle not found'
+            throw 'AI Audio Analyzer.vst3 bundle not found'
           }
 
-          Compress-Archive -Path $vst3.FullName -DestinationPath 'dist/AI-Analyzer-Windows.vst3.zip' -CompressionLevel Optimal
+          Compress-Archive -Path $vst3.FullName -DestinationPath 'dist/AI-Audio-Analyzer-Windows.vst3.zip' -CompressionLevel Optimal
 
           $bridgeFiles = @(
             'bridge/server.py',
@@ -230,7 +228,7 @@ jobs:
       - name: Upload install package
         uses: actions/upload-artifact@v4
         with:
-          name: AI-Analyzer-${{ runner.os }}
+          name: AI-Audio-Analyzer-${{ runner.os }}
           path: dist/
           if-no-files-found: error
           include-hidden-files: true
