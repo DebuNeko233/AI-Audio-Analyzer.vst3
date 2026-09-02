@@ -47,7 +47,8 @@ jobs:
             bridge/analyzer_core.py \
             bridge/project_tools.py \
             bridge/temporal_tools.py \
-            bridge/masking_tools.py
+            bridge/masking_tools.py \
+            bridge/stereo_tools.py
 
   mcp-runtime:
     name: MCP runtime (${{ matrix.label }})
@@ -71,6 +72,11 @@ jobs:
           cache: pip
           cache-dependency-path: bridge/requirements.txt
 
+      - name: Verify macOS runtime architecture
+        if: runner.os == 'macOS'
+        shell: bash
+        run: test "$(uname -m)" = "arm64"
+
       - name: Install MCP build dependencies
         shell: bash
         run: |
@@ -78,10 +84,9 @@ jobs:
           python -m pip install -r bridge/requirements.txt
           python -m pip install 'pyinstaller>=6.10,<7'
 
-      - name: Validate source MCP 0.7
+      - name: Validate source MCP 0.8
         shell: bash
-        run: |
-          AI_ANALYZER_SELF_TEST=1 python bridge/server.py
+        run: AI_ANALYZER_SELF_TEST=1 python bridge/server.py
 
       - name: Build standalone MCP runtime
         shell: bash
@@ -179,8 +184,8 @@ jobs:
           @"
           AI Audio Analyzer $version
           Platform: Windows x64
-          MCP: 0.7 standalone executable
-          OSC protocol: 0.6-compatible
+          MCP: 0.8 standalone one-file executable
+          OSC protocol: 0.8 append-only
           Release commit: $env:GITHUB_SHA
           "@ | Set-Content 'package/VERSION.txt' -Encoding UTF8
 
@@ -214,6 +219,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          test "$(uname -m)" = "arm64"
           cmake -S . -B build \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 \
@@ -256,8 +262,8 @@ jobs:
           cat > package/VERSION.txt <<EOF
           AI Audio Analyzer ${VERSION}
           Platform: macOS Apple Silicon arm64
-          MCP: 0.7 standalone executable
-          OSC protocol: 0.6-compatible
+          MCP: 0.8 standalone one-file executable
+          OSC protocol: 0.8 append-only
           Release commit: ${GITHUB_SHA}
           EOF
 
@@ -367,7 +373,9 @@ jobs:
           - Windows: download AI-Audio-Analyzer-*-Windows.zip, unzip it, then double-click Install.cmd.
           - macOS Apple Silicon: download AI-Audio-Analyzer-*-macOS.zip, unzip it, then double-click Install.command.
           - No Python, source code, package manager, or programming setup is included or required.
-          - Each user package contains the VST3, standalone MCP executable, Cherry Studio Skill, installer, and simple installation guides.
+          - V0.8 adds deeper Mid/Side and stereo measurement: explicit Side spectrum, Side/Mid energy, low-frequency stereo relation, and negative cross-spectrum evidence.
+          - MCP 0.8 exposes 22 measurement tools, including audio_stereo_profile and audio_stereo_compare.
+          - The Skill remains measurement/tool oriented and does not prescribe a mixing style or automatic stereo action.
           - macOS Release is Apple Silicon arm64 only and is currently ad-hoc signed rather than Apple-notarized.
 
           See START-HERE.md inside the downloaded package for the shortest setup path.
@@ -381,16 +389,12 @@ jobs:
           DRAFT: ${{ inputs.draft }}
         run: |
           set -euo pipefail
-          if ! command -v gh >/dev/null 2>&1; then
-            brew install gh
-          fi
-
-          shopt -s nullglob
-          files=(release-assets/*.zip release-assets/SHA256SUMS.txt)
-          if [ "${#files[@]}" -lt 3 ]; then
-            echo 'Expected Windows zip, macOS zip and SHA256SUMS.txt' >&2
-            exit 1
-          fi
+          files=(
+            "release-assets/AI-Audio-Analyzer-v${{ steps.meta.outputs.version }}-Windows.zip"
+            "release-assets/AI-Audio-Analyzer-v${{ steps.meta.outputs.version }}-macOS.zip"
+            "release-assets/SHA256SUMS.txt"
+          )
+          for file in "${files[@]}"; do test -f "$file"; done
 
           flags=()
           if [ "$PRERELEASE" = 'true' ]; then flags+=(--prerelease); fi
