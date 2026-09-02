@@ -4,7 +4,7 @@
 
 **AI Audio Analyzer** 是一个面向 AI / LLM 音乐制作工作流的 JUCE VST3 音频测量层。
 
-它不是让模型去“看”分析器界面，而是在 DAW 内部完成测量，通过 OSC 把紧凑数据发送给 Python MCP Bridge，再由 Cherry Studio 或其他 MCP 客户端结构化读取电平、响度、频谱、立体声、时间关系、工程概览、A/B 以及遮蔽相关证据。
+它不是让模型去“看”分析器界面，而是在 DAW 内部完成测量，通过 OSC 把紧凑数据发送给 MCP Bridge，再由 Cherry Studio 或其他 MCP 客户端结构化读取电平、响度、频谱、立体声、时间关系、工程概览、A/B 以及遮蔽相关证据。
 
 当前产品版本：**0.7.0**。
 
@@ -196,40 +196,60 @@ audio_temporal_compare(a, b, ...)
 
 ## 用户安装
 
-推荐使用 GitHub **Release 懒人包**。当前 Release 平台：
+GitHub **Release 懒人包明确按“完全没接触过编程也能用”来设计**。
+
+当前 Release 平台：
 
 ```text
 Windows x64
 macOS Apple Silicon arm64
 ```
 
-不提供 Intel/x86_64 macOS 包。正常安装**不需要 Python、pip、venv 或 PyPI**。
+不提供 Intel/x86_64 macOS 包。
 
-Windows 运行：
+每个平台最终只提供一个用户 ZIP。用户只需要解压一次，ZIP 里面不会再套另一个 Release ZIP。
+
+解压后的结构大致是：
+
+```text
+AI Audio Analyzer.vst3
+mcp/
+└─ ai-audio-analyzer-mcp[.exe]   已打包好的单文件程序
+skill/
+START-HERE.md
+INSTALL.en.md
+INSTALL.zh-CN.md
+VERSION.txt
+对应平台的一键安装文件
+```
+
+用户 Release **不会包含 MCP Python 源码**，也不会包含 `requirements.txt`、venv、PyInstaller `_internal` 或开发者配置示例。
+
+### Windows
+
+下载 Windows ZIP，右键选择 **全部解压缩**，然后双击：
 
 ```text
 Install.cmd
 ```
 
-macOS Apple Silicon 运行：
+### macOS Apple Silicon
+
+下载 macOS ZIP，解压后双击：
 
 ```text
 Install.command
 ```
 
-若 Gatekeeper 连脚本也拦截，可以右键 → **打开**，或运行：
-
-```bash
-bash ./install.sh
-```
+如果 Gatekeeper 阻止运行，右键 `Install.command` → **打开**。
 
 当前 macOS 包是 ad-hoc 签名，**不是 Apple Developer ID Notarization**。
 
+Release 里自带 `START-HERE.md`、中文教程和英文教程，全部按点哪里、做什么来写，不要求用户理解开发环境。
+
 ## MCP 源码结构与唯一入口
 
-以后不再使用 `server_v05.py / server_v06.py / server_v07.py` 这种版本化启动文件。
-
-唯一支持的源码 / PyInstaller 入口始终是：
+仓库开发侧仍然只有一个 MCP 源码 / PyInstaller 入口：
 
 ```text
 bridge/server.py
@@ -252,7 +272,7 @@ bridge/temporal_tools.py  V0.6 Temporal 解析与比较
 bridge/masking_tools.py   V0.7 Masking Evidence
 ```
 
-源码模式建议 Python 3.12：
+源码开发建议 Python 3.12：
 
 ```bash
 python3.12 -m venv .venv
@@ -261,9 +281,9 @@ python -m pip install -r bridge/requirements.txt
 AI_ANALYZER_SELF_TEST=1 python bridge/server.py
 ```
 
-Windows 使用对应 `.venv\Scripts\Activate.ps1`。
+这套开发流程只存在于仓库中，**不会跟着用户 Release 一起发布**。
 
-`bridge/cherry-studio.example.json` 也统一指向 `bridge/server.py`。Release 自动安装器生成的配置则直接指向 standalone MCP executable。
+`bridge/cherry-studio.example.json` 也只是仓库里的开发者示例。用户安装器会直接生成指向已打包 MCP executable 的 Cherry Studio 配置。
 
 ## Skill
 
@@ -336,7 +356,7 @@ bridge/server.py                唯一 MCP 入口
 bridge/analyzer_core.py         稳定内部 Core
 bridge/*_tools.py               功能模块
 skills/ai-analyzer-flstudio/    英文 LLM-facing Skill
-release/                        懒人包安装器 / 文档
+release/                        面向普通用户的懒人包安装器 / 文档
 .github/workflows/build.yml     开发 CI
 .github/workflows/release.yml   手动 Release 打包
 AGENT.md                        Agent / Maintainer 路线图与规则
