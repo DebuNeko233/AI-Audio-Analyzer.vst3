@@ -44,10 +44,12 @@ bool testLoudnessCadence()
                  "one hundred milliseconds at 48 kHz must equal 4800 samples");
     ok &= expect(aianalyzer::loudnessMetricsIntervalSamples(44100.0) == 4410,
                  "one hundred milliseconds at 44.1 kHz must equal 4410 samples");
-    ok &= expect(!aianalyzer::loudnessMetricsDue(4799, 48000.0),
-                 "loudness metrics should not be polled before one hundred milliseconds of audio");
-    ok &= expect(aianalyzer::loudnessMetricsDue(4800, 48000.0),
-                 "loudness metrics should be due at one hundred milliseconds of audio");
+    ok &= expect(!aianalyzer::loudnessMetricsDue(4799, 48000.0, 99.9),
+                 "loudness metrics should wait while both audio and wall-clock thresholds are short");
+    ok &= expect(aianalyzer::loudnessMetricsDue(4800, 48000.0, 5.0),
+                 "accelerated rendering must query after one hundred milliseconds of processed audio");
+    ok &= expect(aianalyzer::loudnessMetricsDue(1024, 48000.0, 100.0),
+                 "slow realtime processing must query after one hundred milliseconds of wall-clock time");
     ok &= expect(aianalyzer::loudnessMetricsIntervalSamples(0.0) == 1,
                  "invalid sample rate must still produce a bounded positive interval");
     return ok;
