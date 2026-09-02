@@ -78,6 +78,16 @@ temporal-measurement usage
 
 The Skill must **not** become a style-specific mixing guide. Do not add fixed genre EQ recipes, LUFS targets, mandatory sidechain rules, mastering chains, or “metric X means always apply processor Y” behavior.
 
+All **LLM-facing Skill content must be written in English**, including:
+
+```text
+skills/ai-analyzer-flstudio/SKILL.md
+skills/ai-analyzer-flstudio/README-CHERRY-STUDIO.md
+skills/ai-analyzer-flstudio/references/*.md
+```
+
+The reason is interoperability: most target LLMs handle technical tool instructions most reliably in English. User-facing Chinese documentation still belongs in `README.zh-CN.md` and `INSTALL.zh-CN.md`; do not reintroduce mixed Chinese/English instructions inside the Skill package unless explicitly requested.
+
 ## 3. Important behavior already implemented
 
 ### 0.2 — loudness / True Peak / stereo bands
@@ -350,7 +360,7 @@ Did package/install layout change?
 Did Python/PyInstaller behavior change?
 Did Gatekeeper/signing behavior change?
 Did Cherry Studio config change?
-Did Skill calling strategy/scope change?
+Did Skill calling strategy/scope/language change?
 Did CI trigger/build behavior change?
 Did roadmap/current-status change?
 ```
@@ -360,6 +370,8 @@ If yes, update every affected document in the same change whenever practical.
 ### English / Chinese parity
 
 `README.md` and `README.zh-CN.md` must describe the same current facts. `INSTALL.en.md` and `INSTALL.zh-CN.md` must describe the same installation behavior. They need not be literal translations, but versions, platforms, paths, entry points, tool counts and limitations must not contradict each other.
+
+The Skill package is an exception to bilingual parity: it is intentionally English-only because it is primarily machine-facing.
 
 ### No stale roadmap
 
@@ -374,7 +386,7 @@ When a roadmap item is implemented, move it to implemented history and advance t
 4. Make the smallest coherent implementation.
 5. Add/update regression tests when behavior changes.
 6. Perform mandatory documentation-impact review.
-7. Update affected English/Chinese docs and references.
+7. Update affected English/Chinese user docs and English LLM-facing Skill references.
 8. Verify intended CI path: build vs skip.
 9. Inspect actual CI/runtime evidence before claiming success.
 10. Update AGENT.md for meaningful architecture/history/roadmap changes.
@@ -420,6 +432,7 @@ VERSION.txt generation
 - Do not treat spectral/temporal overlap as proof of audible masking.
 - Do not call onset candidates ground-truth onsets.
 - Do not encode one mixing aesthetic into MCP or Skill.
+- Keep LLM-facing Skill content English-only unless explicitly requested otherwise.
 - Do not re-add Intel macOS Release support unless explicitly requested.
 - Do not make ordinary users install Python while standalone MCP is available.
 - Do not claim macOS notarization when it is not notarized.
@@ -427,6 +440,6 @@ VERSION.txt generation
 
 ## 11. Maintaining this file
 
-`AGENT.md` is living project memory. Update it when architecture, supported platforms, Release strategy, MCP entry point/tools, protocol/identity model, measurement semantics, Skill scope, major milestones, roadmap priorities or CI/build policy materially change.
+`AGENT.md` is living project memory. Update it when architecture, supported platforms, Release strategy, MCP entry point/tools, protocol/identity model, measurement semantics, Skill scope/language, major milestones, roadmap priorities or CI/build policy materially change.
 
 Keep it decision-focused rather than turning it into a raw commit log.
