@@ -6,18 +6,17 @@ The normal `build` workflow is for development artifacts. User-facing lazy packa
 .github/workflows/release.yml
 ```
 
-## Publish a release from GitHub UI
+## Publish from GitHub UI
 
-1. Open the repository on GitHub.
-2. Open **Actions**.
-3. Select **release-lazy-package**.
-4. Click **Run workflow**.
-5. `tag` can be left empty. The workflow then reads the version from `CMakeLists.txt` and uses `v<version>`; for example `v0.4.1`.
-6. Enable `prerelease` only for beta/test releases.
-7. Enable `draft` if the release should not be public immediately.
-8. Click **Run workflow**.
+1. Open **Actions**.
+2. Select **release-lazy-package**.
+3. Click **Run workflow**.
+4. Leave `tag` empty to use `v<CMake project version>`.
+5. Enable `prerelease` only for beta/test releases.
+6. Enable `draft` when you want to inspect the Release before making it public.
+7. Run the workflow.
 
-The workflow builds both platforms from the same commit and publishes:
+The workflow publishes:
 
 ```text
 AI-Audio-Analyzer-v<version>-Windows.zip
@@ -25,15 +24,56 @@ AI-Audio-Analyzer-v<version>-macOS.zip
 SHA256SUMS.txt
 ```
 
-Each platform ZIP contains the VST3, `mcp/`, `skill/`, automatic installer, English manual, Simplified Chinese manual, and `START-HERE.md`.
+## Standalone MCP build
 
-If the tag already has a GitHub Release, re-running the workflow replaces the ZIP/checksum assets and updates the release notes instead of creating a duplicate release.
+Release packages do not require end users to install Python or pip. The workflow builds Analyzer MCP 0.5 with PyInstaller `onedir` and runs the executable's built-in self-test before packaging.
+
+Three native MCP runtimes are built independently:
+
+```text
+windows-latest   → Windows x64
+macos-latest     → macOS arm64 / Apple Silicon
+macos-15-intel   → macOS x86_64 / Intel
+```
+
+The macOS lazy package contains both macOS MCP runtimes. `install.sh` selects the runtime using `uname -m`. The VST3 remains a universal `arm64;x86_64` bundle with deployment target macOS 11.0.
+
+Final package layout:
+
+```text
+Windows
+├─ AI Audio Analyzer.vst3
+├─ mcp/
+│  ├─ runtime/ai-audio-analyzer-mcp/...
+│  └─ source/...
+├─ skill/
+├─ Install.cmd
+├─ Install.ps1
+├─ START-HERE.md
+├─ INSTALL.zh-CN.md
+└─ INSTALL.en.md
+
+macOS
+├─ AI Audio Analyzer.vst3
+├─ mcp/
+│  ├─ runtime/arm64/ai-audio-analyzer-mcp/...
+│  ├─ runtime/x86_64/ai-audio-analyzer-mcp/...
+│  └─ source/...
+├─ skill/
+├─ Install.command
+├─ install.sh
+├─ START-HERE.md
+├─ INSTALL.zh-CN.md
+└─ INSTALL.en.md
+```
+
+`mcp/source/` remains in every package for development/manual fallback and contains `server.py`, `server_v05.py`, `project_tools.py`, `requirements.txt`, and the Cherry Studio example.
+
+If a tag already has a GitHub Release, re-running the workflow replaces the package/checksum assets instead of creating a duplicate Release.
 
 ## 中文说明
 
-普通 `build` Action 是开发阶段工件。真正给用户下载的“懒人包”由 `release-lazy-package` 手动发布。
-
-GitHub 页面操作：
+普通 `build` Action 只负责开发阶段回归和工件；真正给用户下载的懒人包由：
 
 ```text
 Actions
@@ -41,31 +81,23 @@ Actions
 → Run workflow
 ```
 
-`tag` 留空时自动读取 `CMakeLists.txt` 里的版本号。例如项目版本是 `0.4.1`，最终 Release Tag 就是：
+手动生成。
+
+Release 中的 Analyzer MCP 已经使用 PyInstaller 打包，所以普通用户**不需要 Python、pip、venv 或 PyPI 网络**。
+
+macOS 会分别在 Apple Silicon Runner 和 Intel Runner 上打两套 MCP Runtime，最后装进同一个 macOS ZIP；安装脚本按当前 CPU 自动选择。VST3 本身继续使用 universal `arm64+x86_64`。
+
+Python 源码版仍保留在 `mcp/source/`，只用于开发、调试和特殊环境 fallback。
+
+## Validation
+
+Normal `build` CI smoke-tests installer/source changes without recompiling VST3 when plugin source did not change:
 
 ```text
-v0.4.1
+Windows installer → PowerShell parse
+macOS installer   → bash -n
+Bridge 0.5        → source self-test + MCP tool regression
+VST3              → skipped when Source/CMake did not change
 ```
 
-正式版保持：
-
-```text
-prerelease = false
-draft      = false
-```
-
-测试版本可以勾选 `prerelease`；想先检查 Release 页面再公开可以勾选 `draft`。
-
-工作流会分别在 macOS 和 Windows Runner 上重新构建 VST3，并生成两个独立安装包，然后自动创建 / 更新 GitHub Release。
-
-## Installer validation
-
-Changes under `release/**` or `.github/workflows/release.yml` are smoke-tested by the normal `build` workflow without rebuilding the VST3:
-
-```text
-Windows  → parse Install.ps1
-Linux    → bash -n install.sh / Install.command
-VST3     → skipped
-```
-
-This keeps installer changes cheap to validate while the manual Release workflow still performs a clean platform build before publishing.
+The manual Release workflow performs the expensive checks: three PyInstaller native-runtime builds, packaged-runtime self-tests, clean Windows/macOS VST3 builds, lazy-package assembly, checksums, and GitHub Release upload.
