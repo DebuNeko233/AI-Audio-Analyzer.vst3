@@ -1,8 +1,8 @@
-# AI Audio Analyzer 0.6 — 中文安装教程
+# AI Audio Analyzer 0.7 — 中文安装教程
 
 [English manual](INSTALL.en.md)
 
-Release 懒人包包含 VST3、**PyInstaller 打包好的 Analyzer MCP 0.6 Standalone Runtime**、Cherry Studio Skill 和自动安装脚本。普通用户不需要安装 Python、pip、venv，也不需要访问 PyPI。
+Release 懒人包包含 VST3、**PyInstaller 打包好的 Analyzer MCP 0.7 Standalone Runtime**、Cherry Studio Skill 和自动安装脚本。普通用户不需要安装 Python、pip、venv，也不需要访问 PyPI。
 
 配套 FL Studio 控制 MCP：
 
@@ -25,10 +25,10 @@ mcp/
 ├─ runtime/ai-audio-analyzer-mcp/...
 └─ source/
    ├─ server.py
-   ├─ server_v05.py
-   ├─ server_v06.py
+   ├─ analyzer_core.py
    ├─ project_tools.py
    ├─ temporal_tools.py
+   ├─ masking_tools.py
    ├─ requirements.txt
    └─ cherry-studio.example.json
 skill/
@@ -38,17 +38,13 @@ INSTALL.zh-CN.md
 平台安装脚本
 ```
 
-打包后的可执行文件仍叫 `ai-audio-analyzer-mcp`（Windows 为 `.exe`）；当前源码 MCP 入口已经是 `server_v06.py`。
+打包后的可执行文件仍叫 `ai-audio-analyzer-mcp`（Windows 为 `.exe`）。源码与 PyInstaller 的唯一启动入口始终是 `server.py`，以后不再使用 `server_vXX.py`。
 
 # 推荐：自动安装
 
 ## Windows
 
-直接双击：
-
-```text
-Install.cmd
-```
+直接双击 `Install.cmd`。
 
 标准 VST3 目录位于 `Program Files`，所以只有复制插件时需要 UAC。MCP、Skill 和生成的 Cherry Studio 配置仍保存在当前用户目录：
 
@@ -56,13 +52,7 @@ Install.cmd
 %LOCALAPPDATA%\AI Audio Analyzer\
 ```
 
-安装器会：
-
-1. 把 `AI Audio Analyzer.vst3` 复制到标准 VST3 目录；
-2. 安装 Standalone MCP Runtime；
-3. 对打包后的 MCP 执行 `AI_ANALYZER_SELF_TEST=1`；
-4. 复制 Skill；
-5. 生成包含绝对 executable 路径的 `cherry-studio-mcp.json`。
+安装器会复制 VST3、安装 Standalone MCP Runtime、运行内建 self-test、复制 Skill，并生成包含绝对 executable 路径的 `cherry-studio-mcp.json`。
 
 ## macOS Apple Silicon
 
@@ -72,19 +62,9 @@ Install.cmd
 uname -m
 ```
 
-返回：
+返回 `arm64`。
 
-```text
-arm64
-```
-
-双击：
-
-```text
-Install.command
-```
-
-如果 macOS 阻止脚本本身启动，可以右键 `Install.command` → **打开**，或执行：
+双击 `Install.command`。如果 macOS 阻止脚本本身启动，可以右键 → **打开**，或执行：
 
 ```bash
 bash ./install.sh
@@ -98,7 +78,7 @@ MCP   ~/Library/Application Support/AI Audio Analyzer/mcp/
 Skill ~/Library/Application Support/AI Audio Analyzer/skill/
 ```
 
-安装器会移除可处理的 Quarantine，验证安装后的 VST3 签名；必要时做本地 ad-hoc 重签名，然后运行 Standalone MCP Self-test 并生成 `cherry-studio-mcp.json`。
+安装器会处理可移除的 Quarantine，验证安装后的 VST3 签名；必要时做本地 ad-hoc 重签名，然后运行 Standalone MCP Self-test 并生成 `cherry-studio-mcp.json`。
 
 当前 GitHub Build 是 **ad-hoc signed，并没有 Apple Developer ID Notarization**。
 
@@ -111,7 +91,7 @@ Windows: %LOCALAPPDATA%\AI Audio Analyzer\cherry-studio-mcp.json
 macOS:   ~/Library/Application Support/AI Audio Analyzer/cherry-studio-mcp.json
 ```
 
-核心结构：
+Packaged Runtime 的核心形式：
 
 ```json
 {
@@ -128,23 +108,11 @@ macOS:   ~/Library/Application Support/AI Audio Analyzer/cherry-studio-mcp.json
 }
 ```
 
-不要自己常驻运行另一个 Analyzer MCP，同时又让 Cherry Studio 再启动一个。默认 UDP `9855` 只能由一个 Bridge Process 绑定。
+不要自己常驻运行另一个 Analyzer MCP，同时又让 Cherry Studio 再启动一个。默认 UDP `9855` 只应由一个 Bridge Process 绑定。
 
-# Windows 手动安装（不安装 Python）
+# Standalone MCP 自检
 
-1. 复制插件到：
-
-```text
-C:\Program Files\Common Files\VST3\AI Audio Analyzer.vst3
-```
-
-2. 把 `mcp/` 和 `skill/` 放到稳定目录，例如：
-
-```text
-%LOCALAPPDATA%\AI Audio Analyzer\
-```
-
-3. 测试打包后的 MCP：
+Windows：
 
 ```powershell
 $env:AI_ANALYZER_SELF_TEST='1'
@@ -152,76 +120,30 @@ $env:AI_ANALYZER_SELF_TEST='1'
 Remove-Item Env:AI_ANALYZER_SELF_TEST
 ```
 
-健康的 0.6 Runtime 应返回包含类似内容的 JSON：
-
-```json
-{"ok":true,"server":"AI Audio Analyzer MCP","tool_count":18,"entrypoint":"0.6"}
-```
-
-4. Cherry Studio `command` 指向这个 `.exe`，`args` 留空。
-5. 导入 `skill/`。
-
-# macOS 手动安装（Apple Silicon，不安装 Python）
-
-先确认：
+macOS：
 
 ```bash
-uname -m
-```
-
-必须是：
-
-```text
-arm64
-```
-
-复制 VST3：
-
-```bash
-mkdir -p "$HOME/Library/Audio/Plug-Ins/VST3"
-ditto "./AI Audio Analyzer.vst3" \
-  "$HOME/Library/Audio/Plug-Ins/VST3/AI Audio Analyzer.vst3"
-```
-
-移除 Quarantine 并验证当前 ad-hoc 签名：
-
-```bash
-xattr -dr com.apple.quarantine \
-  "$HOME/Library/Audio/Plug-Ins/VST3/AI Audio Analyzer.vst3"
-
-codesign --verify --deep --strict --verbose=4 \
-  "$HOME/Library/Audio/Plug-Ins/VST3/AI Audio Analyzer.vst3"
-```
-
-如果复制 / Quarantine 处理后验证失败，可以做本地 ad-hoc 重签名：
-
-```bash
-codesign --force --deep --sign - --timestamp=none \
-  "$HOME/Library/Audio/Plug-Ins/VST3/AI Audio Analyzer.vst3"
-```
-
-Standalone MCP：
-
-```text
-mcp/runtime/ai-audio-analyzer-mcp/ai-audio-analyzer-mcp
-```
-
-自检：
-
-```bash
-xattr -dr com.apple.quarantine ./mcp
-chmod +x ./mcp/runtime/ai-audio-analyzer-mcp/ai-audio-analyzer-mcp
 AI_ANALYZER_SELF_TEST=1 \
   ./mcp/runtime/ai-audio-analyzer-mcp/ai-audio-analyzer-mcp
 ```
 
-Cherry Studio `command` 指向该 executable，`args` 留空。
+健康的 0.7 Runtime 应返回类似：
+
+```json
+{
+  "ok": true,
+  "entrypoint": "server.py",
+  "mcp_version": "0.7",
+  "osc_protocol_version": "0.6",
+  "tool_count": 20
+}
+```
 
 # Skill
 
-自动安装后导入 `skill/` 目录。
+自动安装后导入 `skill/` 目录。LLM-facing Skill 按项目规则统一使用英文，只负责 MCP 调用、映射、有效性、参数语义、Temporal Evidence 和 Masking Evidence 限制，不提供固定混音风格。
 
-Skill 只负责 MCP 调用与参数语义，不提供固定混音风格。MCP 0.6 当前共 18 个工具，其中包括：
+MCP 0.7 当前共 20 个工具，其中包括：
 
 ```text
 audio_project_status()
@@ -230,6 +152,8 @@ audio_capture_snapshot()
 audio_compare_snapshots()
 audio_temporal_profile()
 audio_temporal_compare()
+audio_masking_evidence()
+audio_project_masking_scan()
 ```
 
 多个 Analyzer 与 FL Mixer Track / Slot 的对应关系仍然使用 V0.4 Identify 机制确定，不靠名字猜。
@@ -248,7 +172,7 @@ py -3.12 -m venv .venv
 python -m pip install --upgrade pip
 python -m pip install -r .\mcp\source\requirements.txt
 $env:AI_ANALYZER_SELF_TEST='1'
-python .\mcp\source\server_v06.py
+python .\mcp\source\server.py
 ```
 
 macOS：
@@ -258,10 +182,10 @@ python3.12 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -r ./mcp/source/requirements.txt
-AI_ANALYZER_SELF_TEST=1 python ./mcp/source/server_v06.py
+AI_ANALYZER_SELF_TEST=1 python ./mcp/source/server.py
 ```
 
-源码模式下，Cherry Studio 的 `command` 指向 venv Python，`args` 指向 `server_v06.py` 的绝对路径。
+源码模式下，Cherry Studio 的 `command` 指向 venv Python，`args` 指向 `server.py` 的绝对路径。
 
 ## Python 本体和 PyPI 镜像
 
@@ -271,14 +195,6 @@ AI_ANALYZER_SELF_TEST=1 python ./mcp/source/server_v06.py
 官方      https://pypi.org/simple
 清华 TUNA https://pypi.tuna.tsinghua.edu.cn/simple
 阿里云    https://mirrors.aliyun.com/pypi/simple/
-```
-
-例如：
-
-```bash
-python -m pip install -r requirements.txt -i https://pypi.org/simple
-python -m pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
-python -m pip install -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple/
 ```
 
 不要为了绕过代理 / 证书问题关闭 TLS 验证。
@@ -298,7 +214,7 @@ macOS:   ~/Library/Audio/Plug-Ins/VST3/AI Audio Analyzer.vst3/Contents/...
 
 ## macOS 无法验证 / 已阻止
 
-优先使用包内 `Install.command`。脚本本身被拦截时右键 → 打开，或运行 `bash ./install.sh`。手动插件安装则按上面执行 `xattr` / `codesign`。当前 Release 没有 Notarize。
+优先使用包内 `Install.command`。脚本本身被拦截时右键 → 打开，或运行 `bash ./install.sh`。当前 Release 没有 Notarize。
 
 ## Intel Mac
 
@@ -308,11 +224,9 @@ macOS:   ~/Library/Audio/Plug-Ins/VST3/AI Audio Analyzer.vst3/Contents/...
 
 先执行 Packaged MCP Self-test。如果自检成功，再检查 Cherry Studio 是否指向同一个 executable，并确认没有第二个 Bridge 占用 UDP `9855`。
 
-正常 Release Runtime 不涉及 Python / PyPI。
-
 ## `No module named mcp.server.fastmcp`
 
-这只应该出现在旧源码环境。Packaged Runtime 已内置 MCP SDK 2.x。主动使用源码模式时，请按 `mcp/source/requirements.txt` 重装，并启动 `server_v06.py`。
+这只应该出现在旧源码环境。Packaged Runtime 已内置 MCP SDK 2.x。主动使用源码模式时，请按 `mcp/source/requirements.txt` 重装，并启动 `server.py`。
 
 ## MCP 正常但没有 Analyzer
 
@@ -320,4 +234,8 @@ macOS:   ~/Library/Audio/Plug-Ins/VST3/AI Audio Analyzer.vst3/Contents/...
 
 ## Temporal Tool 显示 unsupported / unavailable
 
-V0.6 Temporal Tool 需要 **AI Audio Analyzer VST3 0.6+** 的 Frame。继续检查 `signal_present`、`temporal_supported`、`temporal_valid` 和请求窗口覆盖率。旧版 VST3 仍可以提供旧指标，但不能提供 V0.6 Temporal Descriptor。
+V0.6 Temporal Tool 需要 **AI Audio Analyzer VST3 0.6+** 的 Frame。继续检查 `signal_present`、`temporal_supported`、`temporal_valid` 和请求窗口覆盖率。
+
+## Masking Evidence unavailable
+
+V0.7 Masking Evidence 要求两个轨道都存在有效频谱历史；时间加权部分还依赖可用的 V0.6 对齐帧。返回分数是 heuristic evidence，不是可听遮蔽概率。
