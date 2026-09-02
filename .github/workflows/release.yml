@@ -57,9 +57,6 @@ jobs:
           - os: macos-latest
             label: macos-arm64
             artifact: mcp-runtime-macos-arm64
-          - os: macos-15-intel
-            label: macos-x86_64
-            artifact: mcp-runtime-macos-x86_64
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -205,31 +202,26 @@ jobs:
           retention-days: 30
 
   package-macos:
-    name: Build macOS lazy package
+    name: Build macOS Apple Silicon lazy package
     needs: mcp-runtime
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Configure and build universal VST3
+      - name: Configure and build arm64 VST3
         shell: bash
         run: |
           set -euo pipefail
           cmake -S . -B build \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 \
-            "-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64"
+            -DCMAKE_OSX_ARCHITECTURES=arm64
           cmake --build build --config Release --parallel 2
 
       - uses: actions/download-artifact@v4
         with:
           name: mcp-runtime-macos-arm64
           path: input/mcp-arm64
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: mcp-runtime-macos-x86_64
-          path: input/mcp-x86_64
 
       - name: Assemble macOS package
         shell: bash
@@ -242,6 +234,7 @@ jobs:
           test -n "$VST3_PATH"
           BINARY="$VST3_PATH/Contents/MacOS/AI Audio Analyzer"
           echo "VST3 architectures: $(lipo -archs "$BINARY")"
+          test "$(lipo -archs "$BINARY")" = "arm64"
 
           xattr -cr "$VST3_PATH" || true
           codesign --force --deep --sign - --timestamp=none "$VST3_PATH"
@@ -250,11 +243,10 @@ jobs:
           rm -rf dist
           mkdir -p dist
           ROOT="dist/AI-Audio-Analyzer-v${VERSION}-macOS"
-          mkdir -p "$ROOT/mcp/runtime/arm64" "$ROOT/mcp/runtime/x86_64" "$ROOT/mcp/source"
+          mkdir -p "$ROOT/mcp/runtime" "$ROOT/mcp/source"
 
           ditto "$VST3_PATH" "$ROOT/AI Audio Analyzer.vst3"
-          ditto input/mcp-arm64/ai-audio-analyzer-mcp "$ROOT/mcp/runtime/arm64/ai-audio-analyzer-mcp"
-          ditto input/mcp-x86_64/ai-audio-analyzer-mcp "$ROOT/mcp/runtime/x86_64/ai-audio-analyzer-mcp"
+          ditto input/mcp-arm64/ai-audio-analyzer-mcp "$ROOT/mcp/runtime/ai-audio-analyzer-mcp"
           cp bridge/server.py bridge/server_v05.py bridge/project_tools.py bridge/requirements.txt bridge/cherry-studio.example.json "$ROOT/mcp/source/"
           ditto skills/ai-analyzer-flstudio "$ROOT/skill"
 
@@ -264,18 +256,16 @@ jobs:
           cp release/macos/install.sh "$ROOT/install.sh"
           cp release/macos/Install.command "$ROOT/Install.command"
           chmod +x "$ROOT/install.sh" "$ROOT/Install.command"
-          chmod +x "$ROOT/mcp/runtime/arm64/ai-audio-analyzer-mcp/ai-audio-analyzer-mcp"
-          chmod +x "$ROOT/mcp/runtime/x86_64/ai-audio-analyzer-mcp/ai-audio-analyzer-mcp"
+          chmod +x "$ROOT/mcp/runtime/ai-audio-analyzer-mcp/ai-audio-analyzer-mcp"
 
-          file "$ROOT/mcp/runtime/arm64/ai-audio-analyzer-mcp/ai-audio-analyzer-mcp"
-          file "$ROOT/mcp/runtime/x86_64/ai-audio-analyzer-mcp/ai-audio-analyzer-mcp"
-          AI_ANALYZER_SELF_TEST=1 "$ROOT/mcp/runtime/arm64/ai-audio-analyzer-mcp/ai-audio-analyzer-mcp"
+          file "$ROOT/mcp/runtime/ai-audio-analyzer-mcp/ai-audio-analyzer-mcp"
+          AI_ANALYZER_SELF_TEST=1 "$ROOT/mcp/runtime/ai-audio-analyzer-mcp/ai-audio-analyzer-mcp"
 
           cat > "$ROOT/VERSION.txt" <<EOF
           AI Audio Analyzer ${VERSION}
-          Platform: macOS
-          VST3: universal arm64+x86_64, minimum target macOS 11.0
-          MCP: PyInstaller standalone arm64 + x86_64 runtimes
+          Platform: macOS Apple Silicon
+          VST3: arm64, minimum target macOS 11.0
+          MCP: PyInstaller standalone arm64 runtime
           Python required for normal install: No
           Release commit: ${GITHUB_SHA}
           EOF
@@ -330,8 +320,10 @@ jobs:
 
           Separate Windows and macOS lazy packages are provided.
 
-          - **Windows**: VST3 + standalone PyInstaller MCP runtime + Skill + automatic installer.
-          - **macOS**: universal VST3 + separate native arm64/x86_64 standalone MCP runtimes + Skill + automatic installer.
+          - **Windows**: x64 VST3 + standalone PyInstaller MCP runtime + Skill + automatic installer.
+          - **macOS**: Apple Silicon arm64 VST3 + native arm64 standalone MCP runtime + Skill + automatic installer.
+
+          **Intel macOS / x86_64 is not included in current releases.**
 
           **Normal users do not need to install Python, pip, MCP SDK, or access PyPI.** The packaged MCP runtime contains the required Python runtime and dependencies. Python source installation remains available under `mcp/source/` for developers and manual fallback.
 
