@@ -35,6 +35,25 @@ AI-Audio-Analyzer-Windows/
 
 In the repository, the MCP source lives under `bridge/`, while the Cherry Studio Skill lives under `skills/ai-analyzer-flstudio/`.
 
+## Companion FL Studio MCP
+
+AI Audio Analyzer is the **perception channel**. For DAW control, this project is designed to work together with the FL Studio MCP used in the Cherry Studio workflow:
+
+**[rosasynthesiz/flstudio-mcp](https://github.com/rosasynthesiz/flstudio-mcp)**
+
+The two MCP servers have different responsibilities:
+
+```text
+AI Audio Analyzer MCP   → observe / measure / verify
+FL Studio MCP           → inspect / control / modify FL Studio
+```
+
+Together they support the closed loop:
+
+```text
+OBSERVE → DIAGNOSE → PLAN → CHANGE → READBACK → A/B
+```
+
 ## Architecture
 
 ```text
@@ -52,7 +71,7 @@ FL Studio / DAW
              │ OSC UDP
              │ default: 127.0.0.1:9855
              ▼
-        Python MCP bridge
+        Python Analyzer MCP
         ├─ live instance registry
         ├─ short history
         ├─ signal-state filtering
@@ -62,17 +81,12 @@ FL Studio / DAW
              │
              ▼
       Cherry Studio / LLM
-             │
-             └─ optional FL Studio control MCP
-                        │
-                        ▼
-                 modify the DAW
-```
-
-The analyzer MCP is the **perception channel**. An FL Studio control MCP is the **actuation channel**. Together they support a closed loop:
-
-```text
-OBSERVE → DIAGNOSE → PLAN → CHANGE → READBACK → A/B
+        │               │
+        │ perception    │ actuation
+        │               ▼
+        │      rosasynthesiz/flstudio-mcp
+        │               │
+        └───────────────┴──> FL Studio
 ```
 
 ## Current capabilities
@@ -82,16 +96,11 @@ OBSERVE → DIAGNOSE → PLAN → CHANGE → READBACK → A/B
 - 4096-point FFT with Hann window
 - 1024-sample analysis hop
 - 32 logarithmically spaced spectrum features from 20 Hz to 20 kHz
-- Sample Peak dBFS
-- RMS dBFS
-- Crest Factor
+- Sample Peak dBFS / RMS dBFS / Crest Factor
 - LUFS-S short-term loudness
 - LUFS-I integrated loudness with EBU R128 gating
-- True Peak dBTP
-- Session maximum True Peak
-- Spectral Centroid
-- 85% Spectral Rolloff
-- Spectral Flatness
+- True Peak dBTP and session maximum True Peak
+- Spectral Centroid / 85% Spectral Rolloff / Spectral Flatness
 - Full-band Stereo Correlation
 - Mid/Side width ratio
 - 8 band-limited stereo-correlation values:
@@ -109,8 +118,6 @@ Loudness and true-peak measurement use `libebur128` 1.2.6.
 ### Signal-state handling
 
 AI Audio Analyzer does not treat very low-level tails as meaningful program material forever.
-
-Current signal detector behavior:
 
 ```text
 gate close:  below about -50 dBFS for ~0.4 s
@@ -135,16 +142,11 @@ Any number of plugin instances can share the same OSC endpoint:
 ```text
 Kick ───┐
 Bass ───┤
-Vocal ──┼─> UDP 127.0.0.1:9855 ─> one MCP bridge
+Vocal ──┼─> UDP 127.0.0.1:9855 ─> one Analyzer MCP bridge
 Master ─┘
 ```
 
-Each live plugin instance has:
-
-- a human-readable analyzer name;
-- a runtime UUID generated for that live instance.
-
-Duplicate human names are allowed internally, but the MCP bridge will not silently choose one when the name is ambiguous.
+Each live plugin instance has a human-readable analyzer name and a runtime UUID generated for that live instance. Duplicate human names are allowed internally, but the MCP bridge will not silently choose one when the name is ambiguous.
 
 ### Deterministic FL Studio mixer mapping
 
@@ -155,9 +157,9 @@ Parameter ID: identify
 Name: Identify
 ```
 
-Every change of the `Identify` parameter emits an OSC identify event containing the instance runtime UUID. The event is independent of audio playback, so discovery can work while the transport is stopped.
+Every change of `Identify` emits an OSC identify event containing the instance runtime UUID. The event is independent of audio playback, so discovery can work while the transport is stopped.
 
-The intended discovery flow is:
+With [rosasynthesiz/flstudio-mcp](https://github.com/rosasynthesiz/flstudio-mcp), the intended discovery flow is:
 
 ```text
 FL Studio MCP
@@ -185,7 +187,7 @@ instead of relying only on names such as `Bass` or `Track`.
 
 ## MCP tools
 
-The current bridge exposes:
+The current Analyzer bridge exposes:
 
 ```text
 audio_bridge_status()
@@ -229,19 +231,19 @@ skill/
 
 ### 2. Install the VST3
 
-macOS user VST3 directory:
+macOS user directory:
 
 ```text
 ~/Library/Audio/Plug-Ins/VST3/
 ```
 
-System-wide macOS directory:
+macOS system-wide directory:
 
 ```text
 /Library/Audio/Plug-Ins/VST3/
 ```
 
-Windows VST3 directory is commonly:
+Windows directory is commonly:
 
 ```text
 C:\Program Files\Common Files\VST3
@@ -249,7 +251,7 @@ C:\Program Files\Common Files\VST3
 
 Then rescan plugins in FL Studio.
 
-### 3. Install the MCP Python dependencies
+### 3. Install the Analyzer MCP Python dependencies
 
 From the extracted artifact:
 
@@ -260,20 +262,18 @@ source .venv/bin/activate
 python -m pip install -r requirements.txt
 ```
 
-Windows PowerShell activation:
+Windows PowerShell:
 
 ```powershell
 .\.venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
 ```
 
-The MCP bridge uses **MCP Python SDK 2.x** and communicates with Cherry Studio over **stdio**.
+The bridge uses **MCP Python SDK 2.x** and communicates with Cherry Studio over **stdio**.
 
 ### 4. Configure Cherry Studio
 
 Use the Python interpreter from the environment where `mcp` and `python-osc` are installed.
-
-Example:
 
 ```json
 {
@@ -296,7 +296,15 @@ See `mcp/cherry-studio.example.json` in packaged artifacts, or `bridge/cherry-st
 
 Do not manually leave another copy of `server.py` running while Cherry Studio also launches it, because only one process should bind UDP port `9855`.
 
-### 5. Import the Cherry Studio Skill
+### 5. Add FL Studio control MCP
+
+For the execution/control side of the workflow, install and configure:
+
+**[rosasynthesiz/flstudio-mcp](https://github.com/rosasynthesiz/flstudio-mcp)**
+
+Keep both MCP servers enabled in Cherry Studio when you want the model to both **observe audio** and **operate FL Studio**.
+
+### 6. Import the Cherry Studio Skill
 
 Import the packaged `skill/` directory into Cherry Studio.
 
@@ -314,9 +322,9 @@ The Skill teaches the model to:
 
 1. Insert `AI Audio Analyzer` on every mixer track the model should observe.
 2. Keep all analyzers on the same OSC host/port unless you intentionally changed the bridge.
-3. Start the MCP bridge through Cherry Studio.
+3. Enable both the Analyzer MCP and [FL Studio MCP](https://github.com/rosasynthesiz/flstudio-mcp) in Cherry Studio.
 4. Ask the agent to scan Analyzer instances.
-5. When an FL Studio control MCP is available, let the agent bind each Analyzer to its Mixer Track/Slot through `Identify`.
+5. Let the agent bind each Analyzer to its Mixer Track/Slot through `Identify`.
 6. Start playback when actual audio measurements are required.
 7. Prefer 3–10 second `audio_average()` windows for mix decisions.
 
@@ -362,9 +370,9 @@ The protocol keeps the older frame prefix for backward compatibility.
 6      centroid_hz                   float
 7      rolloff_hz                    float
 8      flatness                      float
-9      stereo_correlation             float
+9      stereo_correlation            float
 10     stereo_width                  float
-11..42 spectrum bands                32 floats
+11..42 spectrum bands               32 floats
 43     lufs_s                        float
 44     lufs_i                        float
 45     true_peak_dbtp                float
@@ -390,12 +398,7 @@ The identify event contains the runtime UUID, analyzer name, timestamp, and prot
 
 `libebur128` provides EBU R128 / ITU-R BS.1770-oriented loudness and true-peak measurement.
 
-AI Audio Analyzer maintains a persistent stereo loudness state and requests:
-
-- short-term loudness;
-- integrated loudness;
-- true peak;
-- histogram-backed integrated loudness.
+AI Audio Analyzer maintains a persistent stereo loudness state and requests short-term loudness, integrated loudness, true peak, and histogram-backed integrated loudness.
 
 `LUFS-I` accumulates from the most recent analyzer reset/prepare. If only a chorus loop was played, the result represents that measured session rather than the complete song.
 
@@ -463,10 +466,7 @@ Requirements:
 - Windows: Visual Studio 2022 recommended
 - Internet access during CMake configure
 
-CMake FetchContent downloads:
-
-- JUCE 8.0.8
-- libebur128 1.2.6
+CMake FetchContent downloads JUCE 8.0.8 and libebur128 1.2.6.
 
 ### macOS universal build
 
@@ -519,7 +519,7 @@ README / normal docs
 - Masking detection is relative spectral overlap, not a Bark/ERB psychoacoustic model.
 - Band stereo correlation is FFT-window based and should be interpreted with band energy.
 - Runtime UUIDs are intentionally session-scoped and can change after a plugin reload.
-- FL Mixer Track/Slot mapping currently requires cooperation from an FL Studio control MCP or equivalent host-side parameter control.
+- FL Mixer Track/Slot mapping requires an FL Studio control MCP or equivalent host-side parameter control.
 - The plugin observes audio and does not intentionally alter the audio signal.
 
 ## Repository layout
