@@ -50,7 +50,9 @@ AIAnalyzerAudioProcessor::AIAnalyzerAudioProcessor()
         static_cast<int>(aianalyzer::AnalysisProfile::Full));
     addParameter(analysisProfileParameter);
 
-    lastWorkerProfileIndex = static_cast<int>(aianalyzer::AnalysisProfile::Full);
+    lastWorkerProfileIndex.store(
+        static_cast<int>(aianalyzer::AnalysisProfile::Full),
+        std::memory_order_relaxed);
     analysisWorker.setAnalysisProfile(aianalyzer::AnalysisProfile::Full);
     analysisWorker.setOscConfig(instanceId, oscHost, oscPort);
 }
@@ -62,9 +64,10 @@ AIAnalyzerAudioProcessor::~AIAnalyzerAudioProcessor()
 
 void AIAnalyzerAudioProcessor::prepareToPlay(double sampleRate, int)
 {
-    lastWorkerProfileIndex = getAnalysisProfileIndex();
+    const auto currentProfileIndex = getAnalysisProfileIndex();
+    lastWorkerProfileIndex.store(currentProfileIndex, std::memory_order_relaxed);
     analysisWorker.setAnalysisProfile(
-        static_cast<aianalyzer::AnalysisProfile>(lastWorkerProfileIndex));
+        static_cast<aianalyzer::AnalysisProfile>(currentProfileIndex));
     analysisWorker.prepare(sampleRate);
 
     juce::String currentInstance;
@@ -103,9 +106,10 @@ void AIAnalyzerAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer,
     // Profile reads are cheap; notify the background worker only when the host
     // parameter actually changes. Normal realtime blocks do not signal/wake it.
     const auto currentProfileIndex = getAnalysisProfileIndex();
-    if (currentProfileIndex != lastWorkerProfileIndex)
+    if (currentProfileIndex
+        != lastWorkerProfileIndex.load(std::memory_order_relaxed))
     {
-        lastWorkerProfileIndex = currentProfileIndex;
+        lastWorkerProfileIndex.store(currentProfileIndex, std::memory_order_relaxed);
         analysisWorker.setAnalysisProfile(
             static_cast<aianalyzer::AnalysisProfile>(currentProfileIndex));
     }
@@ -214,7 +218,7 @@ void AIAnalyzerAudioProcessor::setAnalysisProfileIndex(int profileIndex, bool no
         }
     }
 
-    lastWorkerProfileIndex = profileIndex;
+    lastWorkerProfileIndex.store(profileIndex, std::memory_order_relaxed);
     analysisWorker.setAnalysisProfile(
         static_cast<aianalyzer::AnalysisProfile>(profileIndex));
 }
