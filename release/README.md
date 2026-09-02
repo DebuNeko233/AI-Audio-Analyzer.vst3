@@ -8,6 +8,8 @@ User-facing Release packages are created by:
 
 The normal `build` workflow is for development validation/artifacts. It is not the user distribution path.
 
+Current product target: **AI Audio Analyzer 0.8.0 / MCP 0.8 / OSC 0.8**.
+
 ## Release audience
 
 The GitHub Release is designed for people who may have **no programming experience at all**.
@@ -41,13 +43,13 @@ The MCP executable is built with PyInstaller one-file mode:
 -F / --onefile
 ```
 
-Build-time source entrypoint:
+Build-time source entrypoint remains:
 
 ```text
 bridge/server.py
 ```
 
-The build pipeline may use Python internally, but the **user package must not contain MCP Python source**.
+V0.8 also imports `bridge/stereo_tools.py` into that single executable. The build pipeline may use Python internally, but the **user package must not contain MCP Python source**.
 
 ## User package layout
 
@@ -97,7 +99,7 @@ inner Release ZIP files
 
 Do not create a final ZIP in the platform packaging jobs and then upload that ZIP inside a GitHub Actions artifact.
 
-The pipeline should be:
+Required pipeline:
 
 ```text
 build/stage Windows directory
@@ -117,9 +119,10 @@ Before publication, verify at least:
 
 ```text
 source MCP syntax/self-test
+MCP 0.8 / 22-tool registry
 PyInstaller one-file build
 packaged MCP self-test on its native OS
-Windows VST3 build
+Windows x64 VST3 build
 macOS arm64 VST3 build
 Windows installer parse
 macOS installer syntax
@@ -139,7 +142,7 @@ The installer handles the current quarantine/local-signature path. Documentation
 
 ## Documentation rule
 
-When Release layout or installation behavior changes, review and update together:
+When Release layout, version metadata, or installation behavior changes, review and update together:
 
 ```text
 release/common/START-HERE.md
