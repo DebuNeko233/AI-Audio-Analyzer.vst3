@@ -4,17 +4,17 @@
 
 **AI Audio Analyzer** 是一个面向 AI / LLM 音乐制作工作流的 JUCE VST3 机器可读音频测量层。
 
-插件在 DAW 内直接测量音频，通过 OSC 把紧凑数据发送给 Analyzer MCP Bridge，再由 Cherry Studio 或其他 MCP 客户端结构化读取电平、响度、频谱、立体声、时间关系、工程概览、A/B、遮蔽相关证据，以及音频域调性/音乐语义证据。
+插件在 DAW 内直接测量音频，通过 OSC 把紧凑数据发送给 Analyzer MCP Bridge，再由 Cherry Studio 或其他 MCP 客户端结构化读取电平、响度、频谱、立体声、时间关系、工程概览、A/B、遮蔽相关证据、音频域调性证据，以及 V1.0 的闭环修改验证信息。
 
-当前产品版本：**0.9.0**。
+当前产品版本：**1.0.0**。
 
 ## 项目组成
 
 ```text
 AI Audio Analyzer
 ├─ VST3    DAW 内的实时安全测量探针
-├─ MCP     结构化测量 / 比较 / 证据工具
-└─ Skill   英文 LLM 使用说明：正确调用 MCP、理解参数和有效性
+├─ MCP     结构化测量 / 比较 / 验证工具
+└─ Skill   英文 LLM 使用说明：正确调用 MCP、理解参数和证据语义
 ```
 
 Skill **不是风格化混音/和声教程**，不会内置固定 LUFS、EQ、压缩、Sidechain、Stereo、转调、和声修改或母带处理配方。
@@ -27,15 +27,24 @@ Skill **不是风格化混音/和声教程**，不会内置固定 LUFS、EQ、�
 
 ```text
 AI Audio Analyzer MCP   → 观察 / 测量 / 比较 / 验证
-FL Studio MCP           → 读取 / 控制 / 修改 FL Studio
+FL Studio MCP           → 读取 / 控制 / 修改 / 回读 FL Studio
 ```
 
-典型闭环：
+V1.0 把闭环明确为：
 
 ```text
-OBSERVE → REASON → CHANGE → READBACK → COMPARE
-观察       推理       修改       回读         对比
+工程发现
+→ Analyzer 确定性映射
+→ Before 测量
+→ 根据用户目标进行外部推理
+→ 通过真实 DAW-control MCP 修改
+→ 回读宿主实际状态
+→ After 测量
+→ 检查 Before/After 是否可比
+→ 需要时再下钻 Temporal / Masking / Stereo / Tonal 证据
 ```
+
+Analyzer MCP 本身**不负责写入 DAW 参数**。
 
 ## 架构
 
@@ -55,10 +64,13 @@ FL Studio / DAW
                  ├─ V0.6 Temporal Evidence
                  ├─ V0.7 Masking Evidence
                  ├─ V0.8 Mid/Side + Stereo Evidence
-                 └─ V0.9 Tonal / Music-Semantic Evidence
+                 ├─ V0.9 Tonal / Music-Semantic Evidence
+                 └─ V1.0 Closed-loop Verification Sessions
                          │
                          ▼
                   Cherry Studio / LLM
+                         │
+                         └─ 外部 FL Studio MCP 负责实际修改和宿主回读
 ```
 
 多个 Analyzer 可以共用同一个 UDP 端口；只有一个 MCP Bridge 进程应该绑定 UDP `9855`。
@@ -80,8 +92,6 @@ FL Studio / DAW
 
 ### V0.3 Signal Validity
 
-大致逻辑：
-
 ```text
 关闭   低于 -50 dBFS 持续约 0.4 s
 重开   高于 -48 dBFS
@@ -98,13 +108,11 @@ Parameter ID: identify
 Display name: Identify
 ```
 
-每次 Identify 状态翻转都会发送 `/aianalyzer/identify`，Transport 停止时同样有效。Bridge 可把 Runtime UUID 绑定到真实 FL Mixer Track / Slot，之后用：
+每次 Identify 状态翻转都会发送 `/aianalyzer/identify`，Transport 停止时同样有效。Bridge 可把 Runtime UUID 绑定到真实 FL Mixer Track / Slot，之后优先用：
 
 ```text
 mixer:7/slot:9
 ```
-
-稳定选中目标实例。
 
 ### V0.5 Project Intelligence / Snapshot A-B
 
@@ -119,7 +127,7 @@ audio_temporal_compare()
 
 Temporal overlap / correlation 是时间共现和共变证据，不是遮蔽概率，也不是处理指令。
 
-### V0.7 更强的 Masking Evidence
+### V0.7 Masking Evidence
 
 ```text
 32 个 Mid Spectrum 特征
@@ -130,8 +138,6 @@ Temporal overlap / correlation 是时间共现和共变证据，不是遮蔽概�
 → Region-level Masking Evidence
 ```
 
-新增：
-
 ```text
 audio_masking_evidence()
 audio_project_masking_scan()
@@ -139,21 +145,9 @@ audio_project_masking_scan()
 
 这里是 **equal-ERB-rate feature re-binning**，不是 gammatone / cochlear filterbank，也不是经过听阈校准的心理声学模型。分数是 heuristic evidence，不是可听遮蔽概率。
 
-### V0.8 更深入的 Mid/Side 与 Stereo Evidence
+### V0.8 Mid/Side 与 Stereo Evidence
 
-0.8 把单一 `stereo_width` 无法区分的概念拆开：
-
-```text
-带正负号的 L/R Correlation
-Side/Mid Energy Ratio
-Decorrelation Proxy = 1 - abs(correlation)
-Negative Cross-Spectrum Energy Ratio
-20–120 Hz Correlation + Side/Mid Ratio
-32-band Mid Spectrum + 32-band Side Spectrum
-8-band Correlation + Side/Mid Ratio
-```
-
-新增：
+V0.8 将 Signed L/R Correlation、Side/Mid Energy、Decorrelation Proxy、Negative Cross-Spectrum、低频 Stereo Relation、Mid/Side Spectrum 和分频段 Stereo 关系拆开测量。
 
 ```text
 audio_stereo_profile(track, seconds=5)
@@ -164,9 +158,7 @@ Skill 不定义统一的 Width、Correlation、Side/Mid 或低频 Stereo 目标�
 
 ### V0.9 音频域调性 / Music-semantic Evidence
 
-V0.9 增加音乐语义测量，但明确不把音频推断伪装成精确 MIDI / 工程符号数据。
-
-VST3 新增：
+V0.9 提供：
 
 ```text
 12-bin normalized chroma: C..B
@@ -175,67 +167,55 @@ single_f0_harmonic_energy_ratio
 harmonic_f0_candidate_hz
 ```
 
-Chroma 由大约 `80 Hz–5 kHz` 的 Mid Spectrum Power 计算，FFT Bin 映射到最近的 12-TET Pitch Class，并折叠 Octave 信息。
-
-MCP 新增：
+Chroma 来自大约 `80 Hz–5 kHz` 的 Mid Spectrum Power，并映射到最近的 12-TET Pitch Class、折叠 Octave。Single-F0 Harmonic Ratio 的最终能量分子和分母也使用约 `80 Hz–5 kHz` 的语义频段，而候选 F0 搜索范围约为 `55–1000 Hz`。
 
 ```text
 audio_tonal_profile(track, seconds=8)
 audio_tonal_compare(track_a, track_b, seconds=8)
 ```
 
-`audio_tonal_profile()` 进一步提供可解释证据：
+Tonal-center 使用 24 个 Major/Minor Krumhansl-Kessler Profile Correlation。它们是音频域证据，不是精确 Key / Note 概率。涉及精确 Note、Key、Chord、Tuning 时，如果 DAW/MIDI MCP 有真实符号数据，应优先用该数据。
+
+### V1.0 可靠闭环验证
+
+V1.0 新增的是 **Bridge 侧 Verification Orchestration**，没有新增 DSP 或 OSC 字段：
 
 ```text
-Pitch-class Entropy
-24 个 Major/Minor Krumhansl-Kessler Profile Correlations
-Top Tonal-center Candidates
-Top-2 Correlation Margin
-Windowed Chroma Coverage
-Single-F0 Candidate Stability
+audio_begin_verification(label, seconds=5, target_selectors=None)
+audio_complete_verification(verification_id, seconds=0, change_summary="", host_readback="")
+audio_verification_status(verification_id="")
 ```
 
-重要限制：
+标准流程：
 
-- Chroma 是 Pitch-class Power，不是 Note Probability 或 MIDI Transcription；
-- Tonal-center Candidate 是模板相关性，不是 Ground-truth Key，也不是概率；
-- `top2_margin` 是候选之间的分离度，不是校准后的 Confidence；
-- `single_f0_harmonic_energy_ratio` 是 Spectral Alignment Heuristic，不是 Harmonic-content Probability 或 Source Separation；
-- `harmonic_f0_candidate_hz` 可能发生 Octave / Subharmonic Jump，不是已检测到的音符；
-- 如果 DAW / MIDI MCP 可以直接取得精确 Note、Key、Chord、Tuning Metadata，涉及精确符号事实时应优先使用这些数据。
+```text
+Before Baseline
+→ 外部 FL Studio MCP 实际修改
+→ 回读宿主实际状态
+→ After Capture
+→ 检查技术可比性
+→ 返回 After - Before 测量差值
+```
+
+Verification 会显式检查：Before/After 测量窗口是否一致、Analyzer 拓扑是否一致、目标是否缺失或无效、Active Coverage 是否接近。当前 `active_ratio` 的绝对差容差为 `0.15`。
+
+`controlled_comparison=true` 只代表**这次 A/B 的技术测量条件满足当前透明 Guardrails**，不代表 After 更好、设置正确、更加专业，也不代表应该保留修改。
+
+`host_readback` 是调用方从外部 Control MCP 获得的实际宿主回读文本；Analyzer 会把它保存进审计结果，但不会独立验证 FL Studio 控制状态。
+
+Verification Session 只保存在当前 Bridge 内存中，重启 MCP 后不会保留。
 
 ## MCP 工具
 
-MCP 0.9 共 **24 个工具**：
+MCP 1.0 共 **27 个工具**。在之前 24 个测量/证据工具基础上新增：
 
 ```text
-audio_bridge_status()
-audio_list_tracks()
-audio_last_identify()
-audio_bind_last_identified(...)
-audio_instance_map()
-audio_snapshot(track)
-audio_average(track, seconds)
-audio_stereo_bands(track)
-audio_compare_tracks(track_a, track_b)
-audio_detect_masking(track_a, track_b)
-audio_master_status(track="Master")
-audio_project_status()
-audio_mix_overview(seconds=10, max_tracks=32)
-audio_capture_snapshot(name, seconds=5)
-audio_list_snapshots()
-audio_compare_snapshots(before, after)
-audio_temporal_profile(track, seconds=5)
-audio_temporal_compare(...)
-audio_masking_evidence(...)
-audio_project_masking_scan(...)
-audio_stereo_profile(track, seconds=5)
-audio_stereo_compare(track_a, track_b, seconds=5)
-audio_tonal_profile(track, seconds=8)
-audio_tonal_compare(track_a, track_b, seconds=8)
+audio_begin_verification(...)
+audio_complete_verification(...)
+audio_verification_status(...)
 ```
 
-不要为了“完整”而机械调用所有工具。先从工程级工具开始，再只选择问题真正需要的 Evidence Family。
+不要为了“完整”机械调用所有工具。先从工程级工具开始，只选择当前问题真正需要的 Evidence Family；如果任务要求修改 DAW 并验证结果，就用 V1.0 Verification 包住外部写入和宿主回读。
 
 ## 用户安装
 
@@ -296,31 +276,34 @@ Install.command
 bridge/server.py
 ```
 
-版本号是元数据，不写进启动文件名：
+版本关系：
 
 ```text
-Product version       0.9.0
-MCP version           0.9
+Product version       1.0.0
+MCP version           1.0
 OSC protocol version  0.9
 ```
 
-内部按职责拆分：
+V1.0 没有改 VST3 Frame，因此 OSC Protocol 故意保持 0.9。
+
+内部模块：
 
 ```text
-bridge/server.py          启动 / self-test / 共享 Tool Registry
-bridge/analyzer_core.py   OSC 状态、身份映射、基础工具
-bridge/project_tools.py   Project Overview / Snapshot A-B
-bridge/temporal_tools.py  V0.6 Temporal Layer
-bridge/masking_tools.py   V0.7 Masking Evidence Layer
-bridge/stereo_tools.py    V0.8 Mid/Side + Stereo Layer
-bridge/semantic_tools.py  V0.9 Chroma / Tonal-center / Harmonic Evidence
+bridge/server.py             启动 / self-test / 共享 Tool Registry
+bridge/analyzer_core.py      OSC 状态、身份映射、基础工具
+bridge/project_tools.py      Project Overview / Snapshot A-B
+bridge/temporal_tools.py     V0.6 Temporal Layer
+bridge/masking_tools.py      V0.7 Masking Evidence Layer
+bridge/stereo_tools.py       V0.8 Mid/Side + Stereo Layer
+bridge/semantic_tools.py     V0.9 Chroma / Tonal-center / Harmonic Evidence
+bridge/verification_tools.py V1.0 Closed-loop Verification
 ```
 
-仓库开发可以使用 Python 3.12 和 `bridge/requirements.txt`；这套开发内容**不会进入用户 Release**。
+`bridge/ci_regression.py` 只用于仓库 CI，不进入普通用户 Release。
 
 ## Skill
 
-LLM-facing Skill 按项目规则统一使用英文：
+LLM-facing Skill 统一使用英文：
 
 ```text
 skills/ai-analyzer-flstudio/SKILL.md
@@ -330,6 +313,7 @@ skills/ai-analyzer-flstudio/references/parameters.md
 skills/ai-analyzer-flstudio/references/masking-evidence.md
 skills/ai-analyzer-flstudio/references/stereo-evidence.md
 skills/ai-analyzer-flstudio/references/tonal-evidence.md
+skills/ai-analyzer-flstudio/references/verification-evidence.md
 ```
 
 Skill 只负责工具调用、selector / mapping、有效性、参数与证据语义，不预设混音审美、转调、和声修改或处理动作。
@@ -338,50 +322,40 @@ Skill 只负责工具调用、selector / mapping、有效性、参数与证据�
 
 Analysis 地址：`/aianalyzer/frame`。
 
-协议继续 append-only。现有 `0..111` 完全不变，V0.9 追加：
+MCP 1.0 继续使用 append-only **OSC Protocol 0.9**：
 
 ```text
-0..58    V0.1–V0.4 兼容字段
-59       temporal_window_seconds
-60       spectral_flux_mean
-61       spectral_flux_peak
-62       rms_rise_peak_db
-63       low_band_energy_db
-64       V0.6 schema marker = "0.6"
-65       mid_rms_db
-66       side_rms_db
-67       side_to_mid_db
-68       negative_cross_energy_ratio
-69       low_band_20_120_correlation
-70       low_band_20_120_side_to_mid_db
-71..102  32 个 Side Spectrum Bands
-103..110 8 个 Side/Mid Band Ratios
-111      V0.8 schema marker = "0.8"
-112..123 12 个 Chroma Bins：C..B
-124      chroma_energy_ratio
-125      single_f0_harmonic_energy_ratio
-126      harmonic_f0_candidate_hz
-127      V0.9 schema marker = "0.9"
+0..58      V0.1–V0.4 兼容字段
+59..64     V0.6 Temporal
+65..111    V0.8 Mid/Side + Stereo
+112..123   12 Chroma Bins：C..B
+124        chroma_energy_ratio
+125        single_f0_harmonic_energy_ratio
+126        harmonic_f0_candidate_hz
+127        V0.9 schema marker = "0.9"
 ```
 
-历史的 `11..42` 继续保持为 32-band **Mid Spectrum**。
+历史 `11..42` 仍是 32-band **Mid Spectrum**。V1.0 不会在 127 后面继续追加字段。
 
-Identify 地址仍然是 `/aianalyzer/identify`。
+Identify 地址仍是 `/aianalyzer/identify`。
 
 ## 实时线程原则
 
-Audio Callback 不执行 FFT、响度、Music-semantic Analysis、OSC、MCP、文件或网络 I/O，也不执行重量级分配。Audio Sample 只写入预分配 SPSC FIFO，其余分析在后台线程完成。
+Audio Callback 不执行 FFT、响度、Music-semantic Analysis、OSC、MCP、Verification Orchestration、文件或网络 I/O，也不执行重量级分配。Audio Sample 只写入预分配 SPSC FIFO，其余分析在后台线程完成。
 
 ## 当前限制
 
-- V0.7 ERB 仍然只是 feature re-binning，不是真正 auditory filterbank；
-- Masking Evidence 仍然是 heuristic；
+- V0.7 ERB 仍是 feature re-binning，不是真正 auditory filterbank；
+- Masking Evidence 仍是 heuristic；
 - V0.8 Negative Cross Evidence 不是 phase-angle histogram 或 mono-cancellation 百分比；
 - V0.8 Side/Mid 与 Correlation 都是测量，不是 Stereo Quality Score；
 - V0.9 Chroma 是 FFT-derived 12-TET Pitch-class Evidence，不是 Transcription；
 - V0.9 Tonal-center Ranking 是 Profile Correlation，不是精确 Key Detection；
 - V0.9 Single-F0 Harmonic Evidence 是 Heuristic，在 Polyphonic / Noisy / Inharmonic Material 上可能不稳定；
-- Temporal 对齐受独立 OSC Stream 和约 10 Hz 更新分辨率限制；
+- V1.0 Topology Fingerprint 只代表当前 Live Analyzer 的一致性，不是完整、永久的 FL Studio Project Hash；
+- V1.0 `host_readback` 由调用方/外部 Control MCP 提供，Analyzer 不独立验证；
+- V1.0 Verification Session 是内存态，Bridge 退出后消失；
+- Temporal 对齐受独立 OSC Stream 和更新分辨率限制；
 - LUFS-I / Session Max True Peak 是 Session 累积量；
 - FL Mixer Binding 是 Session-scoped，重新打开工程后可能需要重新 Identify；
 - macOS Release 仅支持 Apple Silicon，且当前未 Notarize。
@@ -393,11 +367,12 @@ Source/                         JUCE VST3
 bridge/server.py                唯一 MCP 入口
 bridge/analyzer_core.py         稳定内部 MCP/OSC Core
 bridge/*_tools.py               功能模块
+bridge/ci_regression.py         仓库内部 MCP 回归测试
 skills/ai-analyzer-flstudio/    英文 LLM-facing Skill
 release/                        面向普通用户的安装器 / 文档
 .github/workflows/build.yml     开发 CI
 .github/workflows/release.yml   手动 Release 打包
-AGENT.md                        Agent / Maintainer 路线图与规则
+AGENT.md                        Agent / Maintainer 历史与规则
 ```
 
 修改仓库前先阅读 `AGENT.md`。
