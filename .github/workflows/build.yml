@@ -107,7 +107,7 @@ jobs:
           cache: pip
           cache-dependency-path: bridge/requirements.txt
 
-      - name: Validate MCP 1.0 source and regressions
+      - name: Validate MCP 1.1 source and regressions
         shell: bash
         run: |
           set -euo pipefail
@@ -121,6 +121,7 @@ jobs:
             bridge/masking_tools.py \
             bridge/stereo_tools.py \
             bridge/semantic_tools.py \
+            bridge/performance_tools.py \
             bridge/verification_tools.py \
             bridge/ci_regression.py
           AI_ANALYZER_SELF_TEST=1 python bridge/server.py
@@ -139,6 +140,7 @@ jobs:
           cp bridge/masking_tools.py dist/mcp/
           cp bridge/stereo_tools.py dist/mcp/
           cp bridge/semantic_tools.py dist/mcp/
+          cp bridge/performance_tools.py dist/mcp/
           cp bridge/verification_tools.py dist/mcp/
           cp bridge/requirements.txt dist/mcp/
           cp bridge/cherry-studio.example.json dist/mcp/
