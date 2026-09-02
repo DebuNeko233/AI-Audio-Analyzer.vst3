@@ -1,6 +1,7 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include <atomic>
 #include <mutex>
 
 #include "AnalysisFrame.h"
@@ -50,6 +51,12 @@ private:
     juce::String instanceId { "Track" };
     juce::String oscHost { "127.0.0.1" };
     int oscPort = 9855;
+
+    // Host-visible parameter used only for deterministic discovery. Every
+    // transition (false->true or true->false) emits one /aianalyzer/identify
+    // event containing this live plugin instance's runtime UUID.
+    juce::AudioParameterBool* identifyParameter = nullptr;
+    std::atomic<bool> lastIdentifyState { false };
 
     aianalyzer::AnalysisWorker analysisWorker;
 
