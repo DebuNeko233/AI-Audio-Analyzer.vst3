@@ -13,6 +13,7 @@ jobs:
       plugin: ${{ steps.filter.outputs.plugin }}
       bridge: ${{ steps.filter.outputs.bridge }}
       skill: ${{ steps.filter.outputs.skill }}
+      release: ${{ steps.filter.outputs.release }}
       workflow: ${{ steps.filter.outputs.workflow }}
     steps:
       - uses: actions/checkout@v4
@@ -47,6 +48,7 @@ jobs:
           plugin=false
           bridge=false
           skill=false
+          release=false
           workflow=false
 
           while IFS= read -r file; do
@@ -61,6 +63,9 @@ jobs:
               skills/ai-analyzer-flstudio/*)
                 skill=true
                 ;;
+              release/*|.github/workflows/release.yml)
+                release=true
+                ;;
               .github/workflows/build.yml)
                 workflow=true
                 ;;
@@ -70,9 +75,42 @@ jobs:
           echo "plugin=$plugin" >> "$GITHUB_OUTPUT"
           echo "bridge=$bridge" >> "$GITHUB_OUTPUT"
           echo "skill=$skill" >> "$GITHUB_OUTPUT"
+          echo "release=$release" >> "$GITHUB_OUTPUT"
           echo "workflow=$workflow" >> "$GITHUB_OUTPUT"
 
-          echo "plugin=$plugin bridge=$bridge skill=$skill workflow=$workflow"
+          echo "plugin=$plugin bridge=$bridge skill=$skill release=$release workflow=$workflow"
+
+  release-validate:
+    name: Validate release installer (${{ matrix.os }})
+    needs: changes
+    if: needs.changes.outputs.release == 'true' || needs.changes.outputs.workflow == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate macOS shell installers
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n release/macos/install.sh
+          bash -n release/macos/Install.command
+          test -s release/common/START-HERE.md
+          test -s release/common/INSTALL.en.md
+          test -s release/common/INSTALL.zh-CN.md
+
+      - name: Validate Windows PowerShell installer
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $null = [scriptblock]::Create((Get-Content release/windows/Install.ps1 -Raw))
+          if (-not (Test-Path release/windows/Install.cmd)) { throw 'Install.cmd missing' }
+          Write-Host 'Windows installer syntax OK'
 
   bridge:
     name: Validate and package MCP / skill components
