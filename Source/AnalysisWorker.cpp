@@ -14,6 +14,7 @@ constexpr float kRolloffFraction = 0.85f;
 constexpr double kOscIntervalMs = 100.0; // 10 Hz network update rate
 constexpr float kTemporalLowBandMinHz = 40.0f;
 constexpr float kTemporalLowBandMaxHz = 160.0f;
+constexpr float kStereoLowBandMaxHz = 120.0f;
 
 // Treat material below -50 dBFS as absent, but use hysteresis and a short hold
 // to avoid chattering when a tail hovers around the threshold.
@@ -38,6 +39,27 @@ int stereoBandForFrequency(float frequencyHz)
             return band;
     }
     return -1;
+}
+
+float amplitudeRatioToDb(double numerator, double denominator) noexcept
+{
+    if (numerator <= 1.0e-20 && denominator <= 1.0e-20)
+        return 0.0f;
+
+    const auto ratio = std::max(numerator, 1.0e-20) / std::max(denominator, 1.0e-20);
+    return juce::jlimit(-120.0f, 120.0f,
+                        static_cast<float>(20.0 * std::log10(ratio)));
+}
+
+float powerRatioToDb(double numeratorPower, double denominatorPower) noexcept
+{
+    if (numeratorPower <= 1.0e-30 && denominatorPower <= 1.0e-30)
+        return 0.0f;
+
+    const auto ratio = std::max(numeratorPower, 1.0e-30) /
+                       std::max(denominatorPower, 1.0e-30);
+    return juce::jlimit(-120.0f, 120.0f,
+                        static_cast<float>(10.0 * std::log10(ratio)));
 }
 } // namespace
 
@@ -154,6 +176,7 @@ void AnalysisWorker::resetAnalysisState()
     std::fill(fftLeftData.begin(), fftLeftData.end(), 0.0f);
     std::fill(fftRightData.begin(), fftRightData.end(), 0.0f);
     std::fill(midMagnitudes.begin(), midMagnitudes.end(), 0.0f);
+    std::fill(sideMagnitudes.begin(), sideMagnitudes.end(), 0.0f);
     std::fill(previousMidMagnitudes.begin(), previousMidMagnitudes.end(), 0.0f);
     filledSamples = 0;
 
@@ -340,6 +363,9 @@ void AnalysisWorker::processWindow()
     const auto sideRms = std::sqrt(sumSide2 / kFftSize);
     frame.stereoWidth = juce::jlimit(0.0f, 4.0f,
                                      static_cast<float>(sideRms / std::max(midRms, 1.0e-12)));
+    frame.midRmsDb = amplitudeToDb(static_cast<float>(midRms));
+    frame.sideRmsDb = amplitudeToDb(static_cast<float>(sideRms));
+    frame.sideToMidDb = amplitudeRatioToDb(sideRms, midRms);
 
     const int numBins = kFftSize / 2 + 1;
     const auto normalization = static_cast<float>(kFftSize) * 0.5f;
@@ -354,6 +380,16 @@ void AnalysisWorker::processWindow()
     std::array<double, kNumStereoCorrelationBands> bandCross {};
     std::array<double, kNumStereoCorrelationBands> bandLeftPower {};
     std::array<double, kNumStereoCorrelationBands> bandRightPower {};
+    std::array<double, kNumStereoCorrelationBands> bandMidPower {};
+    std::array<double, kNumStereoCorrelationBands> bandSidePower {};
+
+    double negativeCrossWeight = 0.0;
+    double totalCrossWeight = 0.0;
+    double lowBandCross = 0.0;
+    double lowBandLeftPower = 0.0;
+    double lowBandRightPower = 0.0;
+    double lowBandMidPower = 0.0;
+    double lowBandSidePower = 0.0;
 
     const int firstBin = std::max(1, static_cast<int>(std::ceil(kMinFrequencyHz * kFftSize / currentSampleRate)));
     const int lastBin = std::min(numBins - 1,
@@ -370,8 +406,12 @@ void AnalysisWorker::processWindow()
         const auto rIm = fftRightData[index + 1];
         const auto midRe = 0.5f * (lRe + rRe);
         const auto midIm = 0.5f * (lIm + rIm);
+        const auto sideRe = 0.5f * (lRe - rRe);
+        const auto sideIm = 0.5f * (lIm - rIm);
         midMagnitudes[static_cast<std::size_t>(k)] =
             std::sqrt(midRe * midRe + midIm * midIm) / normalization;
+        sideMagnitudes[static_cast<std::size_t>(k)] =
+            std::sqrt(sideRe * sideRe + sideIm * sideIm) / normalization;
     }
 
     const bool hadPreviousTemporalFrame = hasPreviousTemporalFrame;
@@ -450,6 +490,21 @@ void AnalysisWorker::processWindow()
         const auto magnitude = std::max(midMagnitudes[static_cast<std::size_t>(k)], 1.0e-12f);
         const auto frequency = static_cast<double>(k) * currentSampleRate / kFftSize;
         const auto power = static_cast<double>(magnitude) * magnitude;
+        const auto index = static_cast<std::size_t>(k * 2);
+        const auto lRe = static_cast<double>(fftLeftData[index]);
+        const auto lIm = static_cast<double>(fftLeftData[index + 1]);
+        const auto rRe = static_cast<double>(fftRightData[index]);
+        const auto rIm = static_cast<double>(fftRightData[index + 1]);
+        const auto midRe = 0.5 * (lRe + rRe);
+        const auto midIm = 0.5 * (lIm + rIm);
+        const auto sideRe = 0.5 * (lRe - rRe);
+        const auto sideIm = 0.5 * (lIm - rIm);
+        const auto leftPower = lRe * lRe + lIm * lIm;
+        const auto rightPower = rRe * rRe + rIm * rIm;
+        const auto cross = lRe * rRe + lIm * rIm;
+        const auto midPower = midRe * midRe + midIm * midIm;
+        const auto sidePower = sideRe * sideRe + sideIm * sideIm;
+        const auto bilateralWeight = std::sqrt(std::max(0.0, leftPower * rightPower));
 
         weightedFrequency += frequency * magnitude;
         totalMagnitude += magnitude;
@@ -458,21 +513,42 @@ void AnalysisWorker::processWindow()
         logMagnitude += std::log(static_cast<double>(magnitude));
         ++flatnessBins;
 
+        totalCrossWeight += bilateralWeight;
+        if (cross < 0.0)
+            negativeCrossWeight += bilateralWeight;
+
+        if (frequency >= kMinFrequencyHz && frequency < kStereoLowBandMaxHz)
+        {
+            lowBandCross += cross;
+            lowBandLeftPower += leftPower;
+            lowBandRightPower += rightPower;
+            lowBandMidPower += midPower;
+            lowBandSidePower += sidePower;
+        }
+
         const auto band = stereoBandForFrequency(static_cast<float>(frequency));
         if (band >= 0)
         {
-            const auto index = static_cast<std::size_t>(k * 2);
-            const auto lRe = static_cast<double>(fftLeftData[index]);
-            const auto lIm = static_cast<double>(fftLeftData[index + 1]);
-            const auto rRe = static_cast<double>(fftRightData[index]);
-            const auto rIm = static_cast<double>(fftRightData[index + 1]);
             const auto b = static_cast<std::size_t>(band);
-
-            bandCross[b] += lRe * rRe + lIm * rIm;
-            bandLeftPower[b] += lRe * lRe + lIm * lIm;
-            bandRightPower[b] += rRe * rRe + rIm * rIm;
+            bandCross[b] += cross;
+            bandLeftPower[b] += leftPower;
+            bandRightPower[b] += rightPower;
+            bandMidPower[b] += midPower;
+            bandSidePower[b] += sidePower;
         }
     }
+
+    frame.negativeCrossEnergyRatio = totalCrossWeight > 1.0e-18
+        ? juce::jlimit(0.0f, 1.0f,
+                       static_cast<float>(negativeCrossWeight / totalCrossWeight))
+        : 0.0f;
+
+    const auto lowBandDenom = std::sqrt(std::max(0.0, lowBandLeftPower * lowBandRightPower));
+    frame.lowBandCorrelation = lowBandDenom > 1.0e-18
+        ? juce::jlimit(-1.0f, 1.0f,
+                       static_cast<float>(lowBandCross / lowBandDenom))
+        : 0.0f;
+    frame.lowBandSideToMidDb = powerRatioToDb(lowBandSidePower, lowBandMidPower);
 
     frame.spectralCentroidHz = totalMagnitude > 0.0
         ? static_cast<float>(weightedFrequency / totalMagnitude)
@@ -504,11 +580,16 @@ void AnalysisWorker::processWindow()
     {
         const auto frequency = std::min(bandCenterHz(band),
                                         static_cast<float>(currentSampleRate * 0.5));
-        const auto magnitude = interpolateMagnitudeAtFrequency(midMagnitudes.data(),
-                                                               numBins,
-                                                               currentSampleRate,
-                                                               frequency);
-        frame.bandsDb[static_cast<std::size_t>(band)] = amplitudeToDb(magnitude);
+        const auto midMagnitude = interpolateMagnitudeAtFrequency(midMagnitudes.data(),
+                                                                  numBins,
+                                                                  currentSampleRate,
+                                                                  frequency);
+        const auto sideMagnitude = interpolateMagnitudeAtFrequency(sideMagnitudes.data(),
+                                                                   numBins,
+                                                                   currentSampleRate,
+                                                                   frequency);
+        frame.bandsDb[static_cast<std::size_t>(band)] = amplitudeToDb(midMagnitude);
+        frame.sideBandsDb[static_cast<std::size_t>(band)] = amplitudeToDb(sideMagnitude);
     }
 
     for (int band = 0; band < kNumStereoCorrelationBands; ++band)
@@ -518,6 +599,7 @@ void AnalysisWorker::processWindow()
         frame.bandStereoCorrelation[b] = bandDenom > 1.0e-18
             ? juce::jlimit(-1.0f, 1.0f, static_cast<float>(bandCross[b] / bandDenom))
             : 0.0f;
+        frame.bandSideToMidDb[b] = powerRatioToDb(bandSidePower[b], bandMidPower[b]);
     }
 
     // Once the signal gate has closed, spectral/stereo/temporal values are
@@ -536,8 +618,16 @@ void AnalysisWorker::processWindow()
         frame.spectralFluxPeak = 0.0f;
         frame.rmsRisePeakDb = 0.0f;
         frame.lowBandEnergyDb = kFloorDb;
+        frame.midRmsDb = kFloorDb;
+        frame.sideRmsDb = kFloorDb;
+        frame.sideToMidDb = 0.0f;
+        frame.negativeCrossEnergyRatio = 0.0f;
+        frame.lowBandCorrelation = 0.0f;
+        frame.lowBandSideToMidDb = 0.0f;
         frame.bandsDb.fill(kFloorDb);
         frame.bandStereoCorrelation.fill(0.0f);
+        frame.sideBandsDb.fill(kFloorDb);
+        frame.bandSideToMidDb.fill(0.0f);
     }
 
     {
@@ -612,7 +702,8 @@ void AnalysisWorker::sendFrame(const AnalysisFrame& frame)
     message.addFloat32(frame.stereoWidth);
 
     // Preserve the V0.1 prefix so older bridges can still read the first
-    // 11 scalar fields plus 32 spectrum bands.
+    // 11 scalar fields plus 32 spectrum bands. Historical bandsDb is the Mid
+    // spectrum; V0.8 appends the Side spectrum separately.
     for (const auto bandDb : frame.bandsDb)
         message.addFloat32(bandDb);
 
@@ -641,6 +732,22 @@ void AnalysisWorker::sendFrame(const AnalysisFrame& frame)
     message.addFloat32(frame.rmsRisePeakDb);
     message.addFloat32(frame.lowBandEnergyDb);
     message.addString("0.6");
+
+    // V0.8 Mid/Side + stereo extras. Indices 0..64 are untouched. These fields
+    // separate Side energy and negative cross-spectrum evidence from ordinary
+    // correlation so downstream models can distinguish decorrelation from
+    // strong phase opposition without relying on a single width number.
+    message.addFloat32(frame.midRmsDb);
+    message.addFloat32(frame.sideRmsDb);
+    message.addFloat32(frame.sideToMidDb);
+    message.addFloat32(frame.negativeCrossEnergyRatio);
+    message.addFloat32(frame.lowBandCorrelation);
+    message.addFloat32(frame.lowBandSideToMidDb);
+    for (const auto sideBandDb : frame.sideBandsDb)
+        message.addFloat32(sideBandDb);
+    for (const auto sideToMidDb : frame.bandSideToMidDb)
+        message.addFloat32(sideToMidDb);
+    message.addString("0.8");
 
     oscSender.send(message);
 }
