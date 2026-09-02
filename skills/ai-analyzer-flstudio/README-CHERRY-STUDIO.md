@@ -1,83 +1,85 @@
 # AI Audio Analyzer Cherry Studio Skill
 
-这个 Skill 面向：
+This Skill is intended for:
 
-- Cherry Studio
-- AI Audio Analyzer.vst3 0.6+
-- AI Audio Analyzer MCP 0.6
-- 可选的 FL Studio 控制 MCP：https://github.com/rosasynthesiz/flstudio-mcp
+- Cherry Studio;
+- AI Audio Analyzer.vst3 0.6+;
+- AI Audio Analyzer MCP 0.6;
+- optional FL Studio control MCP: https://github.com/rosasynthesiz/flstudio-mcp
 
-Skill 的职责是让模型**正确调用 Analyzer MCP、理解返回参数、处理多实例映射和数据有效性**。它不提供固定混音风格、LUFS 目标、EQ/压缩/Sidechain 配方。
+Its purpose is to help the model **call Analyzer MCP correctly, interpret returned measurements, handle multi-instance mapping, and respect data validity**. It does not provide fixed mixing styles, LUFS targets, EQ/compression/sidechain recipes, or artistic presets.
 
-## 当前主要能力
+## Current capabilities
 
 ```text
 V0.3  Signal State / runtime UUID
-V0.4  Identify → FL Mixer Track/Slot deterministic mapping
+V0.4  Identify → deterministic FL Mixer Track/Slot mapping
 V0.5  Project Status / Mix Overview / Snapshot A-B
 V0.6  Spectral Flux / RMS Rise / temporal profile / band-envelope comparison
 ```
 
-## 推荐初始化顺序
+## Recommended initialization flow
+
+Start with:
 
 ```text
 audio_project_status()
 ```
 
-如果存在未绑定 Analyzer：
+If Analyzer instances are unbound:
 
 ```text
-FL Studio MCP 找到真实 Mixer Track / Slot
-→ 读取目标 Analyzer 的 Identify 当前值
-→ 翻转 Identify
+Use FL Studio MCP to locate the real Mixer Track / Slot
+→ read the target Analyzer's current Identify value
+→ toggle Identify
 → audio_last_identify()
 → audio_bind_last_identified(...)
 → audio_instance_map()
 ```
 
-绑定后优先使用：
+After binding, prefer:
 
 ```text
 mixer:<index>/slot:<slot>
 ```
 
-## 工具选择
+## Tool selection
 
 ```text
-工程状态             audio_project_status()
-工程窗口概览         audio_mix_overview()
-单轨稳定窗口         audio_average()
-单轨当前帧           audio_snapshot()
-单轨时间变化         audio_temporal_profile()
-两轨频谱关系         audio_compare_tracks()
-两轨时间关系         audio_temporal_compare()
-立体声分频           audio_stereo_bands()
-Snapshot 管理        audio_capture_snapshot() / audio_list_snapshots()
-Before/After         audio_compare_snapshots()
+Project readiness         audio_project_status()
+Project recent window     audio_mix_overview()
+Stable single track       audio_average()
+Latest single frame       audio_snapshot()
+Single-track timing       audio_temporal_profile()
+Two-track spectrum        audio_compare_tracks()
+Two-track timing          audio_temporal_compare()
+Band stereo               audio_stereo_bands()
+Snapshot management       audio_capture_snapshot() / audio_list_snapshots()
+Before/After              audio_compare_snapshots()
 ```
 
-MCP 0.6 当前共 18 个工具，完整列表见 `references/analyzer-mcp.md`。
+MCP 0.6 currently exposes 18 tools. See `references/analyzer-mcp.md` for the complete list.
 
-## V0.6 时间分析
+## V0.6 temporal analysis
 
-VST3 0.6 在原 OSC frame 尾部 append：
+VST3 0.6 appends these fields to the existing OSC frame:
 
 ```text
 temporal_window_seconds
 spectral_flux_mean
 spectral_flux_peak
 rms_rise_peak_db
-low_band_energy_db   # 40-160 Hz FFT-derived energy
+low_band_energy_db   # FFT-derived 40-160 Hz energy
 frame_schema_version
 ```
 
-单轨：
+Single track:
 
 ```text
 audio_temporal_profile("mixer:7/slot:9", 5)
 ```
 
-两轨：
+Two tracks:
 
 ```text
 audio_temporal_compare(
@@ -90,48 +92,48 @@ audio_temporal_compare(
 )
 ```
 
-`band_envelope_correlation` 描述两条所选频段包络的共变；`normalized_band_temporal_overlap` 描述它们是否经常同时处在各自较强状态。两者都是测量证据，不是“必须处理”的结论。
+`band_envelope_correlation` describes how similarly the selected-band envelopes vary. `normalized_band_temporal_overlap` describes how often both tracks are simultaneously strong relative to their own selected-band peaks. Both are measurement evidence, not automatic processing instructions.
 
-`onset_candidate_*` 使用返回值里明确给出的 threshold，是压缩后的 change-event heuristic，不是人工标注意义上的真实 onset label。
+`onset_candidate_*` fields use explicit thresholds returned by the MCP. They are compressed change-event heuristics, not ground-truth onset labels.
 
 ## Signal State
 
-Analyzer 低于约 `-50 dBFS` 持续约 0.4 秒后关闭 Gate，重新高于约 `-48 dBFS` 才打开。
+The Analyzer closes its signal gate after input remains below roughly `-50 dBFS` for about 0.4 seconds, and reopens above roughly `-48 dBFS`.
 
-无有效输入时：
+Without valid input:
 
-- Spectrum / Stereo 相关字段为 `null` / unavailable；
-- V0.6 temporal 字段 `temporal_valid=false`；
-- `null` 不等于 0；
-- LUFS-I 和 session max True Peak 可以继续保留。
+- spectrum/stereo content fields become `null` or unavailable;
+- V0.6 temporal fields report `temporal_valid=false`;
+- `null` does not mean zero;
+- LUFS-I and session maximum True Peak may remain available as session-level values.
 
-窗口结果必须结合 `active_ratio`。
+Always interpret windowed results together with `active_ratio`.
 
 ## Snapshot A/B
 
 ```text
 audio_capture_snapshot("before", 5)
-# 外部控制 MCP 修改工程
+# external control MCP changes the project
 audio_capture_snapshot("after", 5)
 audio_compare_snapshots("before", "after")
 ```
 
-尽量使用同一音乐片段、相同窗口长度和接近的 `active_ratio`。Snapshot 只存在于当前 Bridge session。
+Use the same musical passage, similar window lengths, and comparable `active_ratio` when practical. Snapshots exist only in the current Bridge session.
 
-## 推荐 Agent 提示
+## Recommended Agent instruction
 
 ```text
-优先使用 ai-analyzer-flstudio Skill。
-先用 audio_project_status 检查工程准备度；未绑定实例通过 Identify 建立 FL Mixer Track/Slot 映射。
-内容分析前检查 signal_present、analysis_valid、active_ratio；temporal 分析额外检查 temporal_supported/temporal_valid。
-需要稳定统计时用 audio_average；需要单轨时间变化时用 audio_temporal_profile；需要比较两个轨道是否在时间上共同占用某频段时用 audio_temporal_compare。
-不要把 null 当 0，不要把 spectral overlap、temporal overlap、correlation 或 onset candidate 自动解释成具体混音处理指令。
-如果通过 FL Studio MCP 修改工程，修改后用 Analyzer/Snapshot 做测量回读。
+Use the ai-analyzer-flstudio Skill only as technical guidance for AI Audio Analyzer MCP usage and measurement semantics.
+Start with audio_project_status to check project readiness. Use Identify to establish deterministic FL Mixer Track/Slot bindings for unbound instances.
+Before content analysis, check signal_present, analysis_valid, and active_ratio. For temporal analysis, also check temporal_supported and temporal_valid.
+Use audio_average for stable single-track windows, audio_temporal_profile for single-track temporal behavior, and audio_temporal_compare when determining whether two tracks occupy or vary within a frequency region at the same time.
+Do not treat null as zero. Do not convert spectral overlap, temporal overlap, correlation, or onset candidates directly into fixed mixing actions.
+If the FL Studio control MCP changes the project, read back the host state and use Analyzer/Snapshot A-B when measurement verification is useful.
 ```
 
-## 参数参考
+## References
 
 ```text
-references/analyzer-mcp.md   MCP 调用与 selector
-references/parameters.md     参数技术语义与有效性
+references/analyzer-mcp.md   MCP tools, calling flow, selectors
+references/parameters.md     technical parameter semantics and validity
 ```
