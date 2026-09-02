@@ -11,7 +11,13 @@ on:
       - 'assets/**'
       - 'bridge/**'
       - 'skills/ai-analyzer-flstudio/**'
-      - 'release/**'
+      - 'release/common/START-HERE.md'
+      - 'release/common/INSTALL.en.md'
+      - 'release/common/INSTALL.zh-CN.md'
+      - 'release/windows/Install.ps1'
+      - 'release/windows/Install.cmd'
+      - 'release/macos/install.sh'
+      - 'release/macos/Install.command'
       - '.github/workflows/build.yml'
       - '.github/workflows/release.yml'
   pull_request:
@@ -25,7 +31,13 @@ on:
       - 'assets/**'
       - 'bridge/**'
       - 'skills/ai-analyzer-flstudio/**'
-      - 'release/**'
+      - 'release/common/START-HERE.md'
+      - 'release/common/INSTALL.en.md'
+      - 'release/common/INSTALL.zh-CN.md'
+      - 'release/windows/Install.ps1'
+      - 'release/windows/Install.cmd'
+      - 'release/macos/install.sh'
+      - 'release/macos/Install.command'
       - '.github/workflows/build.yml'
       - '.github/workflows/release.yml'
 
@@ -54,9 +66,9 @@ jobs:
         run: |
           set -euo pipefail
 
-          # For a PR synchronize event, compare only the previous PR head with
-          # the new head. This prevents an old plugin change elsewhere in the PR
-          # from forcing Windows/macOS VST3 rebuilds after a docs/MCP-only commit.
+          # PR synchronize runs compare only the previous and current PR heads.
+          # This prevents an older plugin change elsewhere in the PR from
+          # forcing another VST3 build after a later docs/MCP-only commit.
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             if [ "${{ github.event.action }}" = "synchronize" ] && [ -n "${{ github.event.before }}" ]; then
               BASE="${{ github.event.before }}"
@@ -89,7 +101,7 @@ jobs:
               Source/*|CMakeLists.txt|cmake/*|Resources/*|assets/*) plugin=true ;;
               bridge/*) bridge=true ;;
               skills/ai-analyzer-flstudio/*) skill=true ;;
-              release/*|.github/workflows/release.yml) release=true ;;
+              release/common/START-HERE.md|release/common/INSTALL.en.md|release/common/INSTALL.zh-CN.md|release/windows/Install.ps1|release/windows/Install.cmd|release/macos/install.sh|release/macos/Install.command|.github/workflows/release.yml) release=true ;;
               .github/workflows/build.yml) workflow=true ;;
             esac
           done <<< "$CHANGED"
@@ -203,6 +215,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Cache the platform-specific CMake tree, not just the JUCE checkout. This
+      # preserves FetchContent state and reusable JUCE module object files while
+      # every run still reconfigures and rebuilds the current source tree.
       - name: Restore CMake / JUCE incremental build cache
         uses: actions/cache@v4
         with:
