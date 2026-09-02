@@ -1,14 +1,29 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(AIAnalyzer VERSION 0.1.0 LANGUAGES C CXX)
+project(AIAnalyzer VERSION 0.2.0 LANGUAGES C CXX)
 
 include(FetchContent)
+
 FetchContent_Declare(
     JUCE
     GIT_REPOSITORY https://github.com/juce-framework/JUCE.git
     GIT_TAG 8.0.8
 )
 FetchContent_MakeAvailable(JUCE)
+
+# libebur128 supplies standards-based EBU R128 / ITU-R BS.1770 loudness and
+# true-peak measurement. Build it statically so the VST3 has no extra runtime
+# library dependency.
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+set(WITH_STATIC_PIC ON CACHE BOOL "" FORCE)
+set(ENABLE_TESTS OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(
+    libebur128
+    GIT_REPOSITORY https://github.com/jiixyj/libebur128.git
+    GIT_TAG v1.2.6
+    GIT_SHALLOW TRUE
+)
+FetchContent_MakeAvailable(libebur128)
 
 juce_add_plugin(AIAnalyzer
     COMPANY_NAME "DebuNeko233"
@@ -46,10 +61,15 @@ target_compile_definitions(AIAnalyzer PUBLIC
     JUCE_VST3_CAN_REPLACE_VST2=0
 )
 
+target_include_directories(AIAnalyzer PRIVATE
+    ${libebur128_SOURCE_DIR}/ebur128
+)
+
 target_link_libraries(AIAnalyzer PRIVATE
     juce::juce_audio_utils
     juce::juce_dsp
     juce::juce_osc
+    ebur128
     PUBLIC
     juce::juce_recommended_config_flags
     juce::juce_recommended_lto_flags

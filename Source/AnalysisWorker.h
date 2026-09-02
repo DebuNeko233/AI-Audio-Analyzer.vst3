@@ -5,6 +5,8 @@
 #include <atomic>
 #include <mutex>
 
+#include <ebur128.h>
+
 #include "AnalysisFrame.h"
 #include "SpscStereoFifo.h"
 
@@ -36,11 +38,14 @@ private:
     };
 
     void resetAnalysisState();
+    void resetLoudnessState();
+    void processLoudnessHop();
     void processWindow();
     void refreshOscConnectionIfNeeded();
     void sendFrame(const AnalysisFrame& frame);
 
     static float amplitudeToDb(float value) noexcept;
+    static float sanitizeLoudness(double value) noexcept;
     static float interpolateMagnitudeAtFrequency(const float* magnitudes,
                                                  int numBins,
                                                  double sampleRate,
@@ -53,6 +58,7 @@ private:
 
     std::array<float, kHopSize> hopLeft {};
     std::array<float, kHopSize> hopRight {};
+    std::array<float, kHopSize * 2> interleavedHop {};
     std::array<float, kFftSize> windowLeft {};
     std::array<float, kFftSize> windowRight {};
     int filledSamples = 0;
@@ -63,7 +69,15 @@ private:
         juce::dsp::WindowingFunction<float>::hann,
         false
     };
-    std::array<float, kFftSize * 2> fftData {};
+    std::array<float, kFftSize * 2> fftLeftData {};
+    std::array<float, kFftSize * 2> fftRightData {};
+    std::array<float, kFftSize> midMagnitudes {};
+
+    ebur128_state* loudnessState = nullptr;
+    float latestLufsShortTerm = -120.0f;
+    float latestLufsIntegrated = -120.0f;
+    float latestTruePeakDbtp = -120.0f;
+    float maxTruePeakDbtp = -120.0f;
 
     mutable std::mutex latestMutex;
     AnalysisFrame latestFrame;

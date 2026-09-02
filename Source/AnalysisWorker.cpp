@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <numeric>
 
 namespace aianalyzer
 {
@@ -18,6 +17,18 @@ float bandCenterHz(int index)
 {
     const auto t = (static_cast<float>(index) + 0.5f) / static_cast<float>(kNumBands);
     return kMinFrequencyHz * std::pow(kMaxFrequencyHz / kMinFrequencyHz, t);
+}
+
+int stereoBandForFrequency(float frequencyHz)
+{
+    for (int band = 0; band < kNumStereoCorrelationBands; ++band)
+    {
+        const auto lo = kStereoCorrelationBandEdgesHz[static_cast<std::size_t>(band)];
+        const auto hi = kStereoCorrelationBandEdgesHz[static_cast<std::size_t>(band + 1)];
+        if (frequencyHz >= lo && (frequencyHz < hi || band == kNumStereoCorrelationBands - 1))
+            return band;
+    }
+    return -1;
 }
 } // namespace
 
@@ -48,6 +59,9 @@ void AnalysisWorker::shutdown()
         signalThreadShouldExit();
         stopThread(1500);
     }
+
+    if (loudnessState != nullptr)
+        ebur128_destroy(&loudnessState);
 
     oscSender.disconnect();
     oscConnected = false;
@@ -90,17 +104,48 @@ bool AnalysisWorker::getLatestFrame(AnalysisFrame& destination) const
     return true;
 }
 
+void AnalysisWorker::resetLoudnessState()
+{
+    if (loudnessState != nullptr)
+        ebur128_destroy(&loudnessState);
+
+    latestLufsShortTerm = kFloorDb;
+    latestLufsIntegrated = kFloorDb;
+    latestTruePeakDbtp = kFloorDb;
+    maxTruePeakDbtp = kFloorDb;
+
+    const auto currentSampleRate = static_cast<unsigned long>(
+        std::max(1.0, std::round(sampleRate.load(std::memory_order_acquire))));
+
+    const int mode = EBUR128_MODE_S
+                   | EBUR128_MODE_I
+                   | EBUR128_MODE_TRUE_PEAK
+                   | EBUR128_MODE_HISTOGRAM;
+
+    loudnessState = ebur128_init(2, currentSampleRate, mode);
+}
+
 void AnalysisWorker::resetAnalysisState()
 {
     std::fill(windowLeft.begin(), windowLeft.end(), 0.0f);
     std::fill(windowRight.begin(), windowRight.end(), 0.0f);
-    std::fill(fftData.begin(), fftData.end(), 0.0f);
+    std::fill(fftLeftData.begin(), fftLeftData.end(), 0.0f);
+    std::fill(fftRightData.begin(), fftRightData.end(), 0.0f);
+    std::fill(midMagnitudes.begin(), midMagnitudes.end(), 0.0f);
     filledSamples = 0;
+    resetLoudnessState();
 }
 
 float AnalysisWorker::amplitudeToDb(float value) noexcept
 {
     return juce::Decibels::gainToDecibels(std::max(value, 1.0e-9f), kFloorDb);
+}
+
+float AnalysisWorker::sanitizeLoudness(double value) noexcept
+{
+    if (!std::isfinite(value))
+        return kFloorDb;
+    return juce::jlimit(kFloorDb, 24.0f, static_cast<float>(value));
 }
 
 float AnalysisWorker::interpolateMagnitudeAtFrequency(const float* magnitudes,
@@ -113,7 +158,47 @@ float AnalysisWorker::interpolateMagnitudeAtFrequency(const float* magnitudes,
     const auto lower = juce::jlimit(0, numBins - 1, static_cast<int>(std::floor(bin)));
     const auto upper = juce::jlimit(0, numBins - 1, lower + 1);
     const auto fraction = juce::jlimit(0.0f, 1.0f, bin - static_cast<float>(lower));
-    return magnitudes[lower] + fraction * (magnitudes[upper] - magnitudes[lower]);
+    return magnitudes[static_cast<std::size_t>(lower)]
+         + fraction * (magnitudes[static_cast<std::size_t>(upper)]
+                     - magnitudes[static_cast<std::size_t>(lower)]);
+}
+
+void AnalysisWorker::processLoudnessHop()
+{
+    if (loudnessState == nullptr)
+        return;
+
+    for (int i = 0; i < kHopSize; ++i)
+    {
+        interleavedHop[static_cast<std::size_t>(i * 2)] = hopLeft[static_cast<std::size_t>(i)];
+        interleavedHop[static_cast<std::size_t>(i * 2 + 1)] = hopRight[static_cast<std::size_t>(i)];
+    }
+
+    if (ebur128_add_frames_float(loudnessState, interleavedHop.data(), kHopSize) != EBUR128_SUCCESS)
+        return;
+
+    double value = 0.0;
+    if (ebur128_loudness_shortterm(loudnessState, &value) == EBUR128_SUCCESS)
+        latestLufsShortTerm = sanitizeLoudness(value);
+
+    if (ebur128_loudness_global(loudnessState, &value) == EBUR128_SUCCESS)
+        latestLufsIntegrated = sanitizeLoudness(value);
+
+    double leftPeak = 0.0;
+    double rightPeak = 0.0;
+    if (ebur128_prev_true_peak(loudnessState, 0, &leftPeak) == EBUR128_SUCCESS
+        && ebur128_prev_true_peak(loudnessState, 1, &rightPeak) == EBUR128_SUCCESS)
+    {
+        latestTruePeakDbtp = amplitudeToDb(static_cast<float>(std::max(leftPeak, rightPeak)));
+    }
+
+    double leftMax = 0.0;
+    double rightMax = 0.0;
+    if (ebur128_true_peak(loudnessState, 0, &leftMax) == EBUR128_SUCCESS
+        && ebur128_true_peak(loudnessState, 1, &rightMax) == EBUR128_SUCCESS)
+    {
+        maxTruePeakDbtp = amplitudeToDb(static_cast<float>(std::max(leftMax, rightMax)));
+    }
 }
 
 void AnalysisWorker::processWindow()
@@ -146,17 +231,25 @@ void AnalysisWorker::processWindow()
         sumMid2 += static_cast<double>(mid) * mid;
         sumSide2 += static_cast<double>(side) * side;
 
-        fftData[static_cast<std::size_t>(i)] = mid;
+        fftLeftData[static_cast<std::size_t>(i)] = l;
+        fftRightData[static_cast<std::size_t>(i)] = r;
     }
 
-    std::fill(fftData.begin() + kFftSize, fftData.end(), 0.0f);
-    windowFunction.multiplyWithWindowingTable(fftData.data(), kFftSize);
-    fft.performFrequencyOnlyForwardTransform(fftData.data());
+    std::fill(fftLeftData.begin() + kFftSize, fftLeftData.end(), 0.0f);
+    std::fill(fftRightData.begin() + kFftSize, fftRightData.end(), 0.0f);
+    windowFunction.multiplyWithWindowingTable(fftLeftData.data(), kFftSize);
+    windowFunction.multiplyWithWindowingTable(fftRightData.data(), kFftSize);
+    fft.performRealOnlyForwardTransform(fftLeftData.data());
+    fft.performRealOnlyForwardTransform(fftRightData.data());
 
     const auto rms = static_cast<float>(std::sqrt(sumSquares / (2.0 * kFftSize)));
     frame.peakDb = amplitudeToDb(peak);
     frame.rmsDb = amplitudeToDb(rms);
     frame.crestDb = frame.peakDb - frame.rmsDb;
+    frame.lufsShortTerm = latestLufsShortTerm;
+    frame.lufsIntegrated = latestLufsIntegrated;
+    frame.truePeakDbtp = latestTruePeakDbtp;
+    frame.maxTruePeakDbtp = maxTruePeakDbtp;
 
     const auto denom = std::sqrt(std::max(1.0e-20, sumL2 * sumR2));
     frame.stereoCorrelation = denom > 0.0
@@ -178,15 +271,32 @@ void AnalysisWorker::processWindow()
     double logMagnitude = 0.0;
     int flatnessBins = 0;
 
+    std::array<double, kNumStereoCorrelationBands> bandCross {};
+    std::array<double, kNumStereoCorrelationBands> bandLeftPower {};
+    std::array<double, kNumStereoCorrelationBands> bandRightPower {};
+
     const int firstBin = std::max(1, static_cast<int>(std::ceil(kMinFrequencyHz * kFftSize / currentSampleRate)));
     const int lastBin = std::min(numBins - 1,
                                  static_cast<int>(std::floor(std::min(kMaxFrequencyHz,
                                                                       static_cast<float>(currentSampleRate * 0.5))
                                                              * kFftSize / currentSampleRate)));
 
+    for (int k = 0; k < numBins; ++k)
+    {
+        const auto index = static_cast<std::size_t>(k * 2);
+        const auto lRe = fftLeftData[index];
+        const auto lIm = fftLeftData[index + 1];
+        const auto rRe = fftRightData[index];
+        const auto rIm = fftRightData[index + 1];
+        const auto midRe = 0.5f * (lRe + rRe);
+        const auto midIm = 0.5f * (lIm + rIm);
+        midMagnitudes[static_cast<std::size_t>(k)] =
+            std::sqrt(midRe * midRe + midIm * midIm) / normalization;
+    }
+
     for (int k = firstBin; k <= lastBin; ++k)
     {
-        const auto magnitude = std::max(fftData[static_cast<std::size_t>(k)] / normalization, 1.0e-12f);
+        const auto magnitude = std::max(midMagnitudes[static_cast<std::size_t>(k)], 1.0e-12f);
         const auto frequency = static_cast<double>(k) * currentSampleRate / kFftSize;
         const auto power = static_cast<double>(magnitude) * magnitude;
 
@@ -196,6 +306,21 @@ void AnalysisWorker::processWindow()
         arithmeticMagnitude += magnitude;
         logMagnitude += std::log(static_cast<double>(magnitude));
         ++flatnessBins;
+
+        const auto band = stereoBandForFrequency(static_cast<float>(frequency));
+        if (band >= 0)
+        {
+            const auto index = static_cast<std::size_t>(k * 2);
+            const auto lRe = static_cast<double>(fftLeftData[index]);
+            const auto lIm = static_cast<double>(fftLeftData[index + 1]);
+            const auto rRe = static_cast<double>(fftRightData[index]);
+            const auto rIm = static_cast<double>(fftRightData[index + 1]);
+            const auto b = static_cast<std::size_t>(band);
+
+            bandCross[b] += lRe * rRe + lIm * rIm;
+            bandLeftPower[b] += lRe * lRe + lIm * lIm;
+            bandRightPower[b] += rRe * rRe + rIm * rIm;
+        }
     }
 
     frame.spectralCentroidHz = totalMagnitude > 0.0
@@ -207,7 +332,7 @@ void AnalysisWorker::processWindow()
     frame.spectralRolloffHz = 0.0f;
     for (int k = firstBin; k <= lastBin; ++k)
     {
-        const auto magnitude = fftData[static_cast<std::size_t>(k)] / normalization;
+        const auto magnitude = midMagnitudes[static_cast<std::size_t>(k)];
         runningPower += static_cast<double>(magnitude) * magnitude;
         if (runningPower >= targetPower)
         {
@@ -228,11 +353,20 @@ void AnalysisWorker::processWindow()
     {
         const auto frequency = std::min(bandCenterHz(band),
                                         static_cast<float>(currentSampleRate * 0.5));
-        const auto magnitude = interpolateMagnitudeAtFrequency(fftData.data(),
+        const auto magnitude = interpolateMagnitudeAtFrequency(midMagnitudes.data(),
                                                                numBins,
                                                                currentSampleRate,
-                                                               frequency) / normalization;
+                                                               frequency);
         frame.bandsDb[static_cast<std::size_t>(band)] = amplitudeToDb(magnitude);
+    }
+
+    for (int band = 0; band < kNumStereoCorrelationBands; ++band)
+    {
+        const auto b = static_cast<std::size_t>(band);
+        const auto bandDenom = std::sqrt(std::max(0.0, bandLeftPower[b] * bandRightPower[b]));
+        frame.bandStereoCorrelation[b] = bandDenom > 1.0e-18
+            ? juce::jlimit(-1.0f, 1.0f, static_cast<float>(bandCross[b] / bandDenom))
+            : 0.0f;
     }
 
     {
@@ -282,8 +416,18 @@ void AnalysisWorker::sendFrame(const AnalysisFrame& frame)
     message.addFloat32(frame.stereoCorrelation);
     message.addFloat32(frame.stereoWidth);
 
+    // Preserve the V0.1 prefix so an older bridge can still read the first
+    // 11 scalar fields plus 32 spectrum bands and simply ignore V0.2 extras.
     for (const auto bandDb : frame.bandsDb)
         message.addFloat32(bandDb);
+
+    message.addFloat32(frame.lufsShortTerm);
+    message.addFloat32(frame.lufsIntegrated);
+    message.addFloat32(frame.truePeakDbtp);
+    message.addFloat32(frame.maxTruePeakDbtp);
+
+    for (const auto correlation : frame.bandStereoCorrelation)
+        message.addFloat32(correlation);
 
     oscSender.send(message);
 }
@@ -291,6 +435,7 @@ void AnalysisWorker::sendFrame(const AnalysisFrame& frame)
 void AnalysisWorker::run()
 {
     resetAnalysisState();
+    resetRequested.store(false, std::memory_order_release);
 
     while (!threadShouldExit())
     {
@@ -305,6 +450,8 @@ void AnalysisWorker::run()
 
         if (!fifo.pop(hopLeft.data(), hopRight.data(), kHopSize))
             continue;
+
+        processLoudnessHop();
 
         if (filledSamples < kFftSize)
         {

@@ -1,8 +1,8 @@
 # AI Analyzer.vst3
 
-AI Analyzer is a JUCE VST3 made for **machine-readable audio analysis** in AI/LLM-assisted music production workflows.
+AI Analyzer is a JUCE VST3 for **machine-readable audio analysis** in AI/LLM-assisted music-production workflows.
 
-Instead of asking an LLM to "look at" a spectrum-analyzer UI, the plugin extracts compact audio features inside the DAW and sends them over OSC to a Python MCP bridge. Cherry Studio (or another MCP client) can then query track spectra, dynamics, stereo behavior, and track-to-track overlap as structured data.
+Instead of asking an LLM to inspect a spectrum-analyzer GUI, the plugin extracts compact audio features inside the DAW and sends them over OSC to a Python MCP bridge. Cherry Studio (or another MCP client) can then query spectrum, loudness, true peak, stereo behavior, and track-to-track overlap as structured data.
 
 ## Architecture
 
@@ -19,6 +19,7 @@ FL Studio / DAW
       bridge/server.py
        ├─ realtime cache
        ├─ short history
+       ├─ loudness / stereo summaries
        ├─ track comparison
        └─ MCP stdio server
              │
@@ -26,31 +27,73 @@ FL Studio / DAW
        Cherry Studio / LLM
 ```
 
-The realtime audio callback only copies samples into a preallocated SPSC FIFO. FFT, feature extraction, OSC networking, JSON-like structuring, and MCP work happen outside the DAW realtime audio thread.
+The DAW realtime audio callback only copies samples into a preallocated SPSC FIFO. FFT, EBU R128 processing, true-peak analysis, OSC networking, and MCP work happen on background threads.
 
-## V0.1 features
+## V0.2 features
 
 - 4096-point FFT, Hann window, 1024-sample hop
 - 32 logarithmically spaced spectrum samples from 20 Hz to 20 kHz
-- Peak dBFS
-- RMS dBFS
-- Crest factor
-- Spectral centroid
-- 85% spectral rolloff
-- Spectral flatness
-- Stereo correlation
-- Mid/Side width ratio
-- Multiple plugin instances identified by a user-set name (`Kick`, `Bass`, `Vocal`, `Master`, ...)
+- Sample peak dBFS / RMS dBFS / crest factor
+- **LUFS-S (3 s short-term loudness)**
+- **LUFS-I (integrated loudness with EBU R128 gating)**
+- **True Peak dBTP**, including current-hop and session maximum
+- Standards-oriented loudness / true-peak backend via `libebur128` 1.2.6
+- Spectral centroid / 85% rolloff / flatness
+- Full-band stereo correlation / Mid-Side width ratio
+- **8 band-limited stereo-correlation values**:
+  - 20–60 Hz
+  - 60–120 Hz
+  - 120–250 Hz
+  - 250–500 Hz
+  - 500 Hz–1 kHz
+  - 1–2 kHz
+  - 2–5 kHz
+  - 5–20 kHz
+- Multiple plugin instances identified by user-set name (`Kick`, `Bass`, `Vocal`, `Master`, ...)
 - OSC transmission at ~10 Hz
 - Python MCP tools:
   - `audio_list_tracks`
   - `audio_snapshot`
   - `audio_average`
+  - `audio_stereo_bands`
   - `audio_compare_tracks`
   - `audio_detect_masking`
   - `audio_master_status`
 
-> `audio_detect_masking` is currently a **heuristic spectral-overlap detector**, not a complete psychoacoustic masking model. Timing, level, arrangement, transient behavior, and musical context still matter.
+> `audio_detect_masking` remains a **heuristic spectral-overlap detector**, not a complete psychoacoustic masking model. Timing, level, arrangement, transient behavior, and musical context still matter.
+
+## Loudness / True Peak implementation
+
+`libebur128` implements EBU R128 / ITU-R BS.1770-style loudness measurement and true-peak scanning. AI Analyzer feeds each non-overlapped 1024-sample audio hop into a persistent stereo `ebur128_state`.
+
+The plugin requests:
+
+- short-term loudness mode (`EBUR128_MODE_S`)
+- integrated loudness mode (`EBUR128_MODE_I`)
+- true-peak mode (`EBUR128_MODE_TRUE_PEAK`)
+- histogram-backed integrated loudness (`EBUR128_MODE_HISTOGRAM`)
+
+`LUFS-I` integrates from the most recent analyzer reset/prepare. It is **not** averaged again in the MCP bridge. `audio_average()` instead returns the newest LUFS-I value in the requested history window.
+
+The true-peak implementation in libebur128 uses a polyphase FIR interpolator: 4× oversampling below 96 kHz, 2× below 192 kHz, and no additional oversampling at 192 kHz.
+
+## Band-limited stereo correlation
+
+The plugin computes complex L/R FFTs for each 4096-sample Hann window. For every stereo band it accumulates the real cross-spectrum and L/R powers:
+
+```text
+corr_band = Σ Re(XL · conj(XR)) / sqrt(Σ|XL|² · Σ|XR|²)
+```
+
+The result is clamped to `[-1, +1]`.
+
+Interpretation:
+
+- near `+1`: strongly correlated / mono-like
+- near `0`: wide or weakly correlated
+- below `0`: potentially problematic phase relationship
+
+Near-silent bands can have low-information correlation values, so the MCP should interpret correlation together with the corresponding spectrum level.
 
 ## Build the VST3
 
@@ -60,18 +103,20 @@ The realtime audio callback only copies samples into a preallocated SPSC FIFO. F
 - C++20 compiler
 - macOS: Xcode / Command Line Tools
 - Windows: Visual Studio 2022 recommended
-- Internet access during configure (JUCE 8.0.8 is fetched with CMake FetchContent)
+- Internet access during configure; CMake FetchContent downloads:
+  - JUCE 8.0.8
+  - libebur128 1.2.6
 
 ### macOS / Apple Silicon
 
-For a local Apple Silicon build:
+Local Apple Silicon build:
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64
 cmake --build build --config Release --parallel
 ```
 
-For a universal macOS binary:
+Universal macOS binary:
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release "-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64"
@@ -93,21 +138,18 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --config Release --parallel
 ```
 
-Copy the resulting `AI Analyzer.vst3` bundle to your normal VST3 location (commonly `C:\Program Files\Common Files\VST3`).
+Copy the resulting `AI Analyzer.vst3` bundle to the normal VST3 directory, commonly:
+
+```text
+C:\Program Files\Common Files\VST3
+```
 
 ## Run the OSC + MCP bridge
-
-Create a virtual environment:
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r bridge/requirements.txt
-```
-
-Run directly for testing:
-
-```bash
 python bridge/server.py
 ```
 
@@ -124,11 +166,11 @@ AI_ANALYZER_OSC_HOST=127.0.0.1
 AI_ANALYZER_OSC_PORT=9855
 ```
 
-The MCP server itself uses **stdio**, so in normal Cherry Studio use, Cherry Studio should launch `bridge/server.py`; do not separately pipe its stdout through another program.
+The MCP server uses **stdio**. In normal Cherry Studio use, Cherry Studio launches `bridge/server.py` directly.
 
 ## Cherry Studio MCP configuration
 
-Use absolute paths. Example:
+Use absolute paths:
 
 ```json
 {
@@ -151,36 +193,27 @@ A copy is provided at `bridge/cherry-studio.example.json`.
 
 ## FL Studio workflow
 
-1. Put `AI Analyzer` on the mixer track you want the LLM to observe.
-2. Open the plugin UI.
-3. Set a unique `Instance` name, for example `Kick`, `Bass`, `Vocal`, or `Master`.
-4. Keep OSC host `127.0.0.1` and port `9855` unless you changed the bridge.
-5. Click **Apply**.
-6. Start playback.
-7. In Cherry Studio, with the `ai-analyzer` MCP enabled, try:
+1. Put `AI Analyzer` on each mixer track the LLM should observe.
+2. Give every instance a unique name, e.g. `Kick`, `Bass`, `Vocal`, `Master`.
+3. Keep OSC host `127.0.0.1` and port `9855` unless you changed the bridge.
+4. Click **Apply** and start playback.
+5. Enable the `ai-analyzer` MCP in Cherry Studio.
+
+Example prompts:
 
 ```text
-列出当前所有 AI Analyzer 轨道。
+读取 Master 的 LUFS-S、LUFS-I 和 True Peak，只诊断，不修改。
 ```
-
-Then:
 
 ```text
-读取 Kick 和 Bass 的最近 5 秒平均频谱，检查最明显的重叠频段。
+检查 Bass 的 20–120 Hz 分频段 stereo correlation，判断 mono compatibility。
 ```
-
-Or:
 
 ```text
-检查 Master 当前峰值、动态和立体声相关性，只诊断，不修改工程。
+读取 Kick 和 Bass 最近 5 秒的频谱，找出最明显的重叠频段。
 ```
 
-For a full AI-producer workflow, bind both:
-
-- an FL Studio control MCP (to read/write mixer/plugin/Piano Roll state), and
-- this AI Analyzer MCP (to observe audio).
-
-That gives the agent separate **actuation** and **perception** channels.
+For a complete AI producer workflow, bind both an FL Studio control MCP and this analyzer MCP. The agent then has separate **actuation** and **perception** channels.
 
 ## OSC frame schema
 
@@ -190,71 +223,68 @@ Address:
 /aianalyzer/frame
 ```
 
-Arguments:
+The V0.2 frame preserves the entire V0.1 prefix for backward compatibility.
 
 ```text
-0  instance_id          string
-1  sample_rate          float
-2  plugin_timestamp     float
-3  peak_db              float
-4  rms_db               float
-5  crest_db             float
-6  centroid_hz          float
-7  rolloff_hz           float
-8  flatness             float
-9  stereo_correlation   float
-10 stereo_width         float
-11..42 spectrum bands   32 floats (dB)
+0  instance_id                    string
+1  sample_rate                    float
+2  plugin_timestamp               float
+3  peak_db                        float
+4  rms_db                         float
+5  crest_db                       float
+6  centroid_hz                    float
+7  rolloff_hz                     float
+8  flatness                       float
+9  stereo_correlation             float
+10 stereo_width                   float
+11..42 spectrum bands             32 floats (dB)
+43 lufs_s                         float (LUFS)
+44 lufs_i                         float (LUFS)
+45 true_peak_dbtp                 float (current analysis hop)
+46 max_true_peak_dbtp             float (since analyzer reset)
+47..54 band_stereo_correlation    8 floats
 ```
 
-The 32 band centers are logarithmically spaced from 20 Hz to 20 kHz. They are intended as compact machine features rather than a calibrated SPL measurement.
+The spectrum is intended as compact machine-readable features rather than calibrated SPL measurement.
 
 ## Realtime-safety design
-
-The plugin intentionally avoids FFT and network I/O in `processBlock()`.
 
 ```text
 Audio thread
   └─ copy L/R samples → preallocated SPSC FIFO
 
 Analysis thread
-  ├─ consume 1024-sample hops
-  ├─ maintain 4096-sample window
-  ├─ FFT + spectral/dynamic/stereo features
+  ├─ consume non-overlapping 1024-sample hops
+  ├─ feed persistent EBU R128 / True Peak meter
+  ├─ maintain 4096-sample FFT window
+  ├─ spectrum + complex L/R correlation analysis
   └─ send OSC at ~10 Hz
 ```
 
-If the analysis thread cannot keep up, incoming analysis blocks are dropped instead of blocking the DAW audio thread. The UI reports the dropped-block counter.
+If the analysis thread cannot keep up, incoming analysis blocks are dropped instead of blocking the DAW realtime audio thread. The UI reports the dropped-block counter.
 
-## Important V0.1 limitations
+## Current limitations
 
-- No LUFS yet.
-- No true-peak/inter-sample peak yet.
-- No band-limited stereo correlation yet.
+- No LUFS-M display yet (LUFS-S and LUFS-I are implemented).
+- No Mid/Side spectra yet.
 - No chroma/key/pitch-class analysis yet.
 - Spectrum values are compact FFT-derived machine features, not a replacement for a calibrated mastering meter.
 - The masking score is relative spectral overlap, not a Bark/ERB psychoacoustic model.
+- Band stereo correlation is FFT-window based and should be interpreted together with per-band energy.
 - The plugin does not modify the audio signal.
 
 ## Roadmap
 
-### V0.2
-
-- LUFS-M / LUFS-S / LUFS-I
-- True Peak
-- Mid/Side spectra
-- per-band stereo correlation
-- transient density / spectral flux
-- resonance detection
-
 ### V0.3
 
+- LUFS-M
+- Mid/Side spectra
+- transient density / spectral flux
+- resonance detection
 - chroma / pitch-class profile
 - key / tonal-center assistance
-- fundamental/pitch confidence
 - improved kick-vs-bass temporal analysis
 - Bark/ERB masking model
-- reference-track comparison snapshots
 
 ### V1
 

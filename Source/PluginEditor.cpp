@@ -6,12 +6,22 @@ juce::String formatDb(float value)
 {
     return juce::String(value, 1) + " dB";
 }
+
+juce::String formatLufs(float value)
+{
+    return juce::String(value, 1) + " LUFS";
+}
+
+juce::String formatDbtp(float value)
+{
+    return juce::String(value, 1) + " dBTP";
+}
 } // namespace
 
 AIAnalyzerAudioProcessorEditor::AIAnalyzerAudioProcessorEditor(AIAnalyzerAudioProcessor& p)
     : AudioProcessorEditor(&p), processor(p)
 {
-    setSize(720, 440);
+    setSize(760, 500);
 
     instanceLabel.setText("Instance", juce::dontSendNotification);
     hostLabel.setText("OSC Host", juce::dontSendNotification);
@@ -66,29 +76,32 @@ void AIAnalyzerAudioProcessorEditor::paint(juce::Graphics& g)
 
     g.setFont(juce::FontOptions(12.0f));
     g.setColour(juce::Colours::lightgrey);
-    g.drawText("Machine-readable spectrum / dynamics / stereo analysis → OSC → MCP",
+    g.drawText("Spectrum / EBU R128 loudness / true peak / stereo analysis → OSC → MCP",
                18, 42, getWidth() - 36, 22, juce::Justification::centredLeft);
 
     auto analysisArea = getLocalBounds().toFloat().reduced(18.0f);
     analysisArea.removeFromTop(112.0f);
 
-    auto metrics = analysisArea.removeFromTop(70.0f);
+    auto metrics = analysisArea.removeFromTop(94.0f);
     g.setColour(juce::Colour::fromRGB(31, 35, 43));
     g.fillRoundedRectangle(metrics, 8.0f);
 
-    g.setFont(juce::FontOptions(13.0f));
+    g.setFont(juce::FontOptions(12.5f));
     g.setColour(juce::Colours::white);
 
     if (hasFrame)
     {
         const auto columnWidth = metrics.getWidth() / 4.0f;
-        g.drawFittedText("Peak\n" + formatDb(latestFrame.peakDb),
+        g.drawFittedText("Sample / True Peak\n" + formatDb(latestFrame.peakDb)
+                         + " / " + formatDbtp(latestFrame.truePeakDbtp),
                          metrics.withWidth(columnWidth).toNearestInt(),
                          juce::Justification::centred, 2);
-        g.drawFittedText("RMS\n" + formatDb(latestFrame.rmsDb),
+        g.drawFittedText("RMS / Crest\n" + formatDb(latestFrame.rmsDb)
+                         + " / " + formatDb(latestFrame.crestDb),
                          metrics.withX(metrics.getX() + columnWidth).withWidth(columnWidth).toNearestInt(),
                          juce::Justification::centred, 2);
-        g.drawFittedText("Centroid\n" + juce::String(latestFrame.spectralCentroidHz, 0) + " Hz",
+        g.drawFittedText("LUFS-S / LUFS-I\n" + formatLufs(latestFrame.lufsShortTerm)
+                         + " / " + formatLufs(latestFrame.lufsIntegrated),
                          metrics.withX(metrics.getX() + columnWidth * 2.0f).withWidth(columnWidth).toNearestInt(),
                          juce::Justification::centred, 2);
         g.drawFittedText("Corr / Width\n" + juce::String(latestFrame.stereoCorrelation, 2)
@@ -102,6 +115,19 @@ void AIAnalyzerAudioProcessorEditor::paint(juce::Graphics& g)
     }
 
     analysisArea.removeFromTop(12.0f);
+
+    if (hasFrame)
+    {
+        auto detail = analysisArea.removeFromTop(22.0f);
+        g.setFont(juce::FontOptions(11.0f));
+        g.setColour(juce::Colours::lightgrey);
+        g.drawText("Centroid " + juce::String(latestFrame.spectralCentroidHz, 0) + " Hz"
+                   + "   ·   Rolloff " + juce::String(latestFrame.spectralRolloffHz, 0) + " Hz"
+                   + "   ·   Session max TP " + formatDbtp(latestFrame.maxTruePeakDbtp),
+                   detail.toNearestInt(), juce::Justification::centredLeft);
+        analysisArea.removeFromTop(6.0f);
+    }
+
     drawSpectrum(g, analysisArea);
 
     g.setFont(juce::FontOptions(11.0f));
@@ -153,11 +179,11 @@ void AIAnalyzerAudioProcessorEditor::resized()
 
     auto label = row.removeFromLeft(58);
     instanceLabel.setBounds(label);
-    instanceEditor.setBounds(row.removeFromLeft(160).reduced(2));
+    instanceEditor.setBounds(row.removeFromLeft(170).reduced(2));
 
     label = row.removeFromLeft(72);
     hostLabel.setBounds(label);
-    hostEditor.setBounds(row.removeFromLeft(150).reduced(2));
+    hostEditor.setBounds(row.removeFromLeft(160).reduced(2));
 
     label = row.removeFromLeft(42);
     portLabel.setBounds(label);
