@@ -86,9 +86,10 @@ def on_frame_v11(address: str, *args: Any) -> None:
         frame["fft_runs_per_second"] = fft_runs_per_second
         frame["semantic_runs_per_second"] = semantic_runs_per_second
 
-        # Older frame tails are always present for append-only compatibility.
-        # The feature mask is therefore authoritative about whether a zero/floor
-        # means "disabled" rather than a real measured value.
+        # Older append-only tails remain physically present in every new OSC
+        # frame. The feature mask is authoritative: clear disabled families in
+        # the shared history object itself so older tools that inspect history
+        # directly cannot mistake compatibility placeholders for measurements.
         if not features["loudness"]:
             frame["lufs_s"] = None
             frame["lufs_i"] = None
@@ -97,10 +98,17 @@ def on_frame_v11(address: str, *args: Any) -> None:
 
         if not features["spectrum"]:
             frame["spectrum_valid"] = False
+            frame["centroid_hz"] = None
+            frame["rolloff_hz"] = None
+            frame["flatness"] = None
+            frame["bands_db"] = None
 
         if not features["stereo"]:
             frame["stereo_valid"] = False
             frame["stereo_v08_valid"] = False
+            frame["stereo_correlation"] = None
+            frame["stereo_width"] = None
+            frame["band_stereo_correlation"] = None
             for key in (
                 "mid_rms_db",
                 "side_rms_db",
