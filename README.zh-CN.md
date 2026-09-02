@@ -2,7 +2,7 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-**AI Audio Analyzer** 是一个基于 JUCE 的 VST3 插件，目标是在 **AI / LLM 辅助音乐制作工作流**中提供可被机器直接读取的音频分析数据。
+**AI Audio Analyzer** 是一个基于 JUCE 的 VST3 插件，用于在 **AI / LLM 辅助音乐制作工作流**中提供可被机器直接读取的音频分析数据。
 
 它不是让大模型去“看”频谱分析器界面，而是在 DAW 内部提取紧凑的音频特征，通过 OSC 发送给 Python MCP Bridge。Cherry Studio 或其他 MCP 客户端随后可以结构化读取响度、True Peak、频谱、立体声状态、信号有效性以及轨道之间的频谱重叠。
 
@@ -10,7 +10,7 @@
 
 ## 项目包含什么
 
-整个项目有意拆成三个部分：
+整个项目拆成三个部分：
 
 ```text
 AI Audio Analyzer
@@ -35,6 +35,26 @@ AI-Audio-Analyzer-Windows/
 
 在仓库源码中，MCP 位于 `bridge/`，Cherry Studio Skill 位于 `skills/ai-analyzer-flstudio/`。
 
+## 配套 FL Studio MCP
+
+AI Audio Analyzer 负责 **感知**。要让模型真正读取、控制和修改 FL Studio 工程，本项目推荐与当前 Cherry Studio 工作流使用的 FL Studio MCP 配合：
+
+**[rosasynthesiz/flstudio-mcp](https://github.com/rosasynthesiz/flstudio-mcp)**
+
+两个 MCP 的职责是分开的：
+
+```text
+AI Audio Analyzer MCP   → 观察 / 测量 / 验证
+FL Studio MCP           → 读取 / 控制 / 修改 FL Studio
+```
+
+组合后形成完整闭环：
+
+```text
+OBSERVE → DIAGNOSE → PLAN → CHANGE → READBACK → A/B
+观察       诊断        计划      修改       回读       对比
+```
+
 ## 整体架构
 
 ```text
@@ -52,7 +72,7 @@ FL Studio / DAW
              │ OSC UDP
              │ 默认 127.0.0.1:9855
              ▼
-        Python MCP Bridge
+        Python Analyzer MCP
         ├─ 实时实例注册表
         ├─ 短时间历史缓存
         ├─ Signal State 过滤
@@ -62,18 +82,12 @@ FL Studio / DAW
              │
              ▼
       Cherry Studio / LLM
-             │
-             └─ 可选 FL Studio 控制 MCP
-                        │
-                        ▼
-                    修改 DAW
-```
-
-Analyzer MCP 是 **感知通道**，FL Studio 控制 MCP 是 **执行通道**。两者结合后形成完整闭环：
-
-```text
-OBSERVE → DIAGNOSE → PLAN → CHANGE → READBACK → A/B
-观察       诊断        计划      修改       回读       对比
+        │               │
+        │ 感知          │ 执行
+        │               ▼
+        │      rosasynthesiz/flstudio-mcp
+        │               │
+        └───────────────┴──> FL Studio
 ```
 
 ## 当前功能
@@ -83,16 +97,11 @@ OBSERVE → DIAGNOSE → PLAN → CHANGE → READBACK → A/B
 - 4096 点 FFT，Hann Window
 - 1024 Sample Analysis Hop
 - 20 Hz–20 kHz 的 32 个对数频谱特征
-- Sample Peak dBFS
-- RMS dBFS
-- Crest Factor
+- Sample Peak dBFS / RMS dBFS / Crest Factor
 - LUFS-S 短期响度
 - 带 EBU R128 Gating 的 LUFS-I 综合响度
-- True Peak dBTP
-- 本次 Analyzer Session 最大 True Peak
-- Spectral Centroid
-- 85% Spectral Rolloff
-- Spectral Flatness
+- True Peak dBTP 和 Session 最大 True Peak
+- Spectral Centroid / 85% Spectral Rolloff / Spectral Flatness
 - 全频段 Stereo Correlation
 - Mid/Side Width Ratio
 - 8 个分频段 Stereo Correlation：
@@ -111,10 +120,8 @@ OBSERVE → DIAGNOSE → PLAN → CHANGE → READBACK → A/B
 
 AI Audio Analyzer 不会让很低的尾音无限参与频谱和立体声判断。
 
-当前信号检测逻辑：
-
 ```text
-关闭 gate：低于约 -50 dBFS 持续约 0.4 秒
+关闭 Gate：低于约 -50 dBFS 持续约 0.4 秒
 重新打开：高于约 -48 dBFS
 ```
 
@@ -124,7 +131,7 @@ AI Audio Analyzer 不会让很低的尾音无限参与频谱和立体声判断�
 
 需要特别注意：
 
-- LUFS-I 继续保留本次 Session 的累计值；
+- LUFS-I 保留本次 Session 的累计值；
 - Session Max True Peak 继续保留；
 - 持续静音后 LUFS-S 会变为不可用；
 - `audio_average()` 会返回 `active_ratio`，并且只使用有效 Active Frames 计算与音乐内容相关的平均结果。
@@ -136,16 +143,11 @@ AI Audio Analyzer 不会让很低的尾音无限参与频谱和立体声判断�
 ```text
 Kick ───┐
 Bass ───┤
-Vocal ──┼─> UDP 127.0.0.1:9855 ─> 一个 MCP Bridge
+Vocal ──┼─> UDP 127.0.0.1:9855 ─> 一个 Analyzer MCP Bridge
 Master ─┘
 ```
 
-每个运行中的插件实例拥有两种身份：
-
-- 人类可读的 Analyzer 名称；
-- 当前运行实例自动生成的 Runtime UUID。
-
-允许多个实例拥有相同人类名称，但当名称发生歧义时，MCP Bridge 不会偷偷选择其中一个。
+每个运行中的插件实例都有一个人类可读名称和一个当前 Live Instance 自动生成的 Runtime UUID。允许多个实例使用相同的人类名称，但发生歧义时 MCP Bridge 不会偷偷选择其中一个。
 
 ### 与 FL Studio Mixer Track 的确定性映射
 
@@ -160,7 +162,7 @@ Name: Identify
 
 Identify 不依赖音频播放，因此即使 FL Studio 处于停止状态，也可以完成 Analyzer 实例发现。
 
-推荐的自动发现流程：
+与 [rosasynthesiz/flstudio-mcp](https://github.com/rosasynthesiz/flstudio-mcp) 配合时，推荐自动发现流程：
 
 ```text
 FL Studio MCP
@@ -188,7 +190,7 @@ mixer:7/slot:9
 
 ## MCP 工具
 
-当前 Bridge 提供：
+当前 Analyzer Bridge 提供：
 
 ```text
 audio_bridge_status()
@@ -252,7 +254,7 @@ C:\Program Files\Common Files\VST3
 
 复制完成后，在 FL Studio 中重新扫描插件。
 
-### 3. 安装 MCP Python 环境
+### 3. 安装 Analyzer MCP Python 环境
 
 进入下载工件中的 `mcp/`：
 
@@ -276,8 +278,6 @@ python -m pip install -r requirements.txt
 
 `command` 必须使用已经安装 `mcp` 和 `python-osc` 的 Python 环境。
 
-示例：
-
 ```json
 {
   "mcpServers": {
@@ -299,7 +299,15 @@ python -m pip install -r requirements.txt
 
 不要在终端里长期运行一个 `server.py`，同时又让 Cherry Studio 再启动一个。UDP `9855` 应只由一个 Bridge Process 绑定。
 
-### 5. 导入 Cherry Studio Skill
+### 5. 添加 FL Studio 控制 MCP
+
+执行 / 控制 FL Studio 的一侧使用：
+
+**[rosasynthesiz/flstudio-mcp](https://github.com/rosasynthesiz/flstudio-mcp)**
+
+当你希望模型既能**分析声音**又能**操作 FL Studio**时，在 Cherry Studio 中同时启用 Analyzer MCP 和 FL Studio MCP。
+
+### 6. 导入 Cherry Studio Skill
 
 将下载工件中的 `skill/` 导入 Cherry Studio。
 
@@ -317,9 +325,9 @@ Skill 会告诉模型：
 
 1. 在所有希望 AI 观察的 Mixer Track 上插入 `AI Audio Analyzer`。
 2. 所有 Analyzer 默认保持同一个 OSC Host/Port。
-3. 让 Cherry Studio 启动 Analyzer MCP Bridge。
+3. 在 Cherry Studio 中同时启用 Analyzer MCP 和 [FL Studio MCP](https://github.com/rosasynthesiz/flstudio-mcp)。
 4. 让 Agent 扫描当前所有 Analyzer 实例。
-5. 如果同时启用了 FL Studio 控制 MCP，让 Agent 通过 `Identify` 自动建立 Mixer Track/Slot 映射。
+5. 让 Agent 通过 `Identify` 自动建立 Mixer Track/Slot 映射。
 6. 真正需要音频测量时再播放工程。
 7. 混音判断优先使用 3–10 秒的 `audio_average()`，而不是单帧 Snapshot。
 
@@ -369,9 +377,9 @@ Skill 会告诉模型：
 6      centroid_hz                   float
 7      rolloff_hz                    float
 8      flatness                      float
-9      stereo_correlation             float
+9      stereo_correlation            float
 10     stereo_width                  float
-11..42 spectrum bands                32 floats
+11..42 spectrum bands               32 floats
 43     lufs_s                        float
 44     lufs_i                        float
 45     true_peak_dbtp                float
@@ -397,12 +405,7 @@ Identify Event 包含 Runtime UUID、Analyzer Name、时间戳以及供 Bridge �
 
 `libebur128` 提供面向 EBU R128 / ITU-R BS.1770 的响度和 True Peak 测量。
 
-AI Audio Analyzer 维护一个持续存在的 Stereo Loudness State，并启用：
-
-- Short-Term Loudness；
-- Integrated Loudness；
-- True Peak；
-- Histogram-backed Integrated Loudness。
+AI Audio Analyzer 维护持续存在的 Stereo Loudness State，并启用 Short-Term Loudness、Integrated Loudness、True Peak 和 Histogram-backed Integrated Loudness。
 
 `LUFS-I` 从 Analyzer 最近一次 Reset/Prepare 开始累计。如果只循环播放了副歌，那么这个 LUFS-I 代表当前累计测量范围，而不是整首歌曲。
 
@@ -470,10 +473,7 @@ codesign --verify --deep --strict --verbose=4 \
 - Windows：推荐 Visual Studio 2022
 - CMake Configure 时需要网络访问
 
-FetchContent 会自动下载：
-
-- JUCE 8.0.8
-- libebur128 1.2.6
+FetchContent 会自动下载 JUCE 8.0.8 和 libebur128 1.2.6。
 
 ### macOS Universal Build
 
