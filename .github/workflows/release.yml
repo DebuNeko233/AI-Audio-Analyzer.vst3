@@ -13,7 +13,7 @@ on:
         default: false
         type: boolean
       draft:
-        description: 'Create/update as draft release'
+        description: 'Keep as Draft (not public / not Latest). Normally leave OFF.'
         required: true
         default: false
         type: boolean
@@ -49,7 +49,8 @@ jobs:
             bridge/temporal_tools.py \
             bridge/masking_tools.py \
             bridge/stereo_tools.py \
-            bridge/semantic_tools.py
+            bridge/semantic_tools.py \
+            bridge/verification_tools.py
 
   mcp-runtime:
     name: MCP runtime (${{ matrix.label }})
@@ -85,7 +86,7 @@ jobs:
           python -m pip install -r bridge/requirements.txt
           python -m pip install 'pyinstaller>=6.10,<7'
 
-      - name: Validate source MCP 0.9
+      - name: Validate source MCP 1.0
         shell: bash
         run: AI_ANALYZER_SELF_TEST=1 python bridge/server.py
 
@@ -186,7 +187,7 @@ jobs:
           @"
           AI Audio Analyzer $version
           Platform: Windows x64
-          MCP: 0.9 standalone one-file executable
+          MCP: 1.0 standalone one-file executable
           OSC protocol: 0.9 append-only
           Release commit: $env:GITHUB_SHA
           "@ | Set-Content 'package/VERSION.txt' -Encoding UTF8
@@ -265,7 +266,7 @@ jobs:
           cat > package/VERSION.txt <<EOF
           AI Audio Analyzer ${VERSION}
           Platform: macOS Apple Silicon arm64
-          MCP: 0.9 standalone one-file executable
+          MCP: 1.0 standalone one-file executable
           OSC protocol: 0.9 append-only
           Release commit: ${GITHUB_SHA}
           EOF
@@ -379,10 +380,11 @@ jobs:
           - Windows: download AI-Audio-Analyzer-*-Windows.zip, unzip it, then double-click Install.cmd.
           - macOS Apple Silicon: download AI-Audio-Analyzer-*-macOS.zip, unzip it, then double-click Install.command.
           - No Python, source code, package manager, or programming setup is included or required.
-          - V0.9 adds audio-domain music-semantic evidence: 12-bin chroma, tonal-center candidate ranking, and transparent single-F0 harmonic-alignment evidence.
-          - MCP 0.9 exposes 24 measurement tools, including audio_tonal_profile and audio_tonal_compare.
-          - Tonal-center candidates expose ranking margin/evidence quality and are not ground-truth key labels; exact DAW/MIDI note/key data should be preferred when available.
-          - The Skill remains measurement/tool oriented and does not prescribe a mixing style, key change, harmonic edit, or automatic processing action.
+          - MCP 1.0 adds controlled closed-loop verification sessions around changes made by an external DAW-control MCP.
+          - audio_begin_verification captures the Before measurement/topology baseline; audio_complete_verification captures After evidence and comparability guards; audio_verification_status preserves the session audit trail.
+          - MCP 1.0 exposes 27 measurement/verification tools. OSC remains protocol 0.9 because 1.0 adds no new VST3 frame fields.
+          - Controlled-comparison status is a measurement-reliability guardrail, not a claim that an artistic change is better or worse.
+          - The Skill remains measurement/tool oriented and does not prescribe a mixing, mastering, stereo, key, harmony, or processing style.
           - macOS Release is Apple Silicon arm64 only and is currently ad-hoc signed rather than Apple-notarized.
 
           See START-HERE.md inside the downloaded package for the shortest setup path.
@@ -403,23 +405,31 @@ jobs:
           )
           for file in "${files[@]}"; do test -f "$file"; done
 
-          flags=()
-          if [ "$PRERELEASE" = 'true' ]; then flags+=(--prerelease); fi
-          if [ "$DRAFT" = 'true' ]; then flags+=(--draft); fi
+          create_flags=()
+          if [ "$PRERELEASE" = 'true' ]; then create_flags+=(--prerelease); fi
+          if [ "$DRAFT" = 'true' ]; then create_flags+=(--draft); fi
 
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" "${files[@]}" --clobber
-            gh release edit "$TAG" --title "AI Audio Analyzer $TAG" --notes-file release-assets/RELEASE-NOTES.md
+            gh release edit "$TAG" \
+              --title "AI Audio Analyzer $TAG" \
+              --notes-file release-assets/RELEASE-NOTES.md \
+              --draft="$DRAFT" \
+              --prerelease="$PRERELEASE"
           else
             gh release create "$TAG" "${files[@]}" \
               --target "$GITHUB_SHA" \
               --title "AI Audio Analyzer $TAG" \
               --notes-file release-assets/RELEASE-NOTES.md \
-              "${flags[@]}"
+              "${create_flags[@]}"
+          fi
+
+          if [ "$DRAFT" = 'true' ]; then
+            echo '::notice::Release is intentionally a Draft. It is not public and will not become Latest until Draft is turned off.'
           fi
 
       - name: Show release URL
         shell: bash
         env:
           TAG: ${{ steps.meta.outputs.tag }}
-        run: gh release view "$TAG" --json url --jq .url
+        run: gh release view "$TAG" --json url,isDraft,isPrerelease --jq '{url,isDraft,isPrerelease}'
