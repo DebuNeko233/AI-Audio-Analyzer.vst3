@@ -1,9 +1,9 @@
 {
   "mcpServers": {
-    "ai-analyzer": {
-      "command": "/ABSOLUTE/PATH/TO/AI-Analyzer.vst3/.venv/bin/python",
+    "ai-audio-analyzer": {
+      "command": "/ABSOLUTE/PATH/TO/AI-Audio-Analyzer/.venv/bin/python",
       "args": [
-        "/ABSOLUTE/PATH/TO/AI-Analyzer.vst3/bridge/server.py"
+        "/ABSOLUTE/PATH/TO/AI-Audio-Analyzer/bridge/server.py"
       ],
       "env": {
         "AI_ANALYZER_OSC_HOST": "127.0.0.1",
