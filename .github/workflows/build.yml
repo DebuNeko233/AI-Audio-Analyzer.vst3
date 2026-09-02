@@ -19,7 +19,7 @@ jobs:
 
       - name: Configure (macOS universal)
         if: runner.os == 'macOS'
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release "-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64"
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 "-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64"
 
       - name: Configure (Windows)
         if: runner.os == 'Windows'
@@ -45,8 +45,29 @@ jobs:
             exit 1
           fi
 
-          # Keep the installable macOS VST3 bundle as a top-level item.
-          ditto "$VST3_PATH" "dist/AI Analyzer.vst3"
+          BINARY="$VST3_PATH/Contents/MacOS/AI Analyzer"
+
+          echo "Architectures: $(lipo -archs "$BINARY")"
+          echo "Mach-O deployment info:"
+          otool -l "$BINARY" | awk '
+            /LC_BUILD_VERSION/ { show=1; count=0 }
+            show { print; count++ }
+            show && count >= 7 { show=0 }
+          '
+
+          # JUCE generates moduleinfo.json near the end of the VST3 build. Re-sign
+          # the final bundle after all resources exist, then fail CI if the bundle
+          # is not internally valid.
+          xattr -cr "$VST3_PATH" || true
+          codesign --force --deep --sign - --timestamp=none "$VST3_PATH"
+          codesign --verify --deep --strict --verbose=4 "$VST3_PATH"
+
+          # Preserve the macOS bundle layout, executable bits, metadata and final
+          # ad-hoc signature inside an inner ZIP. Users unzip this file and copy
+          # AI Analyzer.vst3 to ~/Library/Audio/Plug-Ins/VST3/.
+          ditto -c -k --sequesterRsrc --keepParent \
+            "$VST3_PATH" \
+            "dist/AI-Analyzer-macOS.vst3.zip"
 
           # The bridge is a separate archive so users can place it anywhere.
           (
@@ -58,7 +79,7 @@ jobs:
           )
 
           echo "Package contents:"
-          find dist -maxdepth 3 -print
+          ls -lh dist
 
       - name: Package Windows
         if: runner.os == 'Windows'
@@ -73,8 +94,9 @@ jobs:
             throw 'AI Analyzer.vst3 bundle not found'
           }
 
-          # Keep the complete installable VST3 package, including Contents/resources.
-          Copy-Item -Path $vst3.FullName -Destination 'dist/AI Analyzer.vst3' -Recurse
+          # Package the complete VST3 directory to avoid any transport layer
+          # changing the bundle layout or file attributes.
+          Compress-Archive -Path $vst3.FullName -DestinationPath 'dist/AI-Analyzer-Windows.vst3.zip' -CompressionLevel Optimal
 
           $bridgeFiles = @(
             'bridge/server.py',
@@ -84,7 +106,7 @@ jobs:
           Compress-Archive -Path $bridgeFiles -DestinationPath 'dist/bridge.zip' -CompressionLevel Optimal
 
           Write-Host 'Package contents:'
-          Get-ChildItem -Path dist -Recurse | Select-Object FullName
+          Get-ChildItem -Path dist | Select-Object Name, Length
 
       - name: Upload install package
         uses: actions/upload-artifact@v4
