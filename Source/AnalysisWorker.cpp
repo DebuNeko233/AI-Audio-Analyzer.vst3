@@ -189,6 +189,7 @@ void AnalysisWorker::resetLoudnessState()
     latestTruePeakDbtp = kFloorDb;
     maxTruePeakDbtp = kFloorDb;
     lastLoudnessMetricsMs = 0.0;
+    loudnessSamplesSinceMetrics = 0;
 
     const auto currentSampleRate = static_cast<unsigned long>(
         std::max(1.0, std::round(sampleRate.load(std::memory_order_acquire))));
@@ -237,6 +238,7 @@ void AnalysisWorker::resetAnalysisState()
     silenceSeconds = 0.0;
 
     activeProfile = profileFromInt(requestedProfile.load(std::memory_order_acquire));
+    activeTransportEpoch = requestedTransportEpoch.load(std::memory_order_acquire);
     hasPreviousTemporalFrame = false;
     previousWindowRmsDb = kFloorDb;
     resetTemporalAccumulator();
@@ -255,6 +257,7 @@ void AnalysisWorker::resetAnalysisState()
         latestTruePeakDbtp = kFloorDb;
         maxTruePeakDbtp = kFloorDb;
         lastLoudnessMetricsMs = 0.0;
+        loudnessSamplesSinceMetrics = 0;
     }
 
     lastReducedAnalysisMs = 0.0;
@@ -286,7 +289,10 @@ void AnalysisWorker::applyProfileChangeIfNeeded()
             ebur128_destroy(&loudnessState);
 
         if (!newLoudness)
+        {
             lastLoudnessMetricsMs = 0.0;
+            loudnessSamplesSinceMetrics = 0;
+        }
     }
 
     const bool oldTemporal = (oldMask & FeatureTemporal) != 0u;
@@ -305,6 +311,36 @@ void AnalysisWorker::applyProfileChangeIfNeeded()
         resetSemanticCache();
 
     activeProfile = next;
+    lastReducedAnalysisMs = 0.0;
+}
+
+void AnalysisWorker::applyTransportEpochChangeIfNeeded()
+{
+    const auto nextEpoch = requestedTransportEpoch.load(std::memory_order_acquire);
+    if (nextEpoch == activeTransportEpoch)
+        return;
+
+    // The producer may already have pushed one or more blocks from the new
+    // epoch. Dropping the current consumer backlog is preferable to ever
+    // analyzing pre-seek audio under post-seek transport coordinates.
+    fifo.discardAllFromConsumer();
+    activeTransportEpoch = nextEpoch;
+
+    std::fill(windowLeft.begin(), windowLeft.end(), 0.0f);
+    std::fill(windowRight.begin(), windowRight.end(), 0.0f);
+    std::fill(previousMidMagnitudes.begin(), previousMidMagnitudes.end(), 0.0f);
+    filledSamples = 0;
+    signalPresent = false;
+    detectorPeakDb = kFloorDb;
+    silenceSeconds = 0.0;
+    hasPreviousTemporalFrame = false;
+    previousWindowRmsDb = kFloorDb;
+    resetTemporalAccumulator();
+    resetSemanticCache();
+
+    if (hasFeature(activeProfile, FeatureLoudness))
+        resetLoudnessState();
+
     lastReducedAnalysisMs = 0.0;
 }
 
@@ -427,12 +463,64 @@ void AnalysisWorker::attachRuntimeMetadata(AnalysisFrame& frame) const noexcept
     frame.analysisProfile = static_cast<int>(activeProfile);
     frame.analysisFeatureMask = analysisFeatureMask(activeProfile);
     frame.workerLoadRatio = workerLoadRatio;
+
+    const auto queuedSamples = fifo.available();
     frame.fifoFillRatio = juce::jlimit(
         0.0f,
         1.0f,
-        static_cast<float>(fifo.available()) / static_cast<float>(SpscStereoFifo::capacity));
+        static_cast<float>(queuedSamples) / static_cast<float>(SpscStereoFifo::capacity));
     frame.fftRunsPerSecond = fftRunsPerSecond;
     frame.semanticRunsPerSecond = semanticRunsPerSecond;
+
+    frame.transportSupported = transportSupported.load(std::memory_order_relaxed);
+    frame.transportBpm = transportBpm.load(std::memory_order_relaxed);
+    frame.transportTimeSignatureNumerator = std::max(
+        1, transportTimeSignatureNumerator.load(std::memory_order_relaxed));
+    frame.transportTimeSignatureDenominator = std::max(
+        1, transportTimeSignatureDenominator.load(std::memory_order_relaxed));
+    frame.transportIsPlaying = transportIsPlaying.load(std::memory_order_relaxed);
+    frame.transportIsRecording = transportIsRecording.load(std::memory_order_relaxed);
+    frame.transportIsLooping = transportIsLooping.load(std::memory_order_relaxed);
+    frame.transportLoopStartPpq = transportLoopStartPpq.load(std::memory_order_relaxed);
+    frame.transportLoopEndPpq = transportLoopEndPpq.load(std::memory_order_relaxed);
+    frame.transportEpoch = activeTransportEpoch;
+    frame.droppedBlocks = fifo.getDroppedBlocks();
+
+    const auto currentSampleRate = std::max(1.0, sampleRate.load(std::memory_order_acquire));
+    const auto newestBlockSamples = std::max(
+        0, transportBlockSamples.load(std::memory_order_relaxed));
+    const auto analysisDelaySamples = static_cast<double>(queuedSamples)
+                                    + static_cast<double>(kFftSize) * 0.5;
+    frame.estimatedAnalysisLagMs = static_cast<float>(
+        analysisDelaySamples * 1000.0 / currentSampleRate);
+
+    const auto latestTime = transportTimeSeconds.load(std::memory_order_relaxed);
+    const auto latestPpq = transportPpqPosition.load(std::memory_order_relaxed);
+    if (frame.transportSupported && frame.transportIsPlaying)
+    {
+        const auto blockEnd = static_cast<double>(latestTime)
+            + static_cast<double>(newestBlockSamples) / currentSampleRate;
+        const auto estimatedCenter = std::max(
+            0.0,
+            blockEnd - analysisDelaySamples / currentSampleRate);
+        frame.transportTimeSeconds = static_cast<float>(estimatedCenter);
+
+        if (frame.transportBpm > 0.0f)
+        {
+            const auto deltaSeconds = estimatedCenter - static_cast<double>(latestTime);
+            frame.transportPpqPosition = latestPpq
+                + static_cast<float>(deltaSeconds * static_cast<double>(frame.transportBpm) / 60.0);
+        }
+        else
+        {
+            frame.transportPpqPosition = latestPpq;
+        }
+    }
+    else
+    {
+        frame.transportTimeSeconds = latestTime;
+        frame.transportPpqPosition = latestPpq;
+    }
 }
 
 void AnalysisWorker::updatePerformanceTelemetry(double busyMilliseconds,
@@ -1142,6 +1230,27 @@ void AnalysisWorker::sendFrame(const AnalysisFrame& frame)
     message.addFloat32(frame.semanticRunsPerSecond);
     message.addString("1.1");
 
+    // Protocol 1.2 append-only transport/data-quality tail. Existing 0..134
+    // indexes are untouched. Epoch is an instance-local continuous playback
+    // pass; MCP must not assume independently loaded instances share counters.
+    message.addInt32(frame.transportSupported ? 1 : 0);
+    message.addFloat32(frame.transportTimeSeconds);
+    message.addFloat32(frame.transportPpqPosition);
+    message.addFloat32(frame.transportBpm);
+    message.addInt32(frame.transportTimeSignatureNumerator);
+    message.addInt32(frame.transportTimeSignatureDenominator);
+    message.addInt32(frame.transportIsPlaying ? 1 : 0);
+    message.addInt32(frame.transportIsRecording ? 1 : 0);
+    message.addInt32(frame.transportIsLooping ? 1 : 0);
+    message.addFloat32(frame.transportLoopStartPpq);
+    message.addFloat32(frame.transportLoopEndPpq);
+    message.addInt32(static_cast<juce::int32>(std::min<std::uint32_t>(
+        frame.transportEpoch, 0x7fffffffu)));
+    message.addFloat32(frame.estimatedAnalysisLagMs);
+    message.addInt32(static_cast<juce::int32>(std::min<std::uint64_t>(
+        frame.droppedBlocks, 0x7fffffffULL)));
+    message.addString("1.2");
+
     oscSender.send(message);
 }
 
@@ -1166,6 +1275,7 @@ void AnalysisWorker::run()
             resetAnalysisState();
 
         applyProfileChangeIfNeeded();
+        applyTransportEpochChangeIfNeeded();
 
         // Identify must work even while the transport is stopped and no audio
         // is reaching the plugin. Keep the request pending until OSC is ready.
