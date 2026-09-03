@@ -10,9 +10,10 @@ on:
       - 'cmake/**'
       - 'Resources/**'
       - 'assets/**'
-      - 'bridge/**'
+      - 'mcp/**'
       - 'skills/ai-analyzer-flstudio/**'
       - 'release/common/START-HERE.md'
+      - 'release/common/MCP-SETUP.md'
       - 'release/common/INSTALL.en.md'
       - 'release/common/INSTALL.zh-CN.md'
       - 'release/windows/Install.ps1'
@@ -31,9 +32,10 @@ on:
       - 'cmake/**'
       - 'Resources/**'
       - 'assets/**'
-      - 'bridge/**'
+      - 'mcp/**'
       - 'skills/ai-analyzer-flstudio/**'
       - 'release/common/START-HERE.md'
+      - 'release/common/MCP-SETUP.md'
       - 'release/common/INSTALL.en.md'
       - 'release/common/INSTALL.zh-CN.md'
       - 'release/windows/Install.ps1'
@@ -53,7 +55,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       plugin: ${{ steps.filter.outputs.plugin }}
-      bridge: ${{ steps.filter.outputs.bridge }}
+      mcp: ${{ steps.filter.outputs.mcp }}
       skill: ${{ steps.filter.outputs.skill }}
       release: ${{ steps.filter.outputs.release }}
       workflow: ${{ steps.filter.outputs.workflow }}
@@ -93,7 +95,7 @@ jobs:
           printf '%s\n' "$CHANGED"
 
           plugin=false
-          bridge=false
+          mcp=false
           skill=false
           release=false
           workflow=false
@@ -101,19 +103,19 @@ jobs:
             [ -z "$file" ] && continue
             case "$file" in
               Source/*|tests/*|CMakeLists.txt|cmake/*|Resources/*|assets/*) plugin=true ;;
-              bridge/*) bridge=true ;;
+              mcp/*) mcp=true ;;
               skills/ai-analyzer-flstudio/*) skill=true ;;
-              release/common/START-HERE.md|release/common/INSTALL.en.md|release/common/INSTALL.zh-CN.md|release/windows/Install.ps1|release/windows/Install.cmd|release/macos/install.sh|release/macos/Install.command|.github/workflows/release.yml) release=true ;;
+              release/common/START-HERE.md|release/common/MCP-SETUP.md|release/common/INSTALL.en.md|release/common/INSTALL.zh-CN.md|release/windows/Install.ps1|release/windows/Install.cmd|release/macos/install.sh|release/macos/Install.command|.github/workflows/release.yml) release=true ;;
               .github/workflows/build.yml) workflow=true ;;
             esac
           done <<< "$CHANGED"
 
           echo "plugin=$plugin" >> "$GITHUB_OUTPUT"
-          echo "bridge=$bridge" >> "$GITHUB_OUTPUT"
+          echo "mcp=$mcp" >> "$GITHUB_OUTPUT"
           echo "skill=$skill" >> "$GITHUB_OUTPUT"
           echo "release=$release" >> "$GITHUB_OUTPUT"
           echo "workflow=$workflow" >> "$GITHUB_OUTPUT"
-          echo "plugin=$plugin bridge=$bridge skill=$skill release=$release workflow=$workflow"
+          echo "plugin=$plugin mcp=$mcp skill=$skill release=$release workflow=$workflow"
 
   release-validate:
     name: Validate release installer (${{ matrix.os }})
@@ -134,6 +136,7 @@ jobs:
           bash -n release/macos/install.sh
           bash -n release/macos/Install.command
           test -s release/common/START-HERE.md
+          test -s release/common/MCP-SETUP.md
           test -s release/common/INSTALL.en.md
           test -s release/common/INSTALL.zh-CN.md
       - name: Validate Windows PowerShell installer
@@ -145,10 +148,10 @@ jobs:
           if (-not (Test-Path release/windows/Install.cmd)) { throw 'Install.cmd missing' }
           Write-Host 'Windows installer syntax OK'
 
-  bridge:
+  mcp:
     name: Validate and package MCP / Skill components
     needs: changes
-    if: needs.changes.outputs.bridge == 'true' || needs.changes.outputs.skill == 'true' || needs.changes.outputs.workflow == 'true'
+    if: needs.changes.outputs.mcp == 'true' || needs.changes.outputs.skill == 'true' || needs.changes.outputs.workflow == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -156,27 +159,27 @@ jobs:
         with:
           python-version: '3.12'
           cache: pip
-          cache-dependency-path: bridge/requirements.txt
+          cache-dependency-path: mcp/requirements.txt
 
       - name: Validate MCP 1.1 source and regressions
         shell: bash
         run: |
           set -euo pipefail
           python -m pip install --upgrade pip
-          python -m pip install -r bridge/requirements.txt
+          python -m pip install -r mcp/requirements.txt
           python -m py_compile \
-            bridge/server.py \
-            bridge/analyzer_core.py \
-            bridge/project_tools.py \
-            bridge/temporal_tools.py \
-            bridge/masking_tools.py \
-            bridge/stereo_tools.py \
-            bridge/semantic_tools.py \
-            bridge/performance_tools.py \
-            bridge/verification_tools.py \
-            bridge/ci_regression.py
-          AI_ANALYZER_SELF_TEST=1 python bridge/server.py
-          python bridge/ci_regression.py
+            mcp/server.py \
+            mcp/analyzer_core.py \
+            mcp/project_tools.py \
+            mcp/temporal_tools.py \
+            mcp/masking_tools.py \
+            mcp/stereo_tools.py \
+            mcp/semantic_tools.py \
+            mcp/performance_tools.py \
+            mcp/verification_tools.py \
+            mcp/ci_regression.py
+          AI_ANALYZER_SELF_TEST=1 python mcp/server.py
+          PYTHONPATH=mcp python mcp/ci_regression.py
 
       - name: Package MCP and Skill folders
         shell: bash
@@ -184,17 +187,17 @@ jobs:
           set -euo pipefail
           rm -rf dist
           mkdir -p dist/mcp dist/skill
-          cp bridge/server.py dist/mcp/
-          cp bridge/analyzer_core.py dist/mcp/
-          cp bridge/project_tools.py dist/mcp/
-          cp bridge/temporal_tools.py dist/mcp/
-          cp bridge/masking_tools.py dist/mcp/
-          cp bridge/stereo_tools.py dist/mcp/
-          cp bridge/semantic_tools.py dist/mcp/
-          cp bridge/performance_tools.py dist/mcp/
-          cp bridge/verification_tools.py dist/mcp/
-          cp bridge/requirements.txt dist/mcp/
-          cp bridge/cherry-studio.example.json dist/mcp/
+          cp mcp/server.py dist/mcp/
+          cp mcp/analyzer_core.py dist/mcp/
+          cp mcp/project_tools.py dist/mcp/
+          cp mcp/temporal_tools.py dist/mcp/
+          cp mcp/masking_tools.py dist/mcp/
+          cp mcp/stereo_tools.py dist/mcp/
+          cp mcp/semantic_tools.py dist/mcp/
+          cp mcp/performance_tools.py dist/mcp/
+          cp mcp/verification_tools.py dist/mcp/
+          cp mcp/requirements.txt dist/mcp/
+          cp mcp/cherry-studio.example.json dist/mcp/
           cp -R skills/ai-analyzer-flstudio/. dist/skill/
           find dist -maxdepth 3 -type f -print | sort
 
@@ -256,7 +259,7 @@ jobs:
           codesign --force --deep --sign - --timestamp=none "$VST3_PATH"
           codesign --verify --deep --strict --verbose=4 "$VST3_PATH"
           ditto "$VST3_PATH" "dist/AI Audio Analyzer.vst3"
-          cp bridge/*.py bridge/requirements.txt bridge/cherry-studio.example.json dist/mcp/
+          cp mcp/*.py mcp/requirements.txt mcp/cherry-studio.example.json dist/mcp/
           cp -R skills/ai-analyzer-flstudio/. dist/skill/
 
       - name: Package Windows development artifact
@@ -269,7 +272,7 @@ jobs:
           $vst3 = Get-ChildItem build/AIAnalyzer_artefacts -Recurse -Directory -Filter 'AI Audio Analyzer.vst3' | Select-Object -First 1
           if (-not $vst3) { throw 'AI Audio Analyzer.vst3 not found' }
           Copy-Item $vst3.FullName 'dist/AI Audio Analyzer.vst3' -Recurse -Force
-          Copy-Item bridge/*.py,bridge/requirements.txt,bridge/cherry-studio.example.json 'dist/mcp/' -Force
+          Copy-Item mcp/*.py,mcp/requirements.txt,mcp/cherry-studio.example.json 'dist/mcp/' -Force
           Copy-Item 'skills/ai-analyzer-flstudio/*' 'dist/skill/' -Recurse -Force
 
       - uses: actions/upload-artifact@v4
