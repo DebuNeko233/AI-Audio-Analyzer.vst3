@@ -40,7 +40,12 @@ public:
     // DAW transport is sampled in processBlock(), where AudioPlayHead state is
     // valid, and handed to the worker using atomics only. Floats are deliberate:
     // they are lock-free on supported targets and match OSC float32 precision.
-    // Store epoch last so a newly observed epoch publishes the preceding fields.
+    //
+    // A discontinuity is a two-phase handoff. The producer first publishes the
+    // new requested epoch and marks transport unavailable. Only after the worker
+    // has acknowledged that epoch (and discarded/reset old queued state) may a
+    // later audio block publish coordinates again. This prevents an old audio
+    // window from being labelled with post-seek/post-loop DAW coordinates.
     void setTransportStateRealtimeSafe(bool supported,
                                        float timeSeconds,
                                        float ppqPosition,
@@ -55,7 +60,13 @@ public:
                                        std::uint32_t epoch,
                                        int blockSamples) noexcept
     {
-        transportSupported.store(supported, std::memory_order_relaxed);
+        if (activeTransportEpoch.load(std::memory_order_acquire) != epoch)
+        {
+            transportSupported.store(false, std::memory_order_release);
+            requestedTransportEpoch.store(epoch, std::memory_order_release);
+            return;
+        }
+
         transportTimeSeconds.store(timeSeconds, std::memory_order_relaxed);
         transportPpqPosition.store(ppqPosition, std::memory_order_relaxed);
         transportBpm.store(bpm, std::memory_order_relaxed);
@@ -67,7 +78,8 @@ public:
         transportLoopStartPpq.store(loopStartPpq, std::memory_order_relaxed);
         transportLoopEndPpq.store(loopEndPpq, std::memory_order_relaxed);
         transportBlockSamples.store(std::max(0, blockSamples), std::memory_order_relaxed);
-        requestedTransportEpoch.store(epoch, std::memory_order_release);
+        requestedTransportEpoch.store(epoch, std::memory_order_relaxed);
+        transportSupported.store(supported, std::memory_order_release);
     }
 
     AnalysisProfile getAnalysisProfile() const noexcept;
@@ -145,8 +157,9 @@ private:
     AnalysisProfile activeProfile = AnalysisProfile::Full;
 
     // Realtime transport handoff. Epoch is incremented by the processor on a
-    // playback start or discontinuity. The worker drops queued pre-jump audio
-    // and resets pass-dependent state before accepting the new epoch.
+    // playback start or discontinuity. requestedTransportEpoch is producer
+    // intent; activeTransportEpoch is the worker acknowledgement. Coordinates
+    // stay unavailable while those two epochs differ.
     std::atomic<bool> transportSupported { false };
     std::atomic<float> transportTimeSeconds { 0.0f };
     std::atomic<float> transportPpqPosition { 0.0f };
@@ -160,7 +173,7 @@ private:
     std::atomic<float> transportLoopEndPpq { 0.0f };
     std::atomic<int> transportBlockSamples { 0 };
     std::atomic<std::uint32_t> requestedTransportEpoch { 0 };
-    std::uint32_t activeTransportEpoch = 0;
+    std::atomic<std::uint32_t> activeTransportEpoch { 0 };
 
     std::array<float, kHopSize> hopLeft {};
     std::array<float, kHopSize> hopRight {};
