@@ -277,6 +277,7 @@ START-HERE.md
 INSTALL.en.md
 INSTALL.zh-CN.md
 VERSION.txt
+LICENSE
 对应平台的一键安装文件
 ```
 
@@ -402,3 +403,9 @@ AGENT.md                        Agent / Maintainer 约束与历史
 ```
 
 修改仓库前请先阅读 `AGENT.md`。
+
+## 开源协议
+
+AI Audio Analyzer 项目代码采用 **MIT License** 开源，完整协议见 [LICENSE](LICENSE)。
+
+第三方依赖和组件继续遵循各自许可证；本仓库的 MIT License 不会替代或覆盖这些第三方许可证条款。
