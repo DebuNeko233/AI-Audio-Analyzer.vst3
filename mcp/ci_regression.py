@@ -10,8 +10,9 @@ import asyncio
 import copy
 import sys
 from importlib.metadata import version
+from pathlib import Path
 
-sys.path.insert(0, "bridge")
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import analyzer_core as core  # noqa: E402
 import masking_tools as masking  # noqa: E402
