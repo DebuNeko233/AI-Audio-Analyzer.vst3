@@ -20,6 +20,7 @@ import performance_tools as performance  # noqa: E402
 import project_tools as project  # noqa: E402
 import semantic_tools as semantic  # noqa: E402
 import server as entry  # noqa: E402
+import song_tools as song  # noqa: E402
 import stereo_tools as stereo  # noqa: E402
 import temporal_tools as temporal  # noqa: E402
 import verification_tools as verification  # noqa: E402
@@ -51,6 +52,18 @@ def synthetic_frame(
     fifo_fill_ratio: float = 0.01,
     fft_runs_per_second: float = 46.8,
     semantic_runs_per_second: float = 5.0,
+    transport_supported: bool = True,
+    transport_time_seconds: float | None = None,
+    transport_ppq_position: float | None = None,
+    transport_bpm: float = 120.0,
+    transport_epoch: int = 1,
+    transport_is_playing: bool = True,
+    transport_is_recording: bool = False,
+    transport_is_looping: bool = False,
+    loop_start_ppq: float = 0.0,
+    loop_end_ppq: float = 0.0,
+    estimated_analysis_lag_ms: float = 42.0,
+    dropped_blocks: int = 0,
 ) -> list[object]:
     prefix: list[object] = [
         name,
@@ -93,7 +106,26 @@ def synthetic_frame(
         semantic_runs_per_second,
         "1.1",
     ]
-    return prefix + v02 + v03 + v06 + v08 + v09 + v11
+    transport_time = timestamp if transport_time_seconds is None else transport_time_seconds
+    transport_ppq = transport_time * transport_bpm / 60.0 if transport_ppq_position is None else transport_ppq_position
+    v12: list[object] = [
+        1 if transport_supported else 0,
+        transport_time,
+        transport_ppq,
+        transport_bpm,
+        4,
+        4,
+        1 if transport_is_playing else 0,
+        1 if transport_is_recording else 0,
+        1 if transport_is_looping else 0,
+        loop_start_ppq,
+        loop_end_ppq,
+        transport_epoch,
+        estimated_analysis_lag_ms,
+        dropped_blocks,
+        "1.2",
+    ]
+    return prefix + v02 + v03 + v06 + v08 + v09 + v11 + v12
 
 
 def reset_state() -> None:
@@ -107,6 +139,8 @@ def reset_state() -> None:
         project._project_snapshots.clear()
     with verification._verification_lock:
         verification._verifications.clear()
+    with song._song_lock:
+        song._timeline.clear()
 
 
 def bind(runtime_id: str, name: str, track_index: int, slot: int = 9) -> None:
@@ -127,12 +161,12 @@ def main() -> None:
     assert mcp_sdk_version.split(".", 1)[0] == "2", mcp_sdk_version
     assert isinstance(entry.mcp, MCPServer)
     assert entry.mcp is core.mcp
-    assert entry.MCP_VERSION == "1.1"
-    assert entry.OSC_PROTOCOL_VERSION == "1.1"
+    assert entry.MCP_VERSION == "1.2"
+    assert entry.OSC_PROTOCOL_VERSION == "1.2"
 
     names = {tool.name for tool in asyncio.run(entry.mcp.list_tools())}
     assert names == entry.EXPECTED_TOOLS, sorted(names ^ entry.EXPECTED_TOOLS)
-    assert len(names) == 29
+    assert len(names) == 32
 
     reset_state()
 
@@ -169,6 +203,7 @@ def main() -> None:
                 harmonic_f0_hz=130.81,
                 worker_load_ratio=0.18,
                 fifo_fill_ratio=0.01,
+                estimated_analysis_lag_ms=38.0,
             ),
         )
         core._on_frame(
@@ -193,6 +228,7 @@ def main() -> None:
                 harmonic_f0_hz=98.0,
                 worker_load_ratio=0.24,
                 fifo_fill_ratio=0.02,
+                estimated_analysis_lag_ms=55.0,
             ),
         )
 
@@ -204,7 +240,11 @@ def main() -> None:
     assert frame_a["adaptive_analysis_supported"] is True
     assert frame_a["analysis_profile"] == "full"
     assert frame_a["analysis_features"]["semantic"] is True
-    assert frame_a["schema_version"] == "1.1"
+    assert frame_a["transport_v12_supported"] is True
+    assert frame_a["transport_epoch"] == 1
+    assert frame_a["transport_is_playing"] is True
+    assert frame_a["estimated_analysis_lag_ms"] == 38.0
+    assert frame_a["schema_version"] == "1.2"
     assert len(frame_a["side_bands_db"]) == 32
     assert len(frame_a["band_side_to_mid_db"]) == 8
     assert len(frame_a["chroma"]) == 12
@@ -225,6 +265,20 @@ def main() -> None:
     assert project_perf["instance_count"] == 2
     assert project_perf["profile_counts"]["full"] == 2
     assert project_perf["max_worker_load_ratio"] is not None
+
+    song_status = song.audio_song_status()
+    assert song_status["transport_ready"] is True
+    assert song_status["song_memory_ready"] is True
+    assert song_status["max_estimated_analysis_lag_ms"] == 55.0
+    timeline = song.audio_song_timeline("mixer:7/slot:9", 5)
+    assert timeline["available"] is True
+    assert timeline["transport_epoch"] == 1
+    assert timeline["returned_bins"] >= 1
+    assert timeline["bins"][0]["data_quality"]["max_estimated_analysis_lag_ms"] == 38.0
+    song_overview = song.audio_song_overview()
+    assert song_overview["available"] is True
+    assert song_overview["track_count"] == 2
+    assert song_overview["instance_epochs_consistent"] is True
 
     temporal_profile = temporal.audio_temporal_profile("uuid-a", 5.0)
     assert temporal_profile["available"] is True
@@ -373,9 +427,9 @@ def main() -> None:
     assert blocked_baseline["comparability"]["baseline_ready"] is False
 
     # Adaptive-profile validity regression: deliberately provide realistic old
-    # tail numbers but declare Eco/core-only. The new parser must make disabled
+    # tail numbers but declare Eco/core-only. The parser must make disabled
     # evidence unavailable instead of letting downstream tools interpret zeros
-    # or stale values as measurements.
+    # or stale values as measurements. Transport/core context remains available.
     core._on_frame(
         "/aianalyzer/frame",
         *synthetic_frame(
@@ -399,6 +453,7 @@ def main() -> None:
     assert eco["temporal_valid"] is False
     assert eco["semantic_v09_valid"] is False
     assert eco["chroma"] is None
+    assert eco["transport_v12_supported"] is True
     eco_status = performance.audio_analysis_status("uuid-eco")
     assert eco_status["features"] == {
         "core": True,
@@ -413,11 +468,36 @@ def main() -> None:
     with core._lock:
         core._tracks.pop("uuid-eco", None)
         core._history.pop("uuid-eco", None)
+    with song._song_lock:
+        song._timeline.pop("uuid-eco", None)
+
+    # New epoch regression: a later continuous pass must remain separately
+    # addressable rather than being merged into the previous song timeline.
+    core._on_frame(
+        "/aianalyzer/frame",
+        *synthetic_frame(
+            "Bass A",
+            "uuid-a",
+            30.0,
+            shape_a,
+            chroma=chroma_c_major,
+            transport_epoch=2,
+            transport_time_seconds=3.0,
+            estimated_analysis_lag_ms=65.0,
+        ),
+    )
+    pass_status = song.audio_song_status()
+    bass_a_status = next(item for item in pass_status["instances"] if item["runtime_id"] == "uuid-a")
+    assert bass_a_status["remembered_epochs"] == [1, 2]
+    second_pass = song.audio_song_timeline("uuid-a", 1, 2)
+    assert second_pass["available"] is True
+    assert second_pass["transport_epoch"] == 2
+    assert second_pass["bins"][0]["start_seconds"] == 3.0
 
     print(
-        f"AI Audio Analyzer MCP SDK {mcp_sdk_version}: 29 tools; "
+        f"AI Audio Analyzer MCP SDK {mcp_sdk_version}: 32 tools; "
         "V0.4 mapping + project A/B + temporal + masking + stereo + tonal + "
-        "V1.0 closed-loop verification + adaptive profile/performance regressions OK"
+        "V1.0 verification + V1.1 adaptive performance + V1.2 transport/song-memory regressions OK"
     )
 
 
