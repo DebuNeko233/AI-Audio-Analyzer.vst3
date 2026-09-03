@@ -66,7 +66,7 @@ if (-not $SkipPlugin) {
     }
 }
 
-Write-Step 'Installing Analyzer connection and Cherry Studio Skill'
+Write-Step 'Installing Analyzer MCP and Cherry Studio Skill'
 New-Item -ItemType Directory -Path $InstallRoot -Force | Out-Null
 
 foreach ($name in @('mcp', 'skill')) {
@@ -77,7 +77,7 @@ foreach ($name in @('mcp', 'skill')) {
     Copy-Item $source $destination -Recurse -Force
 }
 
-foreach ($doc in @('START-HERE.md', 'INSTALL.en.md', 'INSTALL.zh-CN.md')) {
+foreach ($doc in @('START-HERE.md', 'MCP-SETUP.md', 'INSTALL.en.md', 'INSTALL.zh-CN.md')) {
     $source = Join-Path $PackageRoot $doc
     if (Test-Path $source) { Copy-Item $source $InstallRoot -Force }
 }
@@ -87,7 +87,7 @@ if (-not (Test-Path $McpExe)) {
     throw "Analyzer MCP executable not found: $McpExe"
 }
 
-Write-Step 'Checking Analyzer connection service'
+Write-Step 'Checking Analyzer MCP'
 $oldSelfTest = $env:AI_ANALYZER_SELF_TEST
 try {
     $env:AI_ANALYZER_SELF_TEST = '1'
@@ -103,7 +103,7 @@ try {
     }
 }
 
-Write-Step 'Creating Cherry Studio configuration'
+Write-Step 'Creating Cherry Studio MCP configuration'
 $ConfigPath = Join-Path $InstallRoot 'cherry-studio-mcp.json'
 $config = @{
     mcpServers = @{
@@ -119,14 +119,18 @@ $config = @{
 }
 $config | ConvertTo-Json -Depth 8 | Set-Content -Path $ConfigPath -Encoding UTF8
 
+$McpSetupPath = Join-Path $InstallRoot 'MCP-SETUP.md'
+
 Write-Host ''
 Write-Host 'Installation completed successfully.' -ForegroundColor Green
 Write-Host ''
 Write-Host 'Next steps:'
 Write-Host '1. Restart FL Studio and rescan VST3 plugins.'
-Write-Host '2. In Cherry Studio, add the generated MCP configuration:'
+Write-Host '2. Add the generated MCP configuration to the Agent/Assistant that will use Analyzer:'
 Write-Host "   $ConfigPath"
-Write-Host '3. Import the installed Skill folder:'
+Write-Host '3. Follow the Agent/MCP setup guide (includes JSON examples):'
+Write-Host "   $McpSetupPath"
+Write-Host '4. Import the installed Skill folder for the same Agent:'
 Write-Host "   $(Join-Path $InstallRoot 'skill')"
 Write-Host ''
 Write-Host 'You do not need Python, pip, a terminal, or any programming setup.' -ForegroundColor Green
