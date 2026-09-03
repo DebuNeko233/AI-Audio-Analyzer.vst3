@@ -11,10 +11,10 @@ The normal `build` workflow is for development validation/artifacts. It is not t
 Current product target:
 
 ```text
-AI Audio Analyzer 1.1.0
-MCP 1.1
-OSC 1.1
-29 MCP tools
+AI Audio Analyzer 1.2.0
+MCP 1.2
+OSC 1.2
+32 MCP tools
 ```
 
 ## Release audience
@@ -59,7 +59,7 @@ Build-time source entrypoint remains:
 mcp/server.py
 ```
 
-MCP 1.1 imports all required feature modules, including `performance_tools.py`, into that single executable. Python may be used by the build pipeline, but the **user package must not contain MCP Python source or repository test code**.
+MCP 1.2 imports all required feature modules, including `performance_tools.py` and `song_tools.py`, into that single executable. Python may be used by the build pipeline, but the **user package must not contain MCP Python source or repository test code**.
 
 `mcp/ci_regression.py` is CI-only and must never be shipped to ordinary users.
 
@@ -130,8 +130,10 @@ Before publication, verify at least:
 
 ```text
 source MCP syntax/self-test
-MCP 1.1 exact 29-tool registry
+MCP 1.2 exact 32-tool registry
 historical measurement/evidence regressions
+transport 1.2 parser + song-memory regressions
+transport epoch separation / data-quality coverage regressions
 closed-loop verification positive/negative regressions
 adaptive Full/Eco validity regressions
 PyInstaller -F one-file build
@@ -155,7 +157,7 @@ A successful source self-test does not prove PyInstaller, VST3, package assembly
 
 ## Adaptive-analysis user-facing note
 
-Release notes may explain that Analyzer now supports lower-cost measurement profiles for projects with many plugin instances:
+Release notes may explain lower-cost measurement profiles for projects with many plugin instances:
 
 ```text
 Eco
@@ -172,15 +174,29 @@ Keep this explanation user-oriented:
 - the LLM/DAW-control workflow may temporarily enable a deeper profile when a requested measurement needs it;
 - no additional installation step is required.
 
-MCP 1.1 adds:
+Do not market `worker_load_ratio` as DAW audio-thread CPU. Do not imply a fixed CPU reduction percentage. Do not imply Analyzer MCP writes FL Studio parameters; actual profile writes/readback belong to the external DAW-control MCP.
+
+## Transport-aware song-memory user-facing note
+
+MCP/OSC 1.2 adds latency-resilient whole-song context:
 
 ```text
-audio_analysis_status
-audio_project_performance
-29 total MCP tools
+audio_song_status
+audio_song_overview
+audio_song_timeline
+32 total MCP tools
 ```
 
-Do not market `worker_load_ratio` as DAW audio-thread CPU. Do not imply a fixed CPU reduction percentage. Do not imply Analyzer MCP writes FL Studio parameters; actual profile writes/readback belong to the external DAW-control MCP.
+Release notes may explain this in simple terms:
+
+- Analyzer can remember measured evidence against the DAW timeline while the LLM is thinking or using other tools;
+- playback starts/seeks/loop jumps create separate continuous playback epochs so unrelated song positions are not silently blended;
+- the worker exposes estimated Analyzer backlog and dropped-block telemetry;
+- the canonical memory is bounded and session-scoped, not a persistent project database;
+- automatic Verse/Chorus/Bridge labeling is not yet part of this release;
+- transport coordinates are suitable for whole-song/section reasoning, not sample-accurate editing.
+
+Do not market `estimated_analysis_lag_ms` as total Agent/network latency. Do not claim Song Memory removes all latency; it makes delayed perception **recoverable and auditable**.
 
 ## Closed-loop verification note
 
@@ -189,6 +205,8 @@ The Release also includes controlled measurement verification around changes mad
 Do not market `controlled_comparison=true` as “the change is better”. It only means the documented technical comparability guardrails passed.
 
 `closed_loop_complete=true` additionally requires caller-supplied actual host readback; it still does not mean artistic success.
+
+Current verification remains recent-window based; do not claim transport-anchored same-range verification until implemented.
 
 ## Draft / prerelease semantics
 
