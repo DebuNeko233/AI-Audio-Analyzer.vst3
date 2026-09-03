@@ -42,6 +42,7 @@ jobs:
           test -s release/common/START-HERE.md
           test -s release/common/INSTALL.en.md
           test -s release/common/INSTALL.zh-CN.md
+          test -s LICENSE
           python -m py_compile \
             bridge/server.py \
             bridge/analyzer_core.py \
@@ -184,6 +185,7 @@ jobs:
           Copy-Item release/common/INSTALL.zh-CN.md 'package/INSTALL.zh-CN.md'
           Copy-Item release/windows/Install.ps1 'package/Install.ps1'
           Copy-Item release/windows/Install.cmd 'package/Install.cmd'
+          Copy-Item LICENSE 'package/LICENSE'
 
           @"
           AI Audio Analyzer $version
@@ -203,6 +205,7 @@ jobs:
             $_.Extension -eq '.py' -or $_.Extension -eq '.zip' -or $_.Name -eq 'requirements.txt' -or $_.Name -eq 'cherry-studio.example.json'
           }
           if ($forbidden) { throw "Forbidden developer/nested archive files in user package: $($forbidden.FullName -join ', ')" }
+          if (-not (Test-Path 'package/LICENSE')) { throw 'LICENSE missing from Windows user Release.' }
           if (Test-Path 'package/mcp/source') { throw 'mcp/source must never be present in a user Release.' }
           if (Test-Path 'package/mcp/_internal') { throw '_internal must never be present in a PyInstaller one-file user Release.' }
 
@@ -261,6 +264,7 @@ jobs:
           cp release/common/INSTALL.zh-CN.md package/INSTALL.zh-CN.md
           cp release/macos/install.sh package/install.sh
           cp release/macos/Install.command package/Install.command
+          cp LICENSE package/LICENSE
           chmod +x package/install.sh package/Install.command
           AI_ANALYZER_SELF_TEST=1 package/mcp/ai-audio-analyzer-mcp
 
@@ -277,6 +281,7 @@ jobs:
             find package -type f \( -name '*.py' -o -name '*.zip' -o -name 'requirements.txt' -o -name 'cherry-studio.example.json' \) >&2
             exit 1
           fi
+          test -s package/LICENSE
           test ! -d package/mcp/source
           test ! -d package/mcp/_internal
 
@@ -345,6 +350,8 @@ jobs:
             find "$WIN_ROOT" "$MAC_ROOT" -type f \( -name '*.py' -o -name '*.zip' -o -name 'requirements.txt' -o -name 'cherry-studio.example.json' \) >&2
             exit 1
           fi
+          test -s "$WIN_ROOT/LICENSE"
+          test -s "$MAC_ROOT/LICENSE"
           test ! -d "$WIN_ROOT/mcp/source"
           test ! -d "$MAC_ROOT/mcp/source"
           test ! -d "$WIN_ROOT/mcp/_internal"
@@ -381,6 +388,7 @@ jobs:
           - Windows: download AI-Audio-Analyzer-*-Windows.zip, unzip it, then double-click Install.cmd.
           - macOS Apple Silicon: download AI-Audio-Analyzer-*-macOS.zip, unzip it, then double-click Install.command.
           - No Python, source code, package manager, or programming setup is included or required.
+          - AI Audio Analyzer project code is released under the MIT License; the package includes the repository LICENSE file.
           - Adaptive Analysis adds Eco, Balanced, Mix, and Full performance profiles through the host-visible Analysis Profile parameter.
           - Full remains the default for backward compatibility; lower profiles skip or decimate analysis work when those evidence families are not needed.
           - MCP 1.1 exposes 29 tools, including audio_analysis_status and audio_project_performance for profile/worker telemetry readback.
