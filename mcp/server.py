@@ -106,6 +106,34 @@ EXPECTED_TOOLS = {
 }
 
 
+def _self_test_song_coverage() -> None:
+    """Guard against sparse one-second bins becoming 100% covered after merging."""
+    first = song._new_accumulator({"_received_at": 1.0}, 1, 0)
+    last = song._new_accumulator({"_received_at": 2.0}, 1, 4)
+    for acc, positions in ((first, (0.05, 0.15)), (last, (4.05, 4.15))):
+        for position in positions:
+            song._accumulate(
+                acc,
+                {
+                    "_received_at": 1.0 + position,
+                    "transport_time_seconds": position,
+                    "signal_present": True,
+                    "rms_db": -24.0,
+                    "estimated_analysis_lag_ms": 10.0,
+                    "dropped_blocks": 0,
+                },
+            )
+    summary = song._finalize_rows(
+        [first, last],
+        start_seconds=0.0,
+        end_seconds=5.0,
+        expected_seconds=5.0,
+    )
+    quality = summary["data_quality"]
+    if quality["covered_seconds"] != 0.4 or quality["coverage_ratio"] != 0.08:
+        raise RuntimeError(f"Song-memory sparse coverage regression: {quality}")
+
+
 def self_test() -> None:
     tools = asyncio.run(mcp.list_tools())
     names = {tool.name for tool in tools}
@@ -115,6 +143,8 @@ def self_test() -> None:
         raise RuntimeError(
             f"MCP tool registry mismatch: missing={missing}, unexpected={unexpected}"
         )
+
+    _self_test_song_coverage()
 
     print(
         json.dumps(
@@ -126,6 +156,7 @@ def self_test() -> None:
                 "osc_protocol_version": OSC_PROTOCOL_VERSION,
                 "tool_count": len(names),
                 "expected_tools": len(EXPECTED_TOOLS),
+                "song_memory_sparse_coverage": "ok",
             },
             ensure_ascii=False,
         )
