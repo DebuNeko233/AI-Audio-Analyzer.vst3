@@ -2,6 +2,7 @@
 
 #include <JuceHeader.h>
 #include <atomic>
+#include <cstdint>
 #include <mutex>
 
 #include "AnalysisFrame.h"
@@ -59,6 +60,17 @@ private:
     std::atomic<int> lastWorkerProfileIndex {
         static_cast<int>(aianalyzer::AnalysisProfile::Full)
     };
+
+    // Audio-thread-only transport continuity state. None of this is serialized:
+    // reopening a project starts a fresh Analyzer/MCP observation session.
+    bool previousTransportValid = false;
+    bool previousTransportPlaying = false;
+    bool previousTransportHadSamples = false;
+    std::int64_t previousTransportSamplePosition = 0;
+    double previousTransportTimeSeconds = 0.0;
+    int previousTransportBlockSamples = 0;
+    std::uint32_t transportEpoch = 0;
+
     aianalyzer::AnalysisWorker analysisWorker;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(AIAnalyzerAudioProcessor)
