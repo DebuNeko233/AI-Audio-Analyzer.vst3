@@ -13,6 +13,7 @@ Current layers:
 - stereo_tools: Mid/Side, Side-spectrum, and stereo evidence
 - semantic_tools: chroma, tonal-center, and harmonic-alignment evidence
 - performance_tools: Analysis Profile, feature-mask and worker telemetry parsing
+- song_tools: DAW transport, continuous-pass song memory and latency-aware summaries
 - verification_tools: controlled Before/After verification sessions
 
 Set AI_ANALYZER_SELF_TEST=1 to validate source or packaged runtime without
@@ -60,10 +61,14 @@ import performance_tools as performance  # noqa: E402
 
 core._on_frame = performance.on_frame_v11
 
+import song_tools as song  # noqa: E402
+
+core._on_frame = song.on_frame_v12
+
 import verification_tools as verification  # noqa: E402,F401
 
-MCP_VERSION = "1.1"
-OSC_PROTOCOL_VERSION = "1.1"
+MCP_VERSION = "1.2"
+OSC_PROTOCOL_VERSION = "1.2"
 
 EXPECTED_TOOLS = {
     "audio_bridge_status",
@@ -92,6 +97,9 @@ EXPECTED_TOOLS = {
     "audio_tonal_compare",
     "audio_analysis_status",
     "audio_project_performance",
+    "audio_song_status",
+    "audio_song_timeline",
+    "audio_song_overview",
     "audio_begin_verification",
     "audio_complete_verification",
     "audio_verification_status",
