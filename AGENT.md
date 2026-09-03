@@ -81,7 +81,7 @@ These are performance profiles, not sonic modes. They must never alter the audio
 There is exactly **one supported source/PyInstaller entrypoint**:
 
 ```text
-bridge/server.py
+mcp/server.py
 ```
 
 Do not create version-named startup files.
@@ -89,17 +89,19 @@ Do not create version-named startup files.
 Current internal layout:
 
 ```text
-bridge/server.py             startup / self-test / version metadata / tool registration
-bridge/analyzer_core.py      OSC/runtime state, identity/binding, base tools
-bridge/project_tools.py      project overview / Snapshot A-B
-bridge/temporal_tools.py     temporal parsing/tools
-bridge/masking_tools.py      masking evidence
-bridge/stereo_tools.py       Mid/Side and stereo evidence
-bridge/semantic_tools.py     chroma / tonal-center / harmonic evidence
-bridge/verification_tools.py controlled closed-loop verification sessions
-bridge/performance_tools.py  adaptive-profile / worker-performance telemetry
-bridge/ci_regression.py      repository-only synthetic MCP regression suite
+mcp/server.py             startup / self-test / version metadata / tool registration
+mcp/analyzer_core.py      OSC/runtime state, identity/binding, base tools
+mcp/project_tools.py      project overview / Snapshot A-B
+mcp/temporal_tools.py     temporal parsing/tools
+mcp/masking_tools.py      masking evidence
+mcp/stereo_tools.py       Mid/Side and stereo evidence
+mcp/semantic_tools.py     chroma / tonal-center / harmonic evidence
+mcp/verification_tools.py controlled closed-loop verification sessions
+mcp/performance_tools.py  adaptive-profile / worker-performance telemetry
+mcp/ci_regression.py      repository-only synthetic MCP regression suite
 ```
+
+The repository source directory is named `mcp/`. Do not reintroduce a parallel `bridge/` source directory; “Bridge” may still appear as a conceptual/runtime term and in historical/public tool names such as `audio_bridge_status`.
 
 Current metadata:
 
@@ -142,7 +144,8 @@ The current product incorporates these milestones:
 - deeper Mid/Side, Side-spectrum and negative-cross evidence;
 - 12-bin chroma, tonal-center profile ranking and single-F0 harmonic evidence;
 - controlled Before/After verification around external DAW writes/readback;
-- adaptive analysis profiles and worker/FIFO performance telemetry.
+- adaptive analysis profiles and worker/FIFO performance telemetry;
+- repository MCP source normalized under `mcp/`, with beginner-facing `MCP-SETUP.md` instructions and copyable Agent/client JSON examples in the lazy package.
 
 Protocol evolution remains append-only. Current tail after the existing semantic fields is:
 
@@ -315,7 +318,8 @@ download one ZIP
 → extract once
 → double-click installer
 → restart FL Studio
-→ use generated configuration / Skill
+→ add generated MCP configuration to the intended Agent/Assistant
+→ import/use the Skill with the same Agent
 ```
 
 User packages must contain only the product/plugin runtime, standalone MCP runtime, Skill and beginner-facing install material.
@@ -328,10 +332,14 @@ no ZIP-inside-ZIP
 PyInstaller -F / --onefile MCP executable
 no MCP Python source
 no requirements.txt
-no developer examples/config
+no developer source examples/config
+MCP-SETUP.md included with copyable user JSON examples
+installer-generated cherry-studio-mcp.json uses the real absolute installed executable path
 no venv
 no _internal
 ```
+
+`MCP-SETUP.md` is beginner-facing installation material and is allowed/required even though developer configuration examples such as repository `mcp/cherry-studio.example.json` remain excluded from user Releases.
 
 Windows package includes `Install.cmd` / `Install.ps1`. macOS package includes `Install.command` / `install.sh`.
 
@@ -346,7 +354,7 @@ Do not claim a plugin change is complete until the relevant **latest PR head** h
 ```text
 MCP source/self-test
 exact expected tool registry
-bridge/ci_regression.py
+mcp/ci_regression.py
 release installer validation
 worker scheduling / True Peak C++ regressions
 Windows x64 VST3 build
@@ -357,11 +365,11 @@ Do not substitute an older green run after the head has moved.
 
 ### Development workflow scope
 
-`.github/workflows/build.yml` is intentionally path-scoped. Changes unrelated to plugin source/build files, Bridge, Analyzer Skill, Release installer material, or the build/release workflows should not start the development workflow.
+`.github/workflows/build.yml` is intentionally path-scoped. Changes unrelated to plugin source/build files, MCP source, Analyzer Skill, Release installer material, or the build/release workflows should not start the development workflow.
 
 `tests/**` is part of the plugin validation scope. Internal C++ regressions are enabled in development CI with `AI_ANALYZER_BUILD_TESTS=ON`; ordinary Release builds leave that option off and do not ship the test executable.
 
-For `pull_request` `synchronize` events, component detection compares the previous PR head (`github.event.before`) with the new head instead of repeatedly comparing the PR base with the full current head. This is deliberate: a plugin change earlier in a PR must not force Windows/macOS VST3 rebuilds after a later docs-only, Skill-only, or Bridge-only commit.
+For `pull_request` `synchronize` events, component detection compares the previous PR head (`github.event.before`) with the new head instead of repeatedly comparing the PR base with the full current head. This is deliberate: a plugin change earlier in a PR must not force Windows/macOS VST3 rebuilds after a later docs-only, Skill-only, or MCP-only commit.
 
 A build-workflow change itself is treated as requiring all validation families, including both plugin builds, so CI infrastructure changes are tested by the workflow they modify.
 
@@ -375,7 +383,7 @@ The cache is only an acceleration mechanism. Every VST3 job still runs CMake con
 
 The development workflow uses concurrency cancellation so a newer commit on the same PR/ref cancels an obsolete in-progress build run.
 
-`bridge/ci_regression.py` must remain development-only and must not ship in beginner Releases.
+`mcp/ci_regression.py` must remain development-only and must not ship in beginner Releases.
 
 Adaptive-analysis regressions must include at least:
 
@@ -398,11 +406,12 @@ skills/ai-analyzer-flstudio/README-CHERRY-STUDIO.md
 skills/ai-analyzer-flstudio/references/*.md
 release/README.md
 release/common/START-HERE.md
+release/common/MCP-SETUP.md
 release/common/INSTALL.en.md
 release/common/INSTALL.zh-CN.md
 .github/workflows/build.yml
 .github/workflows/release.yml
-bridge/cherry-studio.example.json
+mcp/cherry-studio.example.json
 release installers
 ```
 
@@ -412,11 +421,12 @@ README feature headings should describe the capability, not lead with historical
 
 ## 11. Repository discipline
 
-- Keep `bridge/server.py` as the only startup/PyInstaller entrypoint.
+- Keep `mcp/server.py` as the only startup/PyInstaller entrypoint.
+- Keep repository MCP source under `mcp/`; do not create a second `bridge/` source tree.
 - Preserve host/plugin identity fields.
 - Keep user-facing platform policy Windows x64 + macOS arm64 only.
 - Keep LLM-facing Skill content English-only.
-- Keep Release beginner-first and source-free.
+- Keep Release beginner-first and source-free while including the user-facing `MCP-SETUP.md` guide.
 - Keep evidence transparent and measurement-oriented.
 - Do not claim CI, packaged-runtime, Release, or installer success without actual evidence.
 - Do not merge a PR while required latest-head CI is failing or still pending.

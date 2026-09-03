@@ -29,7 +29,7 @@ from typing import Any
 
 import analyzer_core as core
 
-# When executed as `python bridge/server.py`, feature modules still import
+# When executed as `python mcp/server.py`, feature modules still import
 # `server`. Alias this __main__ module before loading them so Python does not
 # execute the entrypoint a second time under another module name.
 sys.modules.setdefault("server", sys.modules[__name__])
