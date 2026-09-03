@@ -281,6 +281,7 @@ START-HERE.md
 INSTALL.en.md
 INSTALL.zh-CN.md
 VERSION.txt
+LICENSE
 platform installer file(s)
 ```
 
@@ -406,3 +407,9 @@ AGENT.md                        agent/maintainer contract and history
 ```
 
 Before modifying the repository, read `AGENT.md`.
+
+## License
+
+AI Audio Analyzer project code is released under the **MIT License**. See [LICENSE](LICENSE) for the full text.
+
+Third-party dependencies and components retain their own licenses; the MIT License for this repository does not replace or override those third-party license terms.

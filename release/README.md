@@ -74,6 +74,7 @@ START-HERE.md
 INSTALL.en.md
 INSTALL.zh-CN.md
 VERSION.txt
+LICENSE
 ```
 
 macOS Apple Silicon:
@@ -88,6 +89,7 @@ START-HERE.md
 INSTALL.en.md
 INSTALL.zh-CN.md
 VERSION.txt
+LICENSE
 ```
 
 The following must **never** appear in a user Release:
@@ -102,6 +104,12 @@ _internal/
 bridge/ci_regression.py
 inner Release ZIP files
 ```
+
+## Licensing
+
+AI Audio Analyzer project code is released under the **MIT License**. The repository-root `LICENSE` file is authoritative and must be copied unchanged into every Windows and macOS user package.
+
+Third-party components and dependencies retain their own licenses; including them in or using them to build AI Audio Analyzer does not relicense those third-party works under MIT.
 
 ## Single-compression rule
 
@@ -126,6 +134,7 @@ Windows x64 VST3 build
 macOS arm64 VST3 build/signature
 Windows installer parse
 macOS installer syntax
+MIT LICENSE present in both staged/final platform packages
 no MCP source/developer/test files
 no nested ZIP
 final checksums
