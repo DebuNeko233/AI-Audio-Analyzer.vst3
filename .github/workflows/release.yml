@@ -53,6 +53,7 @@ jobs:
             mcp/stereo_tools.py \
             mcp/semantic_tools.py \
             mcp/performance_tools.py \
+            mcp/song_tools.py \
             mcp/verification_tools.py
 
   mcp-runtime:
@@ -89,7 +90,7 @@ jobs:
           python -m pip install -r mcp/requirements.txt
           python -m pip install 'pyinstaller>=6.10,<7'
 
-      - name: Validate source MCP 1.1
+      - name: Validate source MCP 1.2
         shell: bash
         run: AI_ANALYZER_SELF_TEST=1 python mcp/server.py
 
@@ -192,8 +193,8 @@ jobs:
           @"
           AI Audio Analyzer $version
           Platform: Windows x64
-          MCP: 1.1 standalone one-file executable
-          OSC protocol: 1.1 append-only
+          MCP: 1.2 standalone one-file executable
+          OSC protocol: 1.2 append-only
           Release commit: $env:GITHUB_SHA
           "@ | Set-Content 'package/VERSION.txt' -Encoding UTF8
 
@@ -275,8 +276,8 @@ jobs:
           cat > package/VERSION.txt <<EOF
           AI Audio Analyzer ${VERSION}
           Platform: macOS Apple Silicon arm64
-          MCP: 1.1 standalone one-file executable
-          OSC protocol: 1.1 append-only
+          MCP: 1.2 standalone one-file executable
+          OSC protocol: 1.2 append-only
           Release commit: ${GITHUB_SHA}
           EOF
 
@@ -398,11 +399,13 @@ jobs:
           - No Python, source code, package manager, or programming setup is included or required.
           - MCP-SETUP.md explains how to add the generated MCP server configuration to an MCP-capable Agent/client and includes copyable JSON examples.
           - AI Audio Analyzer project code is released under the MIT License; the package includes the repository LICENSE file.
-          - Adaptive Analysis adds Eco, Balanced, Mix, and Full performance profiles through the host-visible Analysis Profile parameter.
-          - Full remains the default for backward compatibility; lower profiles skip or decimate analysis work when those evidence families are not needed.
-          - MCP 1.1 exposes 29 tools, including audio_analysis_status and audio_project_performance for profile/worker telemetry readback.
-          - Runtime telemetry reports background Analyzer worker load, FIFO fill, FFT rate, and semantic-analysis rate; it is not DAW audio-thread CPU usage.
-          - Analyzer MCP still does not write DAW parameters. Use the actual DAW-control MCP to change Analysis Profile, then verify the resulting Analyzer status.
+          - Adaptive Analysis provides Eco, Balanced, Mix, and Full performance profiles through the host-visible Analysis Profile parameter.
+          - MCP/OSC 1.2 exposes 32 tools and adds transport-aware whole-song memory through audio_song_status, audio_song_overview, and audio_song_timeline.
+          - Analyzer keeps one-second DAW-time memory while the LLM is thinking or using other tools, so recent musical evidence can be queried later instead of relying only on the newest frame.
+          - Playback starts, seeks, and loop jumps create separate continuous playback epochs; pass-dependent Loudness/Temporal/Semantic state is reset so unrelated song positions are not silently blended.
+          - Runtime data-quality telemetry now includes estimated Analyzer backlog and cumulative dropped blocks. Estimated analysis lag is not total network/LLM latency.
+          - Song memory is session-scoped and transport coordinates are intended for song/section reasoning, not sample-accurate editing. Automatic Verse/Chorus/Bridge labeling is not included yet.
+          - Analyzer MCP still does not write DAW parameters. Use the actual DAW-control MCP for changes and host readback.
           - The Skill remains measurement/tool oriented and does not prescribe a mixing, mastering, stereo, key, harmony, or processing style.
           - macOS Release is Apple Silicon arm64 only and is currently ad-hoc signed rather than Apple-notarized.
 
