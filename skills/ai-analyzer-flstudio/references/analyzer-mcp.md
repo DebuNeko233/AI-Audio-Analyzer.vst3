@@ -1,19 +1,20 @@
 # AI Audio Analyzer MCP Reference
 
-This reference describes MCP tools, selector rules, adaptive Analysis Profile readback, call order, validity checks, controlled verification, and OSC compatibility.
+This reference describes MCP tools, selector rules, adaptive Analysis Profile readback, transport-aware song memory, call order, validity checks, controlled verification, and OSC compatibility.
 
 Related semantics:
 
 ```text
 parameters.md
 performance-evidence.md
+song-memory.md
 masking-evidence.md
 stereo-evidence.md
 tonal-evidence.md
 verification-evidence.md
 ```
 
-Current MCP 1.1 exposes **29 tools**:
+Current MCP 1.2 exposes **32 tools**:
 
 ```text
 audio_bridge_status()
@@ -42,6 +43,9 @@ audio_tonal_profile(track, seconds=8)
 audio_tonal_compare(track_a, track_b, seconds=8)
 audio_analysis_status(track)
 audio_project_performance()
+audio_song_status()
+audio_song_timeline(track, resolution_seconds=5, transport_epoch=None, start_seconds=None, end_seconds=None, max_bins=240)
+audio_song_overview(transport_epoch=None, max_tracks=32)
 audio_begin_verification(label, seconds=5, target_selectors=None)
 audio_complete_verification(verification_id, seconds=0, change_summary="", host_readback="")
 audio_verification_status(verification_id="")
@@ -49,11 +53,16 @@ audio_verification_status(verification_id="")
 
 ## Recommended hierarchy
 
-Do not call all 29 tools by default.
+Do not call all 32 tools by default.
 
 ```text
 project readiness
 → audio_project_status()
+
+whole-song / delayed Agent context
+→ audio_song_status()
+→ audio_song_overview()
+→ audio_song_timeline() only when track/range detail is needed
 
 many instances / performance concern
 → audio_project_performance()
@@ -61,10 +70,10 @@ many instances / performance concern
 one instance feature/profile check
 → audio_analysis_status()
 
-project recent overview
+recent project state
 → audio_mix_overview()
 
-stable single-track measurement
+recent stable single-track measurement
 → audio_average()
 
 then choose only the needed evidence family:
@@ -78,6 +87,8 @@ external DAW change + measured verification
 → external control MCP write + actual host readback
 → audio_complete_verification()
 ```
+
+The LLM is not expected to poll the Analyzer continuously. Song memory exists so the Analyzer can keep observing while the model is thinking or waiting for another tool.
 
 ## Deterministic Identify mapping
 
@@ -179,8 +190,6 @@ For project-wide profile/load inspection:
 audio_project_performance()
 ```
 
-It returns instance/profile counts, max/mean worker load, max FIFO fill, per-instance status, and transparent backlog/load warnings.
-
 `worker_load_ratio` is background Analyzer-worker busy time, not DAW realtime audio-thread CPU.
 
 Detailed semantics: `performance-evidence.md`.
@@ -206,12 +215,73 @@ Rules:
 Minimum profiles:
 
 ```text
-LUFS / True Peak                 Balanced
-Spectrum / basic masking         Balanced
-Deep stereo                      Balanced
-Temporal                         Mix
-Tonal / chroma / harmonic        Full
+Transport / signal / Core            Eco
+LUFS / True Peak                     Balanced
+Spectrum / basic masking             Balanced
+Deep stereo                          Balanced
+Temporal                             Mix
+Tonal / chroma / harmonic            Full
 ```
+
+## Transport-aware song tools
+
+Protocol 1.2 adds transport and data-quality context so LLM reasoning latency is not confused with audio time.
+
+### `audio_song_status()`
+
+Use for whole-song readiness and latency quality.
+
+Important fields include:
+
+```text
+transport_ready
+song_memory_ready
+max_estimated_analysis_lag_ms
+max_dropped_blocks
+continuous_passes
+instances[].transport_time_seconds
+instances[].transport_epoch
+instances[].data_age_seconds
+instances[].estimated_analysis_lag_ms
+instances[].dropped_blocks
+warnings
+```
+
+`transport_epoch` is an **instance-local continuous playback pass**, not a permanent project-wide revision ID. Playback start, seek, loop jump, or another detected discontinuity begins a new epoch.
+
+### `audio_song_timeline()`
+
+Returns retained DAW-time bins for one track and one continuous pass.
+
+Available resolutions:
+
+```text
+1 2 5 10 15 30 seconds
+```
+
+Use the coarsest resolution that can answer the question. Do not send a full song as hundreds of one-second bins unless that granularity is truly required.
+
+Returned `data_quality` may include:
+
+```text
+mean_estimated_analysis_lag_ms
+max_estimated_analysis_lag_ms
+dropped_blocks_cumulative
+data_age_seconds
+coverage_ratio
+```
+
+### `audio_song_overview()`
+
+Returns a compact whole-pass summary across Analyzer instances. It does **not** currently label Verse/Chorus/Bridge or infer arrangement names.
+
+### Latency semantics
+
+`estimated_analysis_lag_ms` is Analyzer-side FIFO/window latency. It does not include OSC/MCP/LLM/external-control latency.
+
+Transport coordinates are estimates corrected for queued FIFO audio and FFT-window center. They are intended for song/section reasoning, not sample-accurate edits or phase alignment.
+
+Detailed semantics: `song-memory.md`.
 
 ## Core / project tools
 
@@ -237,7 +307,7 @@ Returns recent project-level summaries and coarse `potential_spectral_conflicts`
 
 ### `audio_snapshot()`
 
-Latest frame/current state. Do not substitute it for a stable multi-second observation.
+Latest frame/current state. Do not substitute it for a stable multi-second observation or a historical DAW-time range.
 
 ### `audio_average()`
 
@@ -379,7 +449,7 @@ Delta convention:
 After - Before
 ```
 
-LUFS-I remains session cumulative.
+Snapshot tools do not independently reset Loudness. For protocol-1.2 instances, LUFS-I accumulates within the current continuous transport epoch; a playback start/seek/loop discontinuity creates a fresh epoch and loudness state. Legacy instances retain reset/prepare-scoped LUFS-I behavior.
 
 ## Controlled verification
 
@@ -395,38 +465,13 @@ audio_begin_verification(
 
 Call it **before** the external artistic/technical write.
 
-Inspect:
-
-```text
-ready_for_external_change
-baseline_blockers
-verification_id
-```
-
 Then:
 
 ```text
 external DAW-control MCP performs the real write
 → external DAW-control MCP reads actual host state back
 → replay comparable passage
-→ audio_complete_verification(
-     verification_id,
-     seconds=0,
-     change_summary="factual attempted change",
-     host_readback="actual returned host state"
-   )
-```
-
-`seconds=0` reuses the baseline duration.
-
-Important outputs:
-
-```text
-result.comparison.controlled_comparison
-result.closed_loop_complete
-result.comparison.comparability
-result.external_change.readback_supplied
-result.comparison.targets[].delta
+→ audio_complete_verification(...)
 ```
 
 `controlled_comparison` = measurement comparability guardrail only.
@@ -434,6 +479,8 @@ result.comparison.targets[].delta
 `closed_loop_complete` = controlled comparison plus supplied actual host readback.
 
 Neither means the artistic change is better/correct/preferred.
+
+Current verification remains recent-window based. Transport-anchored same-DAW-range verification is not yet implemented.
 
 Verification sessions are Bridge-session memory only.
 
@@ -469,9 +516,24 @@ The frame remains append-only:
 132        fft_runs_per_second
 133        semantic_runs_per_second
 134        "1.1" marker
+135        transport_supported
+136        transport_time_seconds
+137        transport_ppq_position
+138        transport_bpm
+139        transport_time_signature_numerator
+140        transport_time_signature_denominator
+141        transport_is_playing
+142        transport_is_recording
+143        transport_is_looping
+144        transport_loop_start_ppq
+145        transport_loop_end_ppq
+146        transport_epoch
+147        estimated_analysis_lag_ms
+148        dropped_blocks
+149        "1.2" marker
 ```
 
-Existing indexes `0..127` are unchanged.
+Existing indexes `0..134` are unchanged.
 
 Feature-mask bits:
 
