@@ -274,6 +274,7 @@ mcp/
 └─ ai-audio-analyzer-mcp[.exe]   PyInstaller -F 单文件程序
 skill/
 START-HERE.md
+MCP-SETUP.md                     Agent/MCP 配置说明 + 可复制 JSON 示例
 INSTALL.en.md
 INSTALL.zh-CN.md
 VERSION.txt
@@ -281,18 +282,20 @@ LICENSE
 对应平台的一键安装文件
 ```
 
-用户 Release **不会包含 MCP Python 源码**、`requirements.txt`、venv、PyInstaller `_internal`、开发者配置示例或嵌套 ZIP。
+用户 Release **不会包含 MCP Python 源码**、`requirements.txt`、venv、PyInstaller `_internal`、开发源码配置示例或嵌套 ZIP。
 
 Windows：全部解压后双击 `Install.cmd`。
 
 macOS Apple Silicon：解压后双击 `Install.command`。如果 Gatekeeper 阻止运行，右键 → **打开**。当前 macOS 包是 ad-hoc 签名，不是 Apple Developer ID Notarization。
+
+安装器会生成包含真实 MCP 可执行文件绝对路径的 `cherry-studio-mcp.json`。按照 `MCP-SETUP.md` 把这个配置导入/加入支持 MCP 的客户端，并**启用给真正要使用 Analyzer 的 Agent/Assistant**，再把 `skill` 文件夹导入给同一个 Agent。
 
 ## 仓库 MCP 架构
 
 源码和 PyInstaller 永远只有一个入口：
 
 ```text
-bridge/server.py
+mcp/server.py
 ```
 
 当前版本关系：
@@ -307,19 +310,19 @@ MCP tools             29
 内部模块：
 
 ```text
-bridge/server.py             启动 / Self-test / Tool Registry
-bridge/analyzer_core.py      OSC 状态、身份映射、基础工具
-bridge/project_tools.py      Project Overview / Snapshot A-B
-bridge/temporal_tools.py     Temporal Layer
-bridge/masking_tools.py      Masking Evidence Layer
-bridge/stereo_tools.py       Mid/Side + Stereo Layer
-bridge/semantic_tools.py     Chroma / Tonal-center / Harmonic Evidence
-bridge/verification_tools.py Closed-loop Verification
-bridge/performance_tools.py  Adaptive Profile / Worker Telemetry
-bridge/ci_regression.py      仓库专用 Synthetic Regression
+mcp/server.py             启动 / Self-test / Tool Registry
+mcp/analyzer_core.py      OSC 状态、身份映射、基础工具
+mcp/project_tools.py      Project Overview / Snapshot A-B
+mcp/temporal_tools.py     Temporal Layer
+mcp/masking_tools.py      Masking Evidence Layer
+mcp/stereo_tools.py       Mid/Side + Stereo Layer
+mcp/semantic_tools.py     Chroma / Tonal-center / Harmonic Evidence
+mcp/verification_tools.py Closed-loop Verification
+mcp/performance_tools.py  Adaptive Profile / Worker Telemetry
+mcp/ci_regression.py      仓库专用 Synthetic Regression
 ```
 
-`bridge/ci_regression.py` 不进入普通用户 Release。
+`mcp/ci_regression.py` 不进入普通用户 Release。
 
 ## Skill
 
@@ -391,10 +394,10 @@ Audio Callback 不执行 FFT、响度、Semantic、OSC、MCP、Verification、�
 
 ```text
 Source/                         JUCE VST3
-bridge/server.py                唯一 MCP 入口
-bridge/analyzer_core.py         稳定内部 MCP/OSC Core
-bridge/*_tools.py               功能模块
-bridge/ci_regression.py         仓库专用 MCP Regression
+mcp/server.py                   唯一 MCP 入口
+mcp/analyzer_core.py            稳定内部 MCP/OSC Core
+mcp/*_tools.py                  功能模块
+mcp/ci_regression.py            仓库专用 MCP Regression
 skills/ai-analyzer-flstudio/    英文 LLM-facing Skill
 release/                        普通用户 Release 安装器/说明
 .github/workflows/build.yml     开发 CI
