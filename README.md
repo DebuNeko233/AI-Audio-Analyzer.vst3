@@ -278,6 +278,7 @@ mcp/
 └─ ai-audio-analyzer-mcp[.exe]   standalone PyInstaller -F executable
 skill/
 START-HERE.md
+MCP-SETUP.md                     Agent/MCP setup + copyable JSON examples
 INSTALL.en.md
 INSTALL.zh-CN.md
 VERSION.txt
@@ -285,18 +286,20 @@ LICENSE
 platform installer file(s)
 ```
 
-User Releases deliberately contain **no MCP Python source**, `requirements.txt`, venv, PyInstaller `_internal`, developer configuration examples, or nested ZIP.
+User Releases deliberately contain **no MCP Python source**, `requirements.txt`, venv, PyInstaller `_internal`, developer source configuration examples, or nested ZIP.
 
 Windows: extract once and double-click `Install.cmd`.
 
 macOS Apple Silicon: extract once and double-click `Install.command`. If Gatekeeper blocks it, right-click and choose **Open**. Current macOS builds are ad-hoc signed, not Apple Developer ID notarized.
+
+The installer generates `cherry-studio-mcp.json` with the real absolute MCP executable path. Follow `MCP-SETUP.md` to import/add that configuration to an MCP-capable client and **enable it for the Agent/Assistant that will use Analyzer**, then import the `skill` folder for the same Agent.
 
 ## Repository MCP architecture
 
 There is exactly one supported source/PyInstaller entrypoint:
 
 ```text
-bridge/server.py
+mcp/server.py
 ```
 
 Current metadata:
@@ -311,19 +314,19 @@ MCP tools             29
 Internal modules:
 
 ```text
-bridge/server.py             startup / self-test / shared tool registry
-bridge/analyzer_core.py      OSC state, identity/binding, base tools
-bridge/project_tools.py      project overview / Snapshot A-B
-bridge/temporal_tools.py     temporal layer
-bridge/masking_tools.py      masking-evidence layer
-bridge/stereo_tools.py       Mid/Side and stereo layer
-bridge/semantic_tools.py     chroma / tonal-center / harmonic evidence
-bridge/verification_tools.py controlled verification sessions
-bridge/performance_tools.py  adaptive profile / worker telemetry layer
-bridge/ci_regression.py      repository-only synthetic regression suite
+mcp/server.py             startup / self-test / shared tool registry
+mcp/analyzer_core.py      OSC state, identity/binding, base tools
+mcp/project_tools.py      project overview / Snapshot A-B
+mcp/temporal_tools.py     temporal layer
+mcp/masking_tools.py      masking-evidence layer
+mcp/stereo_tools.py       Mid/Side and stereo layer
+mcp/semantic_tools.py     chroma / tonal-center / harmonic evidence
+mcp/verification_tools.py controlled verification sessions
+mcp/performance_tools.py  adaptive profile / worker telemetry layer
+mcp/ci_regression.py      repository-only synthetic regression suite
 ```
 
-Repository/source development may use Python 3.12 and `bridge/requirements.txt`; that developer workflow is **not shipped in the user Release**.
+Repository/source development may use Python 3.12 and `mcp/requirements.txt`; that developer workflow is **not shipped in the user Release**.
 
 ## Skill
 
@@ -395,10 +398,10 @@ When a disabled family is re-enabled, state that would otherwise span the unmeas
 
 ```text
 Source/                         JUCE VST3
-bridge/server.py                single MCP entrypoint
-bridge/analyzer_core.py         stable internal MCP/OSC core
-bridge/*_tools.py               feature modules
-bridge/ci_regression.py         repository-only MCP regression suite
+mcp/server.py                   single MCP entrypoint
+mcp/analyzer_core.py            stable internal MCP/OSC core
+mcp/*_tools.py                  feature modules
+mcp/ci_regression.py            repository-only MCP regression suite
 skills/ai-analyzer-flstudio/    English LLM-facing Skill
 release/                        beginner Release installers/docs
 .github/workflows/build.yml     development CI
