@@ -28,10 +28,13 @@ download one ZIP
 → extract once
 → double-click installer
 → restart FL Studio
-→ add generated Cherry Studio config / Skill
+→ add generated MCP config to the intended Agent
+→ import/use the Skill with the same Agent
 ```
 
 Do not require users to install or understand Python, pip, venv, PyPI, source code, build tools, command-line package managers, or repository structure.
+
+The package must include `MCP-SETUP.md`, which explains how to attach the installed MCP server to an MCP-capable Agent/client and provides copyable Windows/macOS JSON examples. The installer-generated `cherry-studio-mcp.json` remains the preferred configuration because it contains the real absolute executable path for that computer.
 
 ## Supported targets
 
@@ -53,12 +56,12 @@ The MCP executable is built with PyInstaller one-file mode:
 Build-time source entrypoint remains:
 
 ```text
-bridge/server.py
+mcp/server.py
 ```
 
 MCP 1.1 imports all required feature modules, including `performance_tools.py`, into that single executable. Python may be used by the build pipeline, but the **user package must not contain MCP Python source or repository test code**.
 
-`bridge/ci_regression.py` is CI-only and must never be shipped to ordinary users.
+`mcp/ci_regression.py` is CI-only and must never be shipped to ordinary users.
 
 ## User package layout
 
@@ -71,6 +74,7 @@ skill/
 Install.cmd
 Install.ps1
 START-HERE.md
+MCP-SETUP.md
 INSTALL.en.md
 INSTALL.zh-CN.md
 VERSION.txt
@@ -86,6 +90,7 @@ skill/
 Install.command
 install.sh
 START-HERE.md
+MCP-SETUP.md
 INSTALL.en.md
 INSTALL.zh-CN.md
 VERSION.txt
@@ -101,9 +106,11 @@ requirements.txt
 cherry-studio.example.json
 venv/
 _internal/
-bridge/ci_regression.py
+mcp/ci_regression.py
 inner Release ZIP files
 ```
+
+`MCP-SETUP.md` is beginner-facing installation material, not a developer source configuration file, and is required in the Release.
 
 ## Licensing
 
@@ -134,6 +141,7 @@ Windows x64 VST3 build
 macOS arm64 VST3 build/signature
 Windows installer parse
 macOS installer syntax
+MCP-SETUP.md present in both staged/final packages
 MIT LICENSE present in both staged/final platform packages
 no MCP source/developer/test files
 no nested ZIP
@@ -204,6 +212,7 @@ When Release layout, version metadata, installation behavior, publication semant
 
 ```text
 release/common/START-HERE.md
+release/common/MCP-SETUP.md
 release/common/INSTALL.en.md
 release/common/INSTALL.zh-CN.md
 release/windows/Install.ps1
@@ -213,4 +222,4 @@ README.zh-CN.md
 AGENT.md
 ```
 
-User-facing Release docs should explain what the person needs to click, not how the software was built.
+User-facing Release docs should explain what the person needs to click and how to attach the generated MCP configuration to the intended Agent, not how the software was built.
