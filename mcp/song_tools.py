@@ -1,17 +1,13 @@
 #!/usr/bin/env python3
 """Transport-aware song-memory layer for AI Audio Analyzer MCP.
 
-The LLM is deliberately not part of the realtime path. Analyzer instances keep
-measuring while the model is thinking or performing DAW operations; this module
-turns the append-only transport tail into bounded, one-second timeline memory
-that can later be queried at coarser resolutions.
+The LLM is deliberately outside the realtime path. Analyzer instances continue
+measuring while the model thinks or controls the DAW; this module retains a
+bounded DAW-time memory that can be queried later at coarser resolutions.
 
 A transport epoch is one continuous playback pass for one Analyzer instance.
-The VST3 increments it on playback start or a transport discontinuity such as a
-seek/loop jump and resets pass-dependent loudness/temporal state. Epoch numbers
-are instance-local; project tools report whether live instances agree instead
-of silently assuming that independently loaded instances have identical epoch
-counters.
+The VST3 increments it on playback start or a detected seek/loop discontinuity
+and resets pass-dependent analysis state. Epoch IDs are instance-local.
 """
 
 from __future__ import annotations
@@ -29,6 +25,8 @@ import temporal_tools as temporal
 V12_START = performance.V11_START + performance.V11_FIELD_COUNT
 V12_FIELD_COUNT = 15
 TIMELINE_BIN_SECONDS = 1.0
+COVERAGE_SLOT_SECONDS = 0.1
+COVERAGE_SLOTS_PER_BIN = int(round(TIMELINE_BIN_SECONDS / COVERAGE_SLOT_SECONDS))
 MAX_TIMELINE_BINS_PER_INSTANCE = 1200  # 20 minutes at 1 s resolution.
 RESOLUTIONS_SECONDS = (1, 2, 5, 10, 15, 30)
 
@@ -60,7 +58,7 @@ def _db_power(value: Any) -> float | None:
     return 10.0 ** (numeric / 10.0)
 
 
-def _db_from_power_sum(power_sum: float, count: int) -> float | None:
+def _db_from_power(power_sum: float, count: int) -> float | None:
     if count <= 0 or power_sum <= 0.0:
         return None
     return round(10.0 * math.log10(max(power_sum / count, 1.0e-12)), 4)
@@ -69,20 +67,20 @@ def _db_from_power_sum(power_sum: float, count: int) -> float | None:
 def _region_powers(bands_db: Any) -> list[float | None]:
     if not isinstance(bands_db, list) or len(bands_db) != len(core.BAND_CENTERS):
         return [None] * len(SPECTRAL_REGIONS)
-
     result: list[float | None] = []
     for _name, lo, hi in SPECTRAL_REGIONS:
-        powers = [
+        values = [
             power
             for center, value in zip(core.BAND_CENTERS, bands_db)
             if lo <= center < hi and (power := _db_power(value)) is not None
         ]
-        result.append(None if not powers else sum(powers) / len(powers))
+        result.append(None if not values else sum(values) / len(values))
     return result
 
 
 def _new_accumulator(frame: dict[str, Any], epoch: int, bin_index: int) -> dict[str, Any]:
     start = bin_index * TIMELINE_BIN_SECONDS
+    received = float(frame.get("_received_at", time.time()))
     return {
         "transport_epoch": epoch,
         "bin_index": bin_index,
@@ -90,8 +88,9 @@ def _new_accumulator(frame: dict[str, Any], epoch: int, bin_index: int) -> dict[
         "end_seconds": start + TIMELINE_BIN_SECONDS,
         "frame_count": 0,
         "active_count": 0,
-        "first_received_at": float(frame.get("_received_at", time.time())),
-        "last_received_at": float(frame.get("_received_at", time.time())),
+        "coverage_mask": 0,
+        "first_received_at": received,
+        "last_received_at": received,
         "rms_power_sum": 0.0,
         "rms_count": 0,
         "lufs_s_power_sum": 0.0,
@@ -124,6 +123,20 @@ def _new_accumulator(frame: dict[str, Any], epoch: int, bin_index: int) -> dict[
     }
 
 
+def _mark_coverage(acc: dict[str, Any], frame: dict[str, Any]) -> None:
+    position = _safe_float(frame.get("transport_time_seconds"))
+    if position is None:
+        return
+    local = max(0.0, min(TIMELINE_BIN_SECONDS - 1.0e-9, position - float(acc["start_seconds"])))
+    slot = max(0, min(COVERAGE_SLOTS_PER_BIN - 1, int(local / COVERAGE_SLOT_SECONDS)))
+    acc["coverage_mask"] = int(acc["coverage_mask"]) | (1 << slot)
+
+
+def _covered_seconds(acc: dict[str, Any]) -> float:
+    mask = max(0, int(acc.get("coverage_mask", 0)))
+    return min(TIMELINE_BIN_SECONDS, mask.bit_count() * COVERAGE_SLOT_SECONDS)
+
+
 def _accumulate(acc: dict[str, Any], frame: dict[str, Any]) -> None:
     acc["frame_count"] += 1
     if bool(frame.get("signal_present")):
@@ -131,6 +144,7 @@ def _accumulate(acc: dict[str, Any], frame: dict[str, Any]) -> None:
     acc["last_received_at"] = max(
         float(acc["last_received_at"]), float(frame.get("_received_at", time.time()))
     )
+    _mark_coverage(acc, frame)
 
     for field, sum_key, count_key in (
         ("rms_db", "rms_power_sum", "rms_count"),
@@ -173,13 +187,13 @@ def _accumulate(acc: dict[str, Any], frame: dict[str, Any]) -> None:
             acc["spectral_region_count"][index] += 1
 
     chroma = frame.get("chroma")
-    coverage = _safe_float(frame.get("chroma_energy_ratio"))
-    if isinstance(chroma, list) and len(chroma) == 12 and coverage is not None and coverage > 0.0:
+    chroma_coverage = _safe_float(frame.get("chroma_energy_ratio"))
+    if isinstance(chroma, list) and len(chroma) == 12 and chroma_coverage is not None and chroma_coverage > 0.0:
         values = [_safe_float(value) for value in chroma]
         if all(value is not None and value >= 0.0 for value in values):
             total = sum(float(value) for value in values)
             if total > 1.0e-12:
-                weight = max(1.0e-6, coverage)
+                weight = max(1.0e-6, chroma_coverage)
                 for index, value in enumerate(values):
                     acc["chroma_sum"][index] += (float(value) / total) * weight
                 acc["chroma_weight_sum"] += weight
@@ -205,107 +219,109 @@ def _accumulate(acc: dict[str, Any], frame: dict[str, Any]) -> None:
         acc["time_signature_denominator"] = frame.get("transport_time_signature_denominator")
 
 
-def _merge_accumulators(items: list[dict[str, Any]]) -> dict[str, Any]:
-    if not items:
-        raise ValueError("Cannot merge an empty timeline range.")
-    merged = _new_accumulator(
-        {"_received_at": min(float(item["first_received_at"]) for item in items)},
-        int(items[0]["transport_epoch"]),
-        int(items[0]["bin_index"]),
-    )
-    merged["start_seconds"] = min(float(item["start_seconds"]) for item in items)
-    merged["end_seconds"] = max(float(item["end_seconds"]) for item in items)
-    merged["first_received_at"] = min(float(item["first_received_at"]) for item in items)
-    merged["last_received_at"] = max(float(item["last_received_at"]) for item in items)
-
-    sum_fields = (
-        "frame_count", "active_count", "rms_power_sum", "rms_count",
-        "lufs_s_power_sum", "lufs_s_count", "crest_sum", "crest_count",
-        "centroid_sum", "centroid_count", "stereo_corr_sum", "stereo_corr_count",
-        "stereo_width_sum", "stereo_width_count", "flux_sum", "flux_count",
-        "chroma_weight_sum", "lag_sum_ms", "lag_count",
-    )
-    for key in sum_fields:
-        merged[key] = sum(item[key] for item in items)
-
-    for key in ("peak_db_max", "true_peak_db_max", "max_true_peak_dbtp"):
-        values = [float(item[key]) for item in items if item[key] is not None]
-        merged[key] = None if not values else max(values)
-
-    latest = max(items, key=lambda item: float(item["last_received_at"]))
-    merged["lufs_i_latest"] = latest.get("lufs_i_latest")
-    merged["bpm_latest"] = latest.get("bpm_latest")
-    merged["time_signature_numerator"] = latest.get("time_signature_numerator")
-    merged["time_signature_denominator"] = latest.get("time_signature_denominator")
-    merged["lag_max_ms"] = max(float(item["lag_max_ms"]) for item in items)
-    merged["dropped_blocks_max"] = max(int(item["dropped_blocks_max"]) for item in items)
-
-    for index in range(len(SPECTRAL_REGIONS)):
-        merged["spectral_region_power_sum"][index] = sum(
-            float(item["spectral_region_power_sum"][index]) for item in items
-        )
-        merged["spectral_region_count"][index] = sum(
-            int(item["spectral_region_count"][index]) for item in items
-        )
-
-    for index in range(12):
-        merged["chroma_sum"][index] = sum(float(item["chroma_sum"][index]) for item in items)
-    return merged
+def _sum(rows: list[dict[str, Any]], key: str) -> float:
+    return sum(float(row[key]) for row in rows)
 
 
-def _finalize(acc: dict[str, Any], expected_seconds: float | None = None) -> dict[str, Any]:
-    frames = max(1, int(acc["frame_count"]))
+def _count(rows: list[dict[str, Any]], key: str) -> int:
+    return sum(int(row[key]) for row in rows)
+
+
+def _latest_row(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    return max(rows, key=lambda row: float(row["last_received_at"]))
+
+
+def _finalize_rows(
+    rows: list[dict[str, Any]],
+    *,
+    start_seconds: float | None = None,
+    end_seconds: float | None = None,
+    expected_seconds: float | None = None,
+) -> dict[str, Any]:
+    if not rows:
+        raise ValueError("Cannot summarize an empty timeline range.")
+
+    start = min(float(row["start_seconds"]) for row in rows) if start_seconds is None else float(start_seconds)
+    end = max(float(row["end_seconds"]) for row in rows) if end_seconds is None else float(end_seconds)
+    frames = max(1, _count(rows, "frame_count"))
+    active = _count(rows, "active_count")
+    latest = _latest_row(rows)
+
+    rms_power = _sum(rows, "rms_power_sum")
+    rms_count = _count(rows, "rms_count")
+    lufs_s_power = _sum(rows, "lufs_s_power_sum")
+    lufs_s_count = _count(rows, "lufs_s_count")
+
+    def max_optional(key: str) -> float | None:
+        values = [float(row[key]) for row in rows if row.get(key) is not None]
+        return None if not values else max(values)
+
+    def mean(sum_key: str, count_key: str, digits: int) -> float | None:
+        count = _count(rows, count_key)
+        return None if count <= 0 else round(_sum(rows, sum_key) / count, digits)
+
     spectral_regions: dict[str, float | None] = {}
     for index, (name, _lo, _hi) in enumerate(SPECTRAL_REGIONS):
-        spectral_regions[name] = _db_from_power_sum(
-            float(acc["spectral_region_power_sum"][index]),
-            int(acc["spectral_region_count"][index]),
-        )
+        power_sum = sum(float(row["spectral_region_power_sum"][index]) for row in rows)
+        count = sum(int(row["spectral_region_count"][index]) for row in rows)
+        spectral_regions[name] = _db_from_power(power_sum, count)
 
+    chroma_weight = sum(float(row["chroma_weight_sum"]) for row in rows)
     chroma = None
-    chroma_weight = float(acc["chroma_weight_sum"])
     if chroma_weight > 0.0:
-        raw = [float(value) / chroma_weight for value in acc["chroma_sum"]]
+        raw = [
+            sum(float(row["chroma_sum"][index]) for row in rows) / chroma_weight
+            for index in range(12)
+        ]
         total = sum(raw)
         if total > 1.0e-12:
             chroma = [round(value / total, 5) for value in raw]
 
-    span = max(0.0, float(acc["end_seconds"]) - float(acc["start_seconds"]))
-    coverage = None
-    if expected_seconds is not None and expected_seconds > 0.0:
-        coverage = min(1.0, span / expected_seconds)
+    covered_seconds = sum(_covered_seconds(row) for row in rows)
+    expected = expected_seconds
+    if expected is None:
+        expected = max(TIMELINE_BIN_SECONDS, end - start)
+    coverage_ratio = min(1.0, covered_seconds / expected) if expected > 0.0 else None
+
+    lag_count = _count(rows, "lag_count")
+    lag_sum = _sum(rows, "lag_sum_ms")
+    lag_max = max(float(row["lag_max_ms"]) for row in rows)
+    dropped_max = max(int(row["dropped_blocks_max"]) for row in rows)
+    last_received = max(float(row["last_received_at"]) for row in rows)
+
+    latest_lufs_i = latest.get("lufs_i_latest")
+    bpm = latest.get("bpm_latest")
+    num = latest.get("time_signature_numerator")
+    den = latest.get("time_signature_denominator")
 
     return {
-        "transport_epoch": int(acc["transport_epoch"]),
-        "start_seconds": round(float(acc["start_seconds"]), 3),
-        "end_seconds": round(float(acc["end_seconds"]), 3),
-        "frame_count": int(acc["frame_count"]),
-        "active_ratio": round(int(acc["active_count"]) / frames, 4),
-        "rms_db": _db_from_power_sum(float(acc["rms_power_sum"]), int(acc["rms_count"])),
-        "lufs_s": _db_from_power_sum(float(acc["lufs_s_power_sum"]), int(acc["lufs_s_count"])),
-        "lufs_i_latest": None if acc["lufs_i_latest"] is None else round(float(acc["lufs_i_latest"]), 4),
-        "peak_db": None if acc["peak_db_max"] is None else round(float(acc["peak_db_max"]), 4),
-        "true_peak_dbtp": None if acc["true_peak_db_max"] is None else round(float(acc["true_peak_db_max"]), 4),
-        "max_true_peak_dbtp": None if acc["max_true_peak_dbtp"] is None else round(float(acc["max_true_peak_dbtp"]), 4),
-        "crest_db": None if not acc["crest_count"] else round(float(acc["crest_sum"]) / int(acc["crest_count"]), 4),
-        "centroid_hz": None if not acc["centroid_count"] else round(float(acc["centroid_sum"]) / int(acc["centroid_count"]), 2),
-        "stereo_correlation": None if not acc["stereo_corr_count"] else round(float(acc["stereo_corr_sum"]) / int(acc["stereo_corr_count"]), 5),
-        "stereo_width": None if not acc["stereo_width_count"] else round(float(acc["stereo_width_sum"]) / int(acc["stereo_width_count"]), 5),
-        "spectral_flux_mean": None if not acc["flux_count"] else round(float(acc["flux_sum"]) / int(acc["flux_count"]), 6),
+        "transport_epoch": int(rows[0]["transport_epoch"]),
+        "start_seconds": round(start, 3),
+        "end_seconds": round(end, 3),
+        "frame_count": _count(rows, "frame_count"),
+        "active_ratio": round(active / frames, 4),
+        "rms_db": _db_from_power(rms_power, rms_count),
+        "lufs_s": _db_from_power(lufs_s_power, lufs_s_count),
+        "lufs_i_latest": None if latest_lufs_i is None else round(float(latest_lufs_i), 4),
+        "peak_db": None if (value := max_optional("peak_db_max")) is None else round(value, 4),
+        "true_peak_dbtp": None if (value := max_optional("true_peak_db_max")) is None else round(value, 4),
+        "max_true_peak_dbtp": None if (value := max_optional("max_true_peak_dbtp")) is None else round(value, 4),
+        "crest_db": mean("crest_sum", "crest_count", 4),
+        "centroid_hz": mean("centroid_sum", "centroid_count", 2),
+        "stereo_correlation": mean("stereo_corr_sum", "stereo_corr_count", 5),
+        "stereo_width": mean("stereo_width_sum", "stereo_width_count", 5),
+        "spectral_flux_mean": mean("flux_sum", "flux_count", 6),
         "spectral_regions": spectral_regions,
         "chroma": chroma,
-        "bpm": acc.get("bpm_latest"),
-        "time_signature": (
-            None
-            if acc.get("time_signature_numerator") is None or acc.get("time_signature_denominator") is None
-            else [int(acc["time_signature_numerator"]), int(acc["time_signature_denominator"])]
-        ),
+        "bpm": bpm,
+        "time_signature": None if num is None or den is None else [int(num), int(den)],
         "data_quality": {
-            "mean_estimated_analysis_lag_ms": None if not acc["lag_count"] else round(float(acc["lag_sum_ms"]) / int(acc["lag_count"]), 3),
-            "max_estimated_analysis_lag_ms": round(float(acc["lag_max_ms"]), 3),
-            "dropped_blocks_cumulative": int(acc["dropped_blocks_max"]),
-            "data_age_seconds": round(max(0.0, time.time() - float(acc["last_received_at"])), 3),
-            "coverage_ratio": None if coverage is None else round(coverage, 4),
+            "covered_seconds": round(covered_seconds, 3),
+            "mean_estimated_analysis_lag_ms": None if lag_count <= 0 else round(lag_sum / lag_count, 3),
+            "max_estimated_analysis_lag_ms": round(lag_max, 3),
+            "dropped_blocks_cumulative": dropped_max,
+            "data_age_seconds": round(max(0.0, time.time() - last_received), 3),
+            "coverage_ratio": None if coverage_ratio is None else round(coverage_ratio, 4),
         },
     }
 
@@ -346,7 +362,7 @@ def _is_master(runtime_id: str) -> bool:
 
 
 def on_frame_v12(address: str, *args: Any) -> None:
-    """Parse all older fields, attach transport/data-quality evidence, then remember the song timeline."""
+    """Parse older fields, attach transport/data quality, then remember DAW time."""
     _ORIGINAL_ON_FRAME(address, *args)
     if len(args) < V12_START + V12_FIELD_COUNT:
         return
@@ -435,13 +451,15 @@ def _pass_summaries(runtime_id: str) -> list[dict[str, Any]]:
         start = min(float(row["start_seconds"]) for row in rows)
         end = max(float(row["end_seconds"]) for row in rows)
         span = max(TIMELINE_BIN_SECONDS, end - start)
+        covered = sum(_covered_seconds(row) for row in rows)
         summaries.append({
             "transport_epoch": epoch,
             "start_seconds": round(start, 3),
             "end_seconds": round(end, 3),
             "span_seconds": round(span, 3),
             "observed_bins": len(rows),
-            "coverage_ratio": round(min(1.0, len(rows) * TIMELINE_BIN_SECONDS / span), 4),
+            "covered_seconds": round(covered, 3),
+            "coverage_ratio": round(min(1.0, covered / span), 4),
             "last_data_age_seconds": round(max(0.0, time.time() - max(float(row["last_received_at"]) for row in rows)), 3),
         })
     return summaries[-12:]
@@ -449,7 +467,7 @@ def _pass_summaries(runtime_id: str) -> list[dict[str, Any]]:
 
 @core.mcp.tool()
 def audio_song_status() -> dict[str, Any]:
-    """Return transport readiness, continuous-pass memory and latency quality for the project."""
+    """Return transport readiness, continuous-pass memory and latency quality."""
     now = time.time()
     with core._lock:
         frames = {runtime_id: dict(frame) for runtime_id, frame in core._tracks.items()}
@@ -458,7 +476,8 @@ def audio_song_status() -> dict[str, Any]:
     for runtime_id in sorted(frames, key=_runtime_sort_key):
         frame = frames[runtime_id]
         epochs = _available_epochs(runtime_id)
-        item = {
+        remembered = sum(len(_bins_for(runtime_id, epoch)) for epoch in epochs)
+        instances.append({
             "runtime_id": runtime_id,
             "selector": _binding_selector(runtime_id),
             "display_name": _display_name(runtime_id),
@@ -472,9 +491,8 @@ def audio_song_status() -> dict[str, Any]:
             "estimated_analysis_lag_ms": frame.get("estimated_analysis_lag_ms"),
             "dropped_blocks": int(frame.get("dropped_blocks", 0) or 0),
             "remembered_epochs": epochs[-12:],
-            "remembered_bin_count": sum(len(_bins_for(runtime_id, epoch)) for epoch in epochs),
-        }
-        instances.append(item)
+            "remembered_bin_count": remembered,
+        })
 
     supported = [item for item in instances if item["transport_supported"]]
     epochs_now = {int(item["transport_epoch"]) for item in supported if item["transport_epoch"] is not None}
@@ -484,11 +502,11 @@ def audio_song_status() -> dict[str, Any]:
     if instances and len(supported) < len(instances):
         warnings.append("Some live Analyzer instances do not expose the transport-aware 1.2 tail; their audio cannot be placed on the song timeline.")
     if len(epochs_now) > 1:
-        warnings.append("Live Analyzer transport epoch counters differ. Epoch IDs are instance-local; compare DAW time ranges rather than assuming equal numbers mean the same pass.")
+        warnings.append("Live Analyzer epoch counters differ. Epoch IDs are instance-local; compare DAW-time ranges rather than assuming equal numbers identify the same pass.")
     if lag_values and max(lag_values) >= 250.0:
-        warnings.append("At least one Analyzer reports >=250 ms of estimated analysis backlog. Prefer timeline memory over assuming the newest measurement is current audio.")
+        warnings.append("At least one Analyzer reports >=250 ms estimated analysis backlog. Prefer retained timeline evidence over assuming the newest measurement represents current audio.")
     if dropped and max(dropped) > 0:
-        warnings.append("At least one Analyzer has dropped audio blocks; inspect data_quality before trusting fine-grained comparisons.")
+        warnings.append("At least one Analyzer has dropped audio blocks; inspect data_quality before fine-grained comparisons.")
 
     reference = next((item for item in instances if _is_master(item["runtime_id"])), instances[0] if instances else None)
     passes = [] if reference is None else _pass_summaries(str(reference["runtime_id"]))
@@ -505,9 +523,10 @@ def audio_song_status() -> dict[str, Any]:
         "instances": instances,
         "warnings": warnings,
         "semantics": {
-            "transport_epoch": "Instance-local continuous playback pass. Playback start, seek, loop jump, or other detected discontinuity starts a new epoch and resets pass-dependent Analyzer state.",
-            "song_memory": "One-second in-memory timeline bins retained independently of LLM response latency; query tools can aggregate them to coarser resolutions.",
-            "estimated_analysis_lag_ms": "FIFO backlog estimate from the Analyzer worker, not network or LLM latency.",
+            "transport_epoch": "Instance-local continuous playback pass. Playback start, seek, loop jump, or another detected discontinuity starts a new epoch and resets pass-dependent Analyzer state.",
+            "song_memory": "One-second in-memory DAW-time bins retained independently of LLM response latency and queryable at coarser resolutions.",
+            "coverage_ratio": "Fraction of requested DAW time represented by observed 100 ms timeline slots; missing slots remain missing after coarse aggregation.",
+            "estimated_analysis_lag_ms": "Analyzer FIFO/window backlog estimate, not network, tool-call, or LLM latency.",
         },
     }
 
@@ -521,7 +540,7 @@ def audio_song_timeline(
     end_seconds: float | None = None,
     max_bins: int = 240,
 ) -> dict[str, Any]:
-    """Return one track's remembered DAW-time timeline for a continuous playback pass."""
+    """Return one track's remembered DAW-time timeline for one playback pass."""
     runtime_id = core._resolve_track(track)
     resolution = min(RESOLUTIONS_SECONDS, key=lambda value: abs(value - int(resolution_seconds)))
     max_bins = max(1, min(int(max_bins), 500))
@@ -564,13 +583,15 @@ def audio_song_timeline(
         group = int(math.floor(float(row["start_seconds"]) / resolution))
         grouped.setdefault(group, []).append(row)
 
-    result_bins = []
-    for group_rows in list(grouped.values())[:max_bins]:
-        merged = _merge_accumulators(group_rows)
-        group_start = math.floor(float(merged["start_seconds"]) / resolution) * resolution
-        merged["start_seconds"] = group_start
-        merged["end_seconds"] = group_start + resolution
-        result_bins.append(_finalize(merged, expected_seconds=float(resolution)))
+    result_bins: list[dict[str, Any]] = []
+    for group, group_rows in list(grouped.items())[:max_bins]:
+        group_start = float(group * resolution)
+        result_bins.append(_finalize_rows(
+            group_rows,
+            start_seconds=group_start,
+            end_seconds=group_start + resolution,
+            expected_seconds=float(resolution),
+        ))
 
     return {
         "available": True,
@@ -583,13 +604,13 @@ def audio_song_timeline(
         "returned_bins": len(result_bins),
         "truncated": len(grouped) > max_bins,
         "bins": result_bins,
-        "note": "Timeline memory is transport-anchored and survives LLM/tool latency inside the running MCP session. Epochs are continuous playback passes, not permanent song revisions.",
+        "note": "Timeline memory is transport-anchored and survives LLM/tool latency inside the running MCP session. coverage_ratio preserves missing 100 ms slots when bins are aggregated.",
     }
 
 
 @core.mcp.tool()
 def audio_song_overview(transport_epoch: int | None = None, max_tracks: int = 32) -> dict[str, Any]:
-    """Summarize the remembered continuous song pass across Analyzer tracks."""
+    """Summarize a remembered continuous song pass across Analyzer tracks."""
     max_tracks = max(1, min(int(max_tracks), 64))
     with core._lock:
         runtime_ids = list(core._tracks)
@@ -605,8 +626,7 @@ def audio_song_overview(transport_epoch: int | None = None, max_tracks: int = 32
         rows = _bins_for(runtime_id, epoch)
         if not rows:
             continue
-        merged = _merge_accumulators(rows)
-        summary = _finalize(merged, expected_seconds=max(1.0, float(merged["end_seconds"]) - float(merged["start_seconds"])))
+        summary = _finalize_rows(rows)
         summary.update({
             "runtime_id": runtime_id,
             "selector": _binding_selector(runtime_id),
@@ -619,10 +639,7 @@ def audio_song_overview(transport_epoch: int | None = None, max_tracks: int = 32
         selected_epochs.add(epoch)
 
     if not tracks:
-        return {
-            "available": False,
-            "reason": "No transport-aligned song memory is available for the requested pass.",
-        }
+        return {"available": False, "reason": "No transport-aligned song memory is available for the requested pass."}
 
     start = min(float(item["start_seconds"]) for item in tracks)
     end = max(float(item["end_seconds"]) for item in tracks)
@@ -634,9 +651,12 @@ def audio_song_overview(transport_epoch: int | None = None, max_tracks: int = 32
     ]
     warnings: list[str] = []
     if transport_epoch is None and len(selected_epochs) > 1:
-        warnings.append("Latest instance-local transport epochs differ. Rows still use each track's latest continuous pass; compare their DAW-time spans before treating them as one exact A/B capture.")
+        warnings.append("Latest instance-local transport epochs differ. Compare DAW-time spans before treating the rows as one exact synchronized pass.")
     if lag_values and max(lag_values) >= 250.0:
-        warnings.append("Some remembered evidence was captured with >=250 ms estimated Analyzer backlog; use coarse section/pass judgments rather than transient-level timing claims.")
+        warnings.append("Some remembered evidence was captured with >=250 ms estimated Analyzer backlog; prefer coarse section/pass judgments over transient-level timing claims.")
+    partial = [item["selector"] for item in tracks if float(item["data_quality"].get("coverage_ratio") or 0.0) < 0.9]
+    if partial:
+        warnings.append("Some tracks have <90% timeline coverage for their remembered span; missing time remains explicit and must not be treated as measured silence.")
 
     return {
         "available": True,
@@ -650,5 +670,5 @@ def audio_song_overview(transport_epoch: int | None = None, max_tracks: int = 32
         "master": master,
         "tracks": tracks,
         "warnings": warnings,
-        "note": "This is a latency-resilient whole-pass summary from retained one-second DAW-time bins. It does not infer Verse/Chorus labels yet; section detection is a later layer on the same timeline.",
+        "note": "Latency-resilient whole-pass summary from retained one-second DAW-time bins. It does not infer Verse/Chorus labels yet; section detection is a later layer on the same timeline.",
     }
