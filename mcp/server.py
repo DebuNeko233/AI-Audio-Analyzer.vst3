@@ -13,6 +13,7 @@ Current layers:
 - stereo_tools: Mid/Side, Side-spectrum, and stereo evidence
 - semantic_tools: chroma, tonal-center, and harmonic-alignment evidence
 - performance_tools: Analysis Profile, feature-mask and worker telemetry parsing
+- control_tools: Analyzer-owned loopback Analysis Profile control
 - song_tools: DAW transport, continuous-pass song memory and latency-aware summaries
 - section_tools: explainable boundaries, neutral recurring families and section profiles
 - verification_tools: controlled Before/After verification sessions
@@ -66,11 +67,13 @@ import song_tools as song  # noqa: E402
 
 core._on_frame = song.on_frame_v12
 
+import control_tools as control  # noqa: E402
 import section_tools as structure  # noqa: E402
 import verification_tools as verification  # noqa: E402,F401
 
 MCP_VERSION = "1.2"
 OSC_PROTOCOL_VERSION = "1.2"
+CONTROL_PROTOCOL_VERSION = control.CONTROL_REVISION
 
 EXPECTED_TOOLS = {
     "audio_bridge_status",
@@ -99,6 +102,8 @@ EXPECTED_TOOLS = {
     "audio_tonal_compare",
     "audio_analysis_status",
     "audio_project_performance",
+    "audio_set_analysis_profile",
+    "audio_set_project_analysis_profile",
     "audio_song_status",
     "audio_song_timeline",
     "audio_song_overview",
@@ -149,6 +154,7 @@ def self_test() -> None:
         )
 
     _self_test_song_coverage()
+    control_result = control._self_test()
     structure_result = structure._self_test()
 
     print(
@@ -159,9 +165,11 @@ def self_test() -> None:
                 "entrypoint": "server.py",
                 "mcp_version": MCP_VERSION,
                 "osc_protocol_version": OSC_PROTOCOL_VERSION,
+                "control_protocol_version": CONTROL_PROTOCOL_VERSION,
                 "tool_count": len(names),
                 "expected_tools": len(EXPECTED_TOOLS),
                 "song_memory_sparse_coverage": "ok",
+                "analyzer_profile_control": control_result,
                 "song_structure_synthetic": structure_result,
             },
             ensure_ascii=False,
