@@ -56,7 +56,7 @@ juce::String profileName(int profile)
 AIAnalyzerAudioProcessorEditor::AIAnalyzerAudioProcessorEditor(AIAnalyzerAudioProcessor& p)
     : AudioProcessorEditor(&p), ownerProcessor(p)
 {
-    setSize(820, 570);
+    setSize(820, 590);
 
     addAndMakeVisible(instanceLabel);
     addAndMakeVisible(hostLabel);
@@ -66,8 +66,12 @@ AIAnalyzerAudioProcessorEditor::AIAnalyzerAudioProcessorEditor(AIAnalyzerAudioPr
     addAndMakeVisible(instanceEditor);
     addAndMakeVisible(hostEditor);
     addAndMakeVisible(portEditor);
-    addAndMakeVisible(profileBox);
     addAndMakeVisible(languageBox);
+    addAndMakeVisible(ecoButton);
+    addAndMakeVisible(balancedButton);
+    addAndMakeVisible(mixButton);
+    addAndMakeVisible(fullButton);
+    addAndMakeVisible(settingsButton);
     addAndMakeVisible(applyButton);
 
     juce::String instance;
@@ -80,18 +84,10 @@ AIAnalyzerAudioProcessorEditor::AIAnalyzerAudioProcessorEditor(AIAnalyzerAudioPr
     portEditor.setText(juce::String(port), false);
     portEditor.setInputRestrictions(5, "0123456789");
 
-    profileBox.addItem("Eco", 1);
-    profileBox.addItem("Balanced", 2);
-    profileBox.addItem("Mix", 3);
-    profileBox.addItem("Full", 4);
-    profileBox.setSelectedId(ownerProcessor.getAnalysisProfileIndex() + 1,
-                             juce::dontSendNotification);
-    profileBox.onChange = [this]
-    {
-        const auto selected = profileBox.getSelectedId();
-        if (selected >= 1 && selected <= 4)
-            ownerProcessor.setAnalysisProfileIndex(selected - 1, true);
-    };
+    ecoButton.onClick = [this] { setProfileFromUi(0); };
+    balancedButton.onClick = [this] { setProfileFromUi(1); };
+    mixButton.onClick = [this] { setProfileFromUi(2); };
+    fullButton.onClick = [this] { setProfileFromUi(3); };
 
     languageBox.addItem("English", 1);
     languageBox.addItem(juce::String(L"中文"), 2);
@@ -108,12 +104,24 @@ AIAnalyzerAudioProcessorEditor::AIAnalyzerAudioProcessorEditor(AIAnalyzerAudioPr
         }
     };
 
+    settingsButton.onClick = [this]
+    {
+        settingsExpanded = !settingsExpanded;
+        settingsButton.setToggleState(settingsExpanded, juce::dontSendNotification);
+        updateLocalizedText();
+        updateSettingsVisibility();
+        resized();
+        repaint();
+    };
+
     applyButton.onClick = [this] { applyConfig(); };
     instanceEditor.onReturnKey = [this] { applyConfig(); };
     hostEditor.onReturnKey = [this] { applyConfig(); };
     portEditor.onReturnKey = [this] { applyConfig(); };
 
     updateLocalizedText();
+    updateProfileButtons();
+    updateSettingsVisibility();
     startTimerHz(30);
 }
 
@@ -137,7 +145,37 @@ void AIAnalyzerAudioProcessorEditor::updateLocalizedText()
                          juce::dontSendNotification);
     languageLabel.setText(aianalyzer::uiText(language, aianalyzer::UiText::Language),
                           juce::dontSendNotification);
+    settingsButton.setButtonText(aianalyzer::uiText(
+        language,
+        settingsExpanded ? aianalyzer::UiText::HideSettings : aianalyzer::UiText::Settings));
     applyButton.setButtonText(aianalyzer::uiText(language, aianalyzer::UiText::Apply));
+}
+
+void AIAnalyzerAudioProcessorEditor::updateProfileButtons()
+{
+    const auto active = ownerProcessor.getAnalysisProfileIndex();
+    ecoButton.setToggleState(active == 0, juce::dontSendNotification);
+    balancedButton.setToggleState(active == 1, juce::dontSendNotification);
+    mixButton.setToggleState(active == 2, juce::dontSendNotification);
+    fullButton.setToggleState(active == 3, juce::dontSendNotification);
+}
+
+void AIAnalyzerAudioProcessorEditor::updateSettingsVisibility()
+{
+    instanceLabel.setVisible(settingsExpanded);
+    hostLabel.setVisible(settingsExpanded);
+    portLabel.setVisible(settingsExpanded);
+    instanceEditor.setVisible(settingsExpanded);
+    hostEditor.setVisible(settingsExpanded);
+    portEditor.setVisible(settingsExpanded);
+    applyButton.setVisible(settingsExpanded);
+}
+
+void AIAnalyzerAudioProcessorEditor::setProfileFromUi(int profileIndex)
+{
+    ownerProcessor.setAnalysisProfileIndex(profileIndex, true);
+    updateProfileButtons();
+    repaint();
 }
 
 void AIAnalyzerAudioProcessorEditor::applyConfig()
@@ -146,9 +184,6 @@ void AIAnalyzerAudioProcessorEditor::applyConfig()
                                      hostEditor.getText(),
                                      portEditor.getText().getIntValue());
 
-    // Echo the actual sanitized configuration back to the editor. This avoids
-    // showing stale/invalid text when empty values fall back to defaults or the
-    // port is clamped to its valid range.
     juce::String instance;
     juce::String host;
     int port = 9855;
@@ -162,11 +197,10 @@ void AIAnalyzerAudioProcessorEditor::timerCallback()
 {
     hasFrame = ownerProcessor.getLatestAnalysis(latestFrame);
 
-    // Follow host automation/state restoration without feeding the change back
-    // into the host from the editor timer.
-    const auto actualProfileId = ownerProcessor.getAnalysisProfileIndex() + 1;
-    if (profileBox.getSelectedId() != actualProfileId)
-        profileBox.setSelectedId(actualProfileId, juce::dontSendNotification);
+    // The host parameter is authoritative. This catches DAW automation/state
+    // restoration and external LLM/DAW-control MCP writes without feeding a
+    // second change back into the host.
+    updateProfileButtons();
 
     const auto actualLanguageId = ownerProcessor.getUiLanguageIndex() + 1;
     if (languageBox.getSelectedId() != actualLanguageId)
@@ -192,8 +226,16 @@ void AIAnalyzerAudioProcessorEditor::paint(juce::Graphics& g)
     g.drawText(aianalyzer::uiText(language, aianalyzer::UiText::Subtitle),
                18, 42, getWidth() - 240, 22, juce::Justification::centredLeft);
 
+    if (settingsExpanded)
+    {
+        const auto settingsPanel = juce::Rectangle<float>(18.0f, 106.0f,
+                                                          static_cast<float>(getWidth() - 36), 38.0f);
+        g.setColour(juce::Colour::fromRGB(25, 28, 35));
+        g.fillRoundedRectangle(settingsPanel, 7.0f);
+    }
+
     auto analysisArea = getLocalBounds().toFloat().reduced(18.0f);
-    analysisArea.removeFromTop(112.0f);
+    analysisArea.removeFromTop(settingsExpanded ? 148.0f : 108.0f);
 
     auto status = analysisArea.removeFromTop(58.0f);
     g.setColour(juce::Colour::fromRGB(27, 31, 38));
@@ -493,23 +535,31 @@ void AIAnalyzerAudioProcessorEditor::resized()
     auto area = getLocalBounds().reduced(18);
     area.removeFromTop(64);
 
-    auto row = area.removeFromTop(34);
+    auto profileRow = area.removeFromTop(34);
+    profileLabel.setBounds(profileRow.removeFromLeft(72));
+    ecoButton.setBounds(profileRow.removeFromLeft(78).reduced(2));
+    balancedButton.setBounds(profileRow.removeFromLeft(104).reduced(2));
+    mixButton.setBounds(profileRow.removeFromLeft(78).reduced(2));
+    fullButton.setBounds(profileRow.removeFromLeft(78).reduced(2));
+    settingsButton.setBounds(profileRow.removeFromRight(112).reduced(2));
 
-    auto label = row.removeFromLeft(54);
-    instanceLabel.setBounds(label);
-    instanceEditor.setBounds(row.removeFromLeft(120).reduced(2));
+    if (settingsExpanded)
+    {
+        area.removeFromTop(4);
+        auto row = area.removeFromTop(34);
 
-    label = row.removeFromLeft(68);
-    hostLabel.setBounds(label);
-    hostEditor.setBounds(row.removeFromLeft(120).reduced(2));
+        auto label = row.removeFromLeft(54);
+        instanceLabel.setBounds(label);
+        instanceEditor.setBounds(row.removeFromLeft(142).reduced(2));
 
-    label = row.removeFromLeft(42);
-    portLabel.setBounds(label);
-    portEditor.setBounds(row.removeFromLeft(60).reduced(2));
+        label = row.removeFromLeft(68);
+        hostLabel.setBounds(label);
+        hostEditor.setBounds(row.removeFromLeft(142).reduced(2));
 
-    label = row.removeFromLeft(62);
-    profileLabel.setBounds(label);
-    profileBox.setBounds(row.removeFromLeft(112).reduced(2));
+        label = row.removeFromLeft(42);
+        portLabel.setBounds(label);
+        portEditor.setBounds(row.removeFromLeft(60).reduced(2));
 
-    applyButton.setBounds(row.removeFromLeft(84).reduced(2));
+        applyButton.setBounds(row.removeFromLeft(84).reduced(2));
+    }
 }
