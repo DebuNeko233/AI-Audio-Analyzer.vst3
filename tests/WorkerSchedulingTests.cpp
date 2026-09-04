@@ -1,4 +1,5 @@
 #include "WorkerScheduling.h"
+#include "ControlProtocol.h"
 
 #include <ebur128.h>
 
@@ -34,6 +35,29 @@ bool testIdleWait()
                  "high sample rates should wake sooner because one hop arrives sooner");
     ok &= expect(aianalyzer::workerIdleWaitMilliseconds(0, 1024, 0.0) == 20,
                  "invalid sample rate must remain bounded");
+    return ok;
+}
+
+bool testControlPortSequence()
+{
+    constexpr auto runtimeId = "00000000-0000-0000-0000-000000000001";
+    constexpr std::array<int, aianalyzer::kControlCandidateCount> expected {
+        43038, 43415, 43792, 44169,
+        44546, 44923, 45300, 45677,
+        46054, 46431, 46808, 47185,
+        47562, 47939, 48316, 48693
+    };
+    constexpr auto actual = aianalyzer::controlCandidatePorts(runtimeId);
+
+    bool ok = true;
+    ok &= expect(actual == expected,
+                 "C++ Analyzer control port derivation must remain protocol-stable");
+    for (const auto port : actual)
+    {
+        ok &= expect(port >= aianalyzer::kControlPortBase
+                     && port < aianalyzer::kControlPortBase + aianalyzer::kControlPortSpan,
+                     "control candidate port must remain inside the documented range");
+    }
     return ok;
 }
 
@@ -118,6 +142,7 @@ bool testRunningTruePeakMatchesGlobal()
 int main()
 {
     const bool ok = testIdleWait()
+                 && testControlPortSequence()
                  && testLoudnessCadence()
                  && testRunningTruePeakMatchesGlobal();
     if (ok)
