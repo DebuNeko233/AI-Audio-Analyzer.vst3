@@ -172,7 +172,7 @@ def main() -> None:
 
     names = {tool.name for tool in asyncio.run(entry.mcp.list_tools())}
     assert names == entry.EXPECTED_TOOLS, sorted(names ^ entry.EXPECTED_TOOLS)
-    assert len(names) == 37
+    assert len(names) == 38
 
     reset_state()
 
@@ -607,7 +607,7 @@ def main() -> None:
     assert float(vocal_story["sections"][0]["active_ratio"]) > float(vocal_story["sections"][1]["active_ratio"])
 
     print(
-        f"AI Audio Analyzer MCP SDK {mcp_sdk_version}: 37 tools; "
+        f"AI Audio Analyzer MCP SDK {mcp_sdk_version}: 38 tools; "
         "V0.4 mapping + project A/B + temporal + masking + stereo + tonal + "
         "V1.0 verification + V1.1 adaptive performance + V1.2 transport/song-memory + "
         "Analyzer-owned profile control + explainable section structure + Track Story regressions OK"
