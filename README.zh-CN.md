@@ -17,7 +17,7 @@ AI Audio Analyzer
 └─ Skill   面向 LLM 的英文 MCP 调用与证据语义说明
 ```
 
-Analyzer 坚持“提供证据，不硬编码审美规则”。不会内置固定 LUFS、Genre EQ、强制 Sidechain/Compression、Stereo 配方、Verse/Chorus/Drop 强制命名、自动轨道角色判断、转调、和声修改或母带链。
+Analyzer 坚持“提供证据，不硬编码审美规则”。不会内置固定 LUFS、Genre EQ、强制 Sidechain/Compression、Stereo 配方、Verse/Chorus/Drop 强制命名、转调、和声修改或母带链。
 
 ## 与 FL Studio MCP 的边界
 
@@ -53,7 +53,7 @@ FL Studio / DAW
                  ├─ DAW Transport / Continuous Playback Epoch
                  ├─ 1 秒 Song Memory / 多分辨率聚合
                  ├─ 可解释 Section Boundary / A-B-C 重复结构家族
-                 ├─ Track Story：单轨跨 Section / Family 变化
+                 ├─ 单轨跨 Section/Family 的 Track Story
                  ├─ Section Profile / Project Overview / Snapshot A-B
                  ├─ Temporal / Masking / Stereo / Tonal Evidence
                  └─ Closed-loop Verification
@@ -84,7 +84,7 @@ LLM **不属于实时测量链路**。模型在思考、调用工具或等待 DA
 - 每实例最多 1200 个 1 秒 Song Memory Bin，使用 100 ms Coverage Slot，可按 1/2/5/10/15/30 秒聚合查询；
 - 多尺度可解释歌曲段落边界检测和中性的 A/B/C 重复结构家族；
 - 即使不同 Analyzer 的实例局部 Epoch 数字不同，也能按 DAW 时间重叠选择对应 Pass，生成 Section 级每轨 Profile；
-- Track Story：按 Section 汇总单个 Analyzer 的活动度、RMS/LUFS-S、动态、频谱、立体声、Temporal、Chroma、覆盖质量、相邻 Section Delta、同 Family 各维度变化和相对极值；
+- 单轨跨 Section 的 Track Story，包括 Coverage-aware 相邻变化、同 Family 各维度变化范围和相对极值；
 - Project Overview、Snapshot A/B、Masking Evidence、Controlled Verification 和性能遥测。
 
 ### Signal Validity
@@ -245,9 +245,9 @@ coverage_ratio
 
 Song Memory 使用 100 ms Coverage Slot，因此把 1 秒 Bin 聚合成 5/10/30 秒时，不会把稀疏数据错误变成 100% 覆盖。
 
-## 可解释歌曲结构与 Track Story
+## 可解释歌曲结构理解层
 
-歌曲结构和 Track Story 完全建立在已有 Song Memory 上，**不增加实时 DSP，也不修改 OSC 1.2 Analysis Frame**。
+第一版歌曲结构层完全建立在已有 Song Memory 上，**不增加实时 DSP，也不修改 OSC 1.2 Analysis Frame**。
 
 ```text
 Song Memory
@@ -258,7 +258,6 @@ Song Memory
 → S01 / S02 / ... Section
 → Section Similarity
 → 中性 A / B / C / ... 重复结构家族
-→ 单个 Analyzer 的 Track Story
 ```
 
 工具：
@@ -275,8 +274,6 @@ audio_section_map(
 )
 
 audio_section_profile(section_id, map_id=None, max_tracks=32, max_related=8)
-
-audio_track_story(track, map_id=None)
 ```
 
 Boundary Detection 会综合可用的跨轨活动、Energy/Loudness、Spectral Balance、Chroma、Stereo、Dynamics 和 Temporal Change。
@@ -307,44 +304,17 @@ C = Chorus
 
 缺失 Song Memory 不会被当成静音或段落边界；`coverage_gaps` 会显式报告缺失数据。
 
-### Track Story 的作用
+### Track Story
 
-两个工具回答的问题不同：
-
-```text
-audio_track_story(track, map_id)
-  看一条轨在多个 Section 中怎么变化
-
-audio_section_profile(section_id, map_id)
-  看一个 Section 内多条轨分别是什么状态
-```
-
-Track Story 可按 Section 输出：
+生成 Section Map 后，可以查看单条轨在整首结构中的变化：
 
 ```text
-Active Ratio
-RMS / LUFS-S / Crest
-Spectral Centroid + 粗频段能量
-Stereo Correlation / Width
-Temporal Spectral Flux
-Chroma / Top Pitch Classes
-Coverage / Estimated Lag / Dropped Blocks
-与前一 Section 的 Current - Previous Delta
+audio_track_story(track, map_id=None)
 ```
 
-对于重复 A/B/C Family，它只给不同维度的 `mean / min / max / spread`，**不会压成单一“稳定性分数”或“质量分数”**。同时会给出各指标在覆盖充分 Section 中的相对高/低位置。
+它会返回每个 Section 的测量证据、相对前一 Section 的 `Current - Previous` Delta、同一 Family 内各维度的变化范围、Coverage/Lag/Drop 信息以及不同指标的相对极值。即使目标轨没有进入原 Section Map 的 `max_tracks` Supporting Set，只要存在同一 DAW 时间范围的 Song Memory，也可以独立选择覆盖最佳的 Retained Pass。
 
-必须遵守：
-
-```text
-Missing Coverage != Silence
-Low Active Ratio != Muted
-Low-frequency Energy != 自动判定 Bass
-Centered Mid-forward Energy != 自动判定 Vocal
-Section Delta != 自动 EQ / Compression / Stereo 指令
-```
-
-即使目标轨当初没有进入 Section Map 的 `max_tracks` 集合，只要它在同一 DAW 时间范围有保留 Song Memory，Track Story 也会独立为这条轨选择覆盖最好的实例局部 Epoch。
+Track Story 只描述证据：缺少 Coverage 不等于不活动，低 `active_ratio` 不自动等于 Muted，A/B/C 不等于语义段落名，任何 Delta 也不自动要求 EQ、Compression 或 Stereo 操作。
 
 推荐整曲调用顺序：
 
@@ -353,8 +323,8 @@ audio_project_status()
 → audio_song_status()
 → 播放/采集足够的目标 Pass
 → audio_section_map()
-→ 对需要看“跨段变化”的轨调用 audio_track_story()
-→ 对需要看“段内多轨关系”的 Section 调用 audio_section_profile()
+→ 关注某一条轨跨段变化时调用 audio_track_story()
+→ 关注某一 Section 的多轨上下文时调用 audio_section_profile()
 → 仍需原始时间变化时才调用 audio_song_timeline()
 → 再针对具体关系调用 Temporal / Masking / Stereo / Tonal
 ```
@@ -504,7 +474,7 @@ mcp/performance_tools.py  Adaptive Profile / Worker Telemetry
 mcp/control_tools.py      本机 Analyzer Analysis Profile 控制
 mcp/song_tools.py         DAW Transport / Pass Memory / Song Summaries
 mcp/section_tools.py      Section Boundary / Recurrence / Section Profile
-mcp/track_story_tools.py  单轨跨 Section / Family 变化摘要
+mcp/track_story_tools.py  单轨跨 Section/Family 演化摘要
 mcp/verification_tools.py Controlled Verification
 mcp/ci_regression.py      仓库内 Synthetic Regression
 ```
