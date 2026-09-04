@@ -98,11 +98,18 @@ def _build_profile_command(runtime_id: str,
 def _decode_ack(data: bytes,
                 runtime_id: str,
                 request_id: str,
-                profile_index: int) -> bool:
+                profile_index: int) -> tuple[bool, bool | None]:
+    """Validate an ACK and return (acknowledged, host_state_changed).
+
+    Revision 1 originally defined four required ACK arguments. Current VST3
+    builds append a fifth integer carrying whether the real host-visible profile
+    differed immediately before this request. Keeping the first four arguments
+    unchanged preserves compatibility with older revision-1 ACK readers.
+    """
     try:
         packet = osc_packet.OscPacket(data)
     except osc_packet.ParseError:
-        return False
+        return False, None
 
     for timed_message in packet.messages:
         message = timed_message.message
@@ -115,12 +122,20 @@ def _decode_ack(data: bytes,
             ack_profile = int(args[2])
         except (TypeError, ValueError):
             continue
-        if (str(args[0]) == runtime_id
-                and str(args[1]) == request_id
-                and ack_profile == profile_index
-                and str(args[3]) == CONTROL_REVISION):
-            return True
-    return False
+        if (str(args[0]) != runtime_id
+                or str(args[1]) != request_id
+                or ack_profile != profile_index
+                or str(args[3]) != CONTROL_REVISION):
+            continue
+
+        changed: bool | None = None
+        if len(args) >= 5:
+            try:
+                changed = bool(int(args[4]))
+            except (TypeError, ValueError):
+                changed = None
+        return True, changed
+    return False, None
 
 
 def _observed_profile(runtime_id: str) -> tuple[int | None, float | None]:
@@ -144,51 +159,63 @@ def _observed_profile(runtime_id: str) -> tuple[int | None, float | None]:
 def _send_profile_request(runtime_id: str,
                           profile_index: int,
                           timeout_seconds: float) -> dict[str, Any]:
+    # Retained telemetry is observation evidence, not authority for current host
+    # state while transport is stopped. Always require a live VST3 control ACK,
+    # even when the newest retained frame already shows the requested profile.
     before_index, before_received = _observed_profile(runtime_id)
-    if before_index == profile_index:
-        return {
-            "ok": True,
-            "runtime_id": runtime_id,
-            "profile": PROFILE_NAMES[profile_index],
-            "profile_display": PROFILE_DISPLAY_NAMES[profile_index],
-            "profile_index": profile_index,
-            "changed": False,
-            "control_acknowledged": False,
-            "telemetry_confirmed": True,
-            "note": "Analyzer telemetry already reports the requested Analysis Profile; no control packet was needed.",
-        }
-
     request_id = uuid.uuid4().hex
     ports = _candidate_ports(runtime_id)
     timeout_seconds = max(0.25, min(float(timeout_seconds), 3.0))
 
+    attempts = 0
+    acknowledged = False
+    ack_changed: bool | None = None
+    socket_error: str | None = None
+
     reply_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
-        reply_socket.bind(("127.0.0.1", 0))
-        reply_port = int(reply_socket.getsockname()[1])
-        command = _build_profile_command(runtime_id, profile_index, request_id, reply_port)
-        deadline = time.monotonic() + timeout_seconds
-        next_send = 0.0
-        attempts = 0
-        acknowledged = False
+        try:
+            reply_socket.bind(("127.0.0.1", 0))
+            reply_port = int(reply_socket.getsockname()[1])
+            command = _build_profile_command(runtime_id, profile_index, request_id, reply_port)
+            deadline = time.monotonic() + timeout_seconds
+            next_send = 0.0
 
-        while time.monotonic() < deadline:
-            now = time.monotonic()
-            if now >= next_send:
-                for port in ports:
-                    reply_socket.sendto(command, ("127.0.0.1", port))
-                attempts += 1
-                next_send = now + 0.20
+            while time.monotonic() < deadline:
+                now = time.monotonic()
+                if now >= next_send:
+                    attempts += 1
+                    try:
+                        for port in ports:
+                            reply_socket.sendto(command, ("127.0.0.1", port))
+                    except OSError as exc:
+                        socket_error = f"{type(exc).__name__}: {exc}"
+                        break
+                    next_send = now + 0.20
 
-            remaining = max(0.0, deadline - time.monotonic())
-            reply_socket.settimeout(min(0.08, remaining))
-            try:
-                data, _sender = reply_socket.recvfrom(4096)
-            except socket.timeout:
-                continue
-            if _decode_ack(data, runtime_id, request_id, profile_index):
-                acknowledged = True
-                break
+                remaining = deadline - time.monotonic()
+                if remaining <= 0.0:
+                    break
+                reply_socket.settimeout(min(0.08, remaining))
+                try:
+                    data, _sender = reply_socket.recvfrom(4096)
+                except socket.timeout:
+                    continue
+                except BlockingIOError:
+                    # Defensive guard for platforms that can expose a
+                    # nonblocking edge at an extremely small timeout.
+                    continue
+                except OSError as exc:
+                    socket_error = f"{type(exc).__name__}: {exc}"
+                    break
+
+                acknowledged, ack_changed = _decode_ack(
+                    data, runtime_id, request_id, profile_index
+                )
+                if acknowledged:
+                    break
+        except OSError as exc:
+            socket_error = f"{type(exc).__name__}: {exc}"
     finally:
         reply_socket.close()
 
@@ -196,43 +223,49 @@ def _send_profile_request(runtime_id: str,
     telemetry_confirmed = (
         after_index == profile_index
         and after_received is not None
-        and (before_received is None or after_received >= before_received)
+        and (before_received is None or after_received > before_received)
     )
 
-    if not acknowledged:
-        return {
-            "ok": False,
-            "runtime_id": runtime_id,
-            "profile": PROFILE_NAMES[profile_index],
-            "profile_display": PROFILE_DISPLAY_NAMES[profile_index],
-            "profile_index": profile_index,
-            "changed": None,
-            "control_acknowledged": False,
-            "telemetry_confirmed": telemetry_confirmed,
-            "attempts": attempts,
-            "candidate_port_count": len(ports),
-            "reason": (
-                "No loopback control ACK was received. The live VST3 may predate Analyzer-owned "
-                "profile control, its local control receiver may be unavailable, or the host may be shutting down. "
-                "Do not assume the profile changed."
-            ),
-        }
-
-    return {
-        "ok": True,
+    common = {
         "runtime_id": runtime_id,
         "profile": PROFILE_NAMES[profile_index],
         "profile_display": PROFILE_DISPLAY_NAMES[profile_index],
         "profile_index": profile_index,
-        "changed": before_index != profile_index,
-        "control_acknowledged": True,
-        "telemetry_confirmed": telemetry_confirmed,
+        "observed_profile_before": (
+            None if before_index is None else PROFILE_NAMES[before_index]
+        ),
         "attempts": attempts,
         "candidate_port_count": len(ports),
+    }
+
+    if not acknowledged:
+        reason = (
+            "No loopback control ACK was received. The live VST3 may predate Analyzer-owned "
+            "profile control, its local control receiver may be unavailable, or the host may be shutting down. "
+            "Do not assume the profile changed."
+        )
+        if socket_error is not None:
+            reason = f"Local control socket failed ({socket_error}). Do not assume the profile changed."
+        return {
+            **common,
+            "ok": False,
+            "changed": None,
+            "control_acknowledged": False,
+            "telemetry_confirmed": telemetry_confirmed,
+            "reason": reason,
+        }
+
+    return {
+        **common,
+        "ok": True,
+        "changed": ack_changed,
+        "control_acknowledged": True,
+        "telemetry_confirmed": telemetry_confirmed,
         "note": (
-            "The VST3 acknowledged the host-visible Analysis Profile request. "
-            "telemetry_confirmed becomes true when a fresh Analyzer frame also reports the target profile; "
-            "transport does not need to be playing for the control ACK itself."
+            "The live VST3 acknowledged the host-visible Analysis Profile request. "
+            "When available, changed is reported by the VST3 from the actual host parameter state immediately "
+            "before applying this request. telemetry_confirmed is true only if a newer Analyzer frame also reports "
+            "the target profile; playback is not required for the control ACK itself."
         ),
     }
 
@@ -335,8 +368,34 @@ def _self_test() -> dict[str, Any]:
         raise RuntimeError("Analyzer control candidate ports must be unique")
     if [_parse_profile(name) for name in PROFILE_NAMES] != [0, 1, 2, 3]:
         raise RuntimeError("Analyzer profile parser regression")
+
+    request_id = "self-test-request"
+    ack_builder = OscMessageBuilder(address=CONTROL_ACK_ADDRESS)
+    ack_builder.add_arg(runtime_id)
+    ack_builder.add_arg(request_id)
+    ack_builder.add_arg(2)
+    ack_builder.add_arg(CONTROL_REVISION)
+    ack_builder.add_arg(1)
+    acknowledged, changed = _decode_ack(
+        ack_builder.build().dgram, runtime_id, request_id, 2
+    )
+    if not acknowledged or changed is not True:
+        raise RuntimeError("Analyzer control ACK parser regression")
+
+    legacy_ack_builder = OscMessageBuilder(address=CONTROL_ACK_ADDRESS)
+    legacy_ack_builder.add_arg(runtime_id)
+    legacy_ack_builder.add_arg(request_id)
+    legacy_ack_builder.add_arg(2)
+    legacy_ack_builder.add_arg(CONTROL_REVISION)
+    acknowledged, changed = _decode_ack(
+        legacy_ack_builder.build().dgram, runtime_id, request_id, 2
+    )
+    if not acknowledged or changed is not None:
+        raise RuntimeError("Analyzer legacy revision-1 ACK compatibility regression")
+
     return {
         "revision": CONTROL_REVISION,
         "candidate_port_protocol": "ok",
         "profile_parser": "ok",
+        "ack_parser": "ok",
     }
