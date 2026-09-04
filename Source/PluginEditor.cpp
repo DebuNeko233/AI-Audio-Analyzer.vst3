@@ -1,5 +1,7 @@
 #include "PluginEditor.h"
 
+#include <cmath>
+
 namespace
 {
 juce::String formatDb(float value)
@@ -15,6 +17,16 @@ juce::String formatLufs(float value)
 juce::String formatDbtp(float value)
 {
     return juce::String(value, 1) + " dBTP";
+}
+
+juce::String formatTransportTime(float seconds)
+{
+    const auto safeSeconds = std::max(0.0f, seconds);
+    const auto totalHundredths = static_cast<int>(std::round(safeSeconds * 100.0f));
+    const auto minutes = totalHundredths / 6000;
+    const auto wholeSeconds = (totalHundredths / 100) % 60;
+    const auto hundredths = totalHundredths % 100;
+    return juce::String::formatted("%02d:%02d.%02d", minutes, wholeSeconds, hundredths);
 }
 
 bool frameHasFeatureForProfile(const aianalyzer::AnalysisFrame& frame,
@@ -44,21 +56,18 @@ juce::String profileName(int profile)
 AIAnalyzerAudioProcessorEditor::AIAnalyzerAudioProcessorEditor(AIAnalyzerAudioProcessor& p)
     : AudioProcessorEditor(&p), ownerProcessor(p)
 {
-    setSize(760, 500);
-
-    instanceLabel.setText("Instance", juce::dontSendNotification);
-    hostLabel.setText("OSC Host", juce::dontSendNotification);
-    portLabel.setText("Port", juce::dontSendNotification);
-    profileLabel.setText("Profile", juce::dontSendNotification);
+    setSize(820, 570);
 
     addAndMakeVisible(instanceLabel);
     addAndMakeVisible(hostLabel);
     addAndMakeVisible(portLabel);
     addAndMakeVisible(profileLabel);
+    addAndMakeVisible(languageLabel);
     addAndMakeVisible(instanceEditor);
     addAndMakeVisible(hostEditor);
     addAndMakeVisible(portEditor);
     addAndMakeVisible(profileBox);
+    addAndMakeVisible(languageBox);
     addAndMakeVisible(applyButton);
 
     juce::String instance;
@@ -84,12 +93,51 @@ AIAnalyzerAudioProcessorEditor::AIAnalyzerAudioProcessorEditor(AIAnalyzerAudioPr
             ownerProcessor.setAnalysisProfileIndex(selected - 1, true);
     };
 
+    languageBox.addItem("English", 1);
+    languageBox.addItem(juce::String(L"中文"), 2);
+    languageBox.setSelectedId(ownerProcessor.getUiLanguageIndex() + 1,
+                              juce::dontSendNotification);
+    languageBox.onChange = [this]
+    {
+        const auto selected = languageBox.getSelectedId();
+        if (selected >= 1 && selected <= 2)
+        {
+            ownerProcessor.setUiLanguageIndex(selected - 1);
+            updateLocalizedText();
+            repaint();
+        }
+    };
+
     applyButton.onClick = [this] { applyConfig(); };
     instanceEditor.onReturnKey = [this] { applyConfig(); };
     hostEditor.onReturnKey = [this] { applyConfig(); };
     portEditor.onReturnKey = [this] { applyConfig(); };
 
+    updateLocalizedText();
     startTimerHz(30);
+}
+
+aianalyzer::UiLanguage AIAnalyzerAudioProcessorEditor::currentLanguage() const noexcept
+{
+    return ownerProcessor.getUiLanguageIndex() == 1
+        ? aianalyzer::UiLanguage::Chinese
+        : aianalyzer::UiLanguage::English;
+}
+
+void AIAnalyzerAudioProcessorEditor::updateLocalizedText()
+{
+    const auto language = currentLanguage();
+    instanceLabel.setText(aianalyzer::uiText(language, aianalyzer::UiText::Instance),
+                          juce::dontSendNotification);
+    hostLabel.setText(aianalyzer::uiText(language, aianalyzer::UiText::OscHost),
+                      juce::dontSendNotification);
+    portLabel.setText(aianalyzer::uiText(language, aianalyzer::UiText::Port),
+                      juce::dontSendNotification);
+    profileLabel.setText(aianalyzer::uiText(language, aianalyzer::UiText::Profile),
+                         juce::dontSendNotification);
+    languageLabel.setText(aianalyzer::uiText(language, aianalyzer::UiText::Language),
+                          juce::dontSendNotification);
+    applyButton.setButtonText(aianalyzer::uiText(language, aianalyzer::UiText::Apply));
 }
 
 void AIAnalyzerAudioProcessorEditor::applyConfig()
@@ -120,24 +168,133 @@ void AIAnalyzerAudioProcessorEditor::timerCallback()
     if (profileBox.getSelectedId() != actualProfileId)
         profileBox.setSelectedId(actualProfileId, juce::dontSendNotification);
 
+    const auto actualLanguageId = ownerProcessor.getUiLanguageIndex() + 1;
+    if (languageBox.getSelectedId() != actualLanguageId)
+    {
+        languageBox.setSelectedId(actualLanguageId, juce::dontSendNotification);
+        updateLocalizedText();
+    }
+
     repaint();
 }
 
 void AIAnalyzerAudioProcessorEditor::paint(juce::Graphics& g)
 {
+    const auto language = currentLanguage();
     g.fillAll(juce::Colour::fromRGB(19, 21, 26));
 
     g.setColour(juce::Colours::white);
     g.setFont(juce::FontOptions(22.0f, juce::Font::bold));
-    g.drawText("AI Audio Analyzer", 18, 12, 260, 32, juce::Justification::centredLeft);
+    g.drawText("AI Audio Analyzer", 18, 12, getWidth() - 240, 32, juce::Justification::centredLeft);
 
     g.setFont(juce::FontOptions(12.0f));
     g.setColour(juce::Colours::lightgrey);
-    g.drawText("Adaptive audio analysis → OSC → MCP",
-               18, 42, getWidth() - 36, 22, juce::Justification::centredLeft);
+    g.drawText(aianalyzer::uiText(language, aianalyzer::UiText::Subtitle),
+               18, 42, getWidth() - 240, 22, juce::Justification::centredLeft);
 
     auto analysisArea = getLocalBounds().toFloat().reduced(18.0f);
     analysisArea.removeFromTop(112.0f);
+
+    auto status = analysisArea.removeFromTop(58.0f);
+    g.setColour(juce::Colour::fromRGB(27, 31, 38));
+    g.fillRoundedRectangle(status, 8.0f);
+
+    auto transportArea = status.reduced(12.0f, 7.0f);
+    auto healthArea = transportArea.removeFromRight(status.getWidth() * 0.42f);
+    transportArea.removeFromRight(12.0f);
+
+    g.setFont(juce::FontOptions(11.5f, juce::Font::bold));
+    g.setColour(juce::Colours::lightgrey);
+    g.drawText(aianalyzer::uiText(language, aianalyzer::UiText::Transport),
+               transportArea.removeFromTop(18.0f).toNearestInt(), juce::Justification::centredLeft);
+
+    g.setFont(juce::FontOptions(11.0f));
+    juce::String transportText;
+    if (!hasFrame || !latestFrame.transportSupported)
+    {
+        transportText = aianalyzer::uiText(language, aianalyzer::UiText::Unsupported);
+        g.setColour(juce::Colours::grey);
+    }
+    else
+    {
+        if (latestFrame.transportIsRecording)
+            transportText = aianalyzer::uiText(language, aianalyzer::UiText::Recording);
+        else if (latestFrame.transportIsPlaying)
+            transportText = aianalyzer::uiText(language, aianalyzer::UiText::Playing);
+        else
+            transportText = aianalyzer::uiText(language, aianalyzer::UiText::Stopped);
+
+        transportText += "   " + formatTransportTime(latestFrame.transportTimeSeconds);
+        if (latestFrame.transportBpm > 0.0f)
+            transportText += "   ·   " + juce::String(latestFrame.transportBpm, 1) + " BPM";
+        transportText += "   ·   " + juce::String(latestFrame.transportTimeSignatureNumerator)
+                       + "/" + juce::String(latestFrame.transportTimeSignatureDenominator);
+        transportText += "   ·   " + aianalyzer::uiText(language, aianalyzer::UiText::Pass)
+                       + " " + juce::String(static_cast<int>(latestFrame.transportEpoch));
+        if (latestFrame.transportIsLooping)
+            transportText += "   ·   " + aianalyzer::uiText(language, aianalyzer::UiText::Loop);
+        g.setColour(latestFrame.transportIsPlaying ? juce::Colours::lightgreen : juce::Colours::lightgrey);
+    }
+    g.drawFittedText(transportText, transportArea.toNearestInt(), juce::Justification::centredLeft, 1);
+
+    const auto drops = hasFrame ? latestFrame.droppedBlocks : ownerProcessor.getDroppedBlocks();
+    juce::String healthText = aianalyzer::uiText(language, aianalyzer::UiText::Healthy);
+    auto healthColour = juce::Colours::lightgreen;
+    if (drops > 0)
+    {
+        healthText = aianalyzer::uiText(language, aianalyzer::UiText::DroppedAudio);
+        healthColour = juce::Colours::orangered;
+    }
+    else if (hasFrame && latestFrame.fifoFillRatio >= 0.75f)
+    {
+        healthText = aianalyzer::uiText(language, aianalyzer::UiText::FifoPressure);
+        healthColour = juce::Colours::orange;
+    }
+    else if (hasFrame && latestFrame.estimatedAnalysisLagMs >= 250.0f)
+    {
+        healthText = aianalyzer::uiText(language, aianalyzer::UiText::HighLatency);
+        healthColour = juce::Colours::orange;
+    }
+
+    auto healthTop = healthArea.removeFromTop(18.0f);
+    g.setFont(juce::FontOptions(11.5f, juce::Font::bold));
+    g.setColour(juce::Colours::lightgrey);
+    g.drawText(aianalyzer::uiText(language, aianalyzer::UiText::AnalysisHealth),
+               healthTop.removeFromLeft(112.0f).toNearestInt(), juce::Justification::centredLeft);
+    g.setColour(healthColour);
+    g.drawFittedText(healthText, healthTop.toNearestInt(), juce::Justification::centredRight, 1);
+
+    g.setFont(juce::FontOptions(10.5f));
+    g.setColour(juce::Colours::lightgrey);
+    juce::String healthMetrics;
+    if (hasFrame)
+    {
+        healthMetrics = aianalyzer::uiText(language, aianalyzer::UiText::Worker)
+                      + " " + juce::String(latestFrame.workerLoadRatio * 100.0f, 0) + "%"
+                      + "   ·   " + aianalyzer::uiText(language, aianalyzer::UiText::Fifo)
+                      + " " + juce::String(latestFrame.fifoFillRatio * 100.0f, 0) + "%"
+                      + "   ·   " + aianalyzer::uiText(language, aianalyzer::UiText::Lag)
+                      + " " + juce::String(latestFrame.estimatedAnalysisLagMs, 0) + " ms"
+                      + "   ·   " + aianalyzer::uiText(language, aianalyzer::UiText::Drops)
+                      + " " + juce::String(static_cast<juce::int64>(drops));
+    }
+    else
+    {
+        healthMetrics = aianalyzer::uiText(language, aianalyzer::UiText::WaitingForAudio);
+    }
+    g.drawFittedText(healthMetrics, healthArea.removeFromTop(16.0f).toNearestInt(),
+                     juce::Justification::centredLeft, 1);
+
+    juce::String instance;
+    juce::String host;
+    int port = 9855;
+    ownerProcessor.getAnalyzerConfig(instance, host, port);
+    g.setColour(juce::Colours::grey);
+    g.drawFittedText(aianalyzer::uiText(language, aianalyzer::UiText::OscTx)
+                     + " → " + host + ":" + juce::String(port),
+                     healthArea.toNearestInt(), juce::Justification::centredLeft, 1);
+
+    analysisArea.removeFromTop(8.0f);
 
     auto metrics = analysisArea.removeFromTop(94.0f);
     g.setColour(juce::Colour::fromRGB(31, 35, 43));
@@ -159,12 +316,13 @@ void AIAnalyzerAudioProcessorEditor::paint(juce::Graphics& g)
         const auto truePeakText = loudnessAvailable
             ? formatDbtp(latestFrame.truePeakDbtp)
             : juce::String("--");
-        g.drawFittedText("Sample / True Peak\n" + formatDb(latestFrame.peakDb)
-                         + " / " + truePeakText,
+        g.drawFittedText(aianalyzer::uiText(language, aianalyzer::UiText::SampleTruePeak)
+                         + "\n" + formatDb(latestFrame.peakDb) + " / " + truePeakText,
                          metrics.withWidth(columnWidth).toNearestInt(),
                          juce::Justification::centred, 2);
 
-        g.drawFittedText("RMS / Crest\n" + formatDb(latestFrame.rmsDb)
+        g.drawFittedText(aianalyzer::uiText(language, aianalyzer::UiText::RmsCrest)
+                         + "\n" + formatDb(latestFrame.rmsDb)
                          + " / " + (latestFrame.signalPresent ? formatDb(latestFrame.crestDb) : juce::String("--")),
                          metrics.withX(metrics.getX() + columnWidth).withWidth(columnWidth).toNearestInt(),
                          juce::Justification::centred, 2);
@@ -177,8 +335,8 @@ void AIAnalyzerAudioProcessorEditor::paint(juce::Graphics& g)
         const auto integratedText = loudnessAvailable
             ? formatLufs(latestFrame.lufsIntegrated)
             : juce::String("--");
-        g.drawFittedText("LUFS-S / LUFS-I\n" + shortTermText
-                         + " / " + integratedText,
+        g.drawFittedText(aianalyzer::uiText(language, aianalyzer::UiText::LufsShortIntegrated)
+                         + "\n" + shortTermText + " / " + integratedText,
                          metrics.withX(metrics.getX() + columnWidth * 2.0f).withWidth(columnWidth).toNearestInt(),
                          juce::Justification::centred, 2);
 
@@ -186,14 +344,16 @@ void AIAnalyzerAudioProcessorEditor::paint(juce::Graphics& g)
             ? juce::String("-- / --")
             : (latestFrame.signalPresent
                 ? juce::String(latestFrame.stereoCorrelation, 2) + " / " + juce::String(latestFrame.stereoWidth, 2)
-                : juce::String("NO SIGNAL"));
-        g.drawFittedText("Corr / Width\n" + stereoText,
+                : aianalyzer::uiText(language, aianalyzer::UiText::NoSignal));
+        g.drawFittedText(aianalyzer::uiText(language, aianalyzer::UiText::CorrWidth)
+                         + "\n" + stereoText,
                          metrics.withX(metrics.getX() + columnWidth * 3.0f).withWidth(columnWidth).toNearestInt(),
                          juce::Justification::centred, 2);
     }
     else
     {
-        g.drawText("Waiting for audio...", metrics.toNearestInt(), juce::Justification::centred);
+        g.drawText(aianalyzer::uiText(language, aianalyzer::UiText::WaitingForAudio),
+                   metrics.toNearestInt(), juce::Justification::centred);
     }
 
     analysisArea.removeFromTop(12.0f);
@@ -210,14 +370,17 @@ void AIAnalyzerAudioProcessorEditor::paint(juce::Graphics& g)
             latestFrame, hostProfileIndex, aianalyzer::FeatureLoudness);
         const bool profilePending = latestFrame.analysisProfile != hostProfileIndex;
 
-        juce::String detailText = "PROFILE " + profileName(hostProfileIndex);
+        juce::String detailText = aianalyzer::uiText(language, aianalyzer::UiText::Profile)
+                                + " " + profileName(hostProfileIndex);
         if (profilePending)
-            detailText += " (pending)";
+            detailText += " (" + aianalyzer::uiText(language, aianalyzer::UiText::Pending) + ")";
         detailText += "   ·   ";
 
         if (latestFrame.signalPresent)
         {
-            detailText += "SIGNAL   ·   Detector " + formatDb(latestFrame.detectorPeakDb);
+            detailText += aianalyzer::uiText(language, aianalyzer::UiText::Signal)
+                       + "   ·   " + aianalyzer::uiText(language, aianalyzer::UiText::Detector)
+                       + " " + formatDb(latestFrame.detectorPeakDb);
             if (spectrumAvailable)
             {
                 detailText += "   ·   Centroid " + juce::String(latestFrame.spectralCentroidHz, 0) + " Hz"
@@ -225,17 +388,21 @@ void AIAnalyzerAudioProcessorEditor::paint(juce::Graphics& g)
             }
             else
             {
-                detailText += "   ·   Spectrum unavailable";
+                detailText += "   ·   " + aianalyzer::uiText(language, aianalyzer::UiText::SpectrumUnavailable);
             }
         }
         else
         {
-            detailText += "NO INPUT (< -50 dBFS)   ·   Detector " + formatDb(latestFrame.detectorPeakDb)
-                       + "   ·   Silence " + juce::String(latestFrame.silenceSeconds, 1) + " s";
+            detailText += aianalyzer::uiText(language, aianalyzer::UiText::NoSignal)
+                       + " (< -50 dBFS)   ·   " + aianalyzer::uiText(language, aianalyzer::UiText::Detector)
+                       + " " + formatDb(latestFrame.detectorPeakDb)
+                       + "   ·   " + aianalyzer::uiText(language, aianalyzer::UiText::Silence)
+                       + " " + juce::String(latestFrame.silenceSeconds, 1) + " s";
         }
 
         if (loudnessAvailable)
-            detailText += "   ·   Session max TP " + formatDbtp(latestFrame.maxTruePeakDbtp);
+            detailText += "   ·   " + aianalyzer::uiText(language, aianalyzer::UiText::SessionMaxTp)
+                       + " " + formatDbtp(latestFrame.maxTruePeakDbtp);
 
         g.drawFittedText(detailText,
                          detail.toNearestInt(),
@@ -245,16 +412,12 @@ void AIAnalyzerAudioProcessorEditor::paint(juce::Graphics& g)
     }
 
     drawSpectrum(g, analysisArea);
-
-    g.setFont(juce::FontOptions(11.0f));
-    g.setColour(juce::Colours::grey);
-    g.drawText("Dropped audio FIFO blocks: " + juce::String(static_cast<juce::int64>(ownerProcessor.getDroppedBlocks())),
-               18, getHeight() - 20, getWidth() - 36, 14, juce::Justification::centredRight);
 }
 
 void AIAnalyzerAudioProcessorEditor::drawSpectrum(juce::Graphics& g,
                                                    juce::Rectangle<float> bounds) const
 {
+    const auto language = currentLanguage();
     g.setColour(juce::Colour::fromRGB(26, 29, 36));
     g.fillRoundedRectangle(bounds, 8.0f);
 
@@ -269,8 +432,8 @@ void AIAnalyzerAudioProcessorEditor::drawSpectrum(juce::Graphics& g,
         g.setColour(juce::Colours::grey);
         g.setFont(juce::FontOptions(13.0f));
         const auto pending = latestFrame.analysisProfile != hostProfileIndex;
-        g.drawText(pending ? "Spectrum waiting for active Analysis Profile"
-                           : "Spectrum disabled by Analysis Profile",
+        g.drawText(pending ? aianalyzer::uiText(language, aianalyzer::UiText::SpectrumWaiting)
+                           : aianalyzer::uiText(language, aianalyzer::UiText::SpectrumDisabled),
                    bounds.toNearestInt(),
                    juce::Justification::centred);
         return;
@@ -280,18 +443,31 @@ void AIAnalyzerAudioProcessorEditor::drawSpectrum(juce::Graphics& g,
     {
         g.setColour(juce::Colours::grey);
         g.setFont(juce::FontOptions(13.0f));
-        g.drawText("No active input", bounds.toNearestInt(), juce::Justification::centred);
+        g.drawText(aianalyzer::uiText(language, aianalyzer::UiText::NoActiveInput),
+                   bounds.toNearestInt(), juce::Justification::centred);
         return;
     }
 
-    juce::Path path;
-    const auto left = bounds.getX() + 10.0f;
+    const auto left = bounds.getX() + 34.0f;
     const auto right = bounds.getRight() - 10.0f;
     const auto top = bounds.getY() + 10.0f;
     const auto bottom = bounds.getBottom() - 10.0f;
     const auto width = right - left;
     const auto height = bottom - top;
 
+    g.setFont(juce::FontOptions(9.5f));
+    for (int db = -20; db >= -80; db -= 20)
+    {
+        const auto normalized = (static_cast<float>(db) + 100.0f) / 100.0f;
+        const auto y = bottom - normalized * height;
+        g.setColour(juce::Colour::fromRGB(48, 53, 63));
+        g.drawHorizontalLine(static_cast<int>(std::round(y)), left, right);
+        g.setColour(juce::Colours::grey);
+        g.drawText(juce::String(db), bounds.getX() + 4.0f, y - 7.0f, 26.0f, 14.0f,
+                   juce::Justification::centredRight);
+    }
+
+    juce::Path path;
     for (int i = 0; i < aianalyzer::kNumBands; ++i)
     {
         const auto x = left + width * static_cast<float>(i) / static_cast<float>(aianalyzer::kNumBands - 1);
@@ -311,6 +487,9 @@ void AIAnalyzerAudioProcessorEditor::drawSpectrum(juce::Graphics& g,
 
 void AIAnalyzerAudioProcessorEditor::resized()
 {
+    languageLabel.setBounds(getWidth() - 190, 18, 64, 28);
+    languageBox.setBounds(getWidth() - 126, 18, 108, 28);
+
     auto area = getLocalBounds().reduced(18);
     area.removeFromTop(64);
 
@@ -320,15 +499,15 @@ void AIAnalyzerAudioProcessorEditor::resized()
     instanceLabel.setBounds(label);
     instanceEditor.setBounds(row.removeFromLeft(120).reduced(2));
 
-    label = row.removeFromLeft(62);
+    label = row.removeFromLeft(68);
     hostLabel.setBounds(label);
     hostEditor.setBounds(row.removeFromLeft(120).reduced(2));
 
-    label = row.removeFromLeft(34);
+    label = row.removeFromLeft(42);
     portLabel.setBounds(label);
     portEditor.setBounds(row.removeFromLeft(60).reduced(2));
 
-    label = row.removeFromLeft(48);
+    label = row.removeFromLeft(62);
     profileLabel.setBounds(label);
     profileBox.setBounds(row.removeFromLeft(112).reduced(2));
 
