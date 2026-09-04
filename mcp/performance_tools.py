@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 """Adaptive-analysis and worker-performance layer for AI Audio Analyzer.
 
-The Analyzer remains read/measure/verify oriented. Analysis Profile is a real
-host-visible VST3 parameter and must be changed through the actual DAW-control
-MCP. This module parses the append-only runtime telemetry tail and lets the LLM
-verify which feature groups are really enabled and whether the background
-analysis worker is keeping up.
+Analysis Profile is a host-visible VST3 parameter that changes Analyzer
+measurement cost only. Newer Analyzer builds can change that parameter through
+the Analyzer-owned loopback control tools; DAW-control MCP remains responsible
+for all artistic/technical project parameters outside the Analyzer itself.
+
+This module parses the append-only runtime telemetry tail and lets the LLM verify
+which feature groups are really enabled and whether the background analysis
+worker is keeping up.
 """
 
 from __future__ import annotations
@@ -165,7 +168,10 @@ def _status_from_frame(frame: dict[str, Any]) -> dict[str, Any]:
                 {"index": 2, "name": "Mix", "features": _features(31)},
                 {"index": 3, "name": "Full", "features": _features(63)},
             ],
-            "writer": "Use the actual DAW-control MCP to change this host-visible VST3 parameter, then read this status again.",
+            "writer": (
+                "Prefer audio_set_analysis_profile() or audio_set_project_analysis_profile() on control-capable Analyzer builds. "
+                "The control path is limited to this Analyzer measurement-performance parameter."
+            ),
         },
         "telemetry_semantics": {
             "worker_load_ratio": "Background Analyzer worker busy-time ratio, not DAW audio-thread CPU usage.",
@@ -219,6 +225,6 @@ def audio_project_performance() -> dict[str, Any]:
         "instances": sorted(rows, key=lambda row: (str(row.get("track") or "").casefold(), str(row.get("id") or ""))),
         "warnings": warnings,
         "note": (
-            "Profiles are performance controls, not artistic modes. Change them through the real DAW-control MCP and verify the resulting Analyzer status/readback."
+            "Profiles are Analyzer performance controls, not artistic modes. Use the Analyzer-owned profile-control tools when available, then verify fresh telemetry if the transport is running."
         ),
     }
