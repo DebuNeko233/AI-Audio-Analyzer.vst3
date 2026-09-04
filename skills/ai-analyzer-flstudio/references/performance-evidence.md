@@ -2,7 +2,7 @@
 
 This reference explains how to use AI Audio Analyzer's adaptive analysis controls without confusing performance configuration with artistic intent.
 
-## Analysis Profile is a host parameter
+## Analysis Profile is an Analyzer-owned host parameter
 
 The VST3 exposes:
 
@@ -16,13 +16,51 @@ Choices:
 3  Full
 ```
 
-AI Audio Analyzer MCP **does not write this parameter**. Use the actual DAW-control MCP to inspect the plugin's exposed parameters, change `Analysis Profile`, read back the host value, and then verify the Analyzer state with:
+Current Analyzer builds can change this **Analyzer-owned measurement-performance parameter** through:
 
 ```text
-audio_analysis_status(track)
+audio_set_analysis_profile(track, profile)
+audio_set_project_analysis_profile(profile, tracks=None)
 ```
 
-Do not invent DAW-control MCP tool names. Use the tools and parameter model the connected DAW MCP actually exposes.
+These tools do not write EQ, compression, gain, pan, synth, routing, automation, or other artistic/project parameters. Those remain the responsibility of the actual DAW-control MCP.
+
+The control path is deliberately local and narrow:
+
+```text
+Analyzer MCP
+→ loopback-only OSC control request
+→ target VST3 runtime UUID
+→ JUCE message thread
+→ host-visible Analysis Profile parameter
+→ loopback ACK
+```
+
+The existing `/aianalyzer/frame` measurement protocol remains OSC 1.2 and keeps indexes `0..149` unchanged. Analyzer-owned control uses a separate local control revision.
+
+## Control acknowledgement and telemetry confirmation
+
+`audio_set_analysis_profile()` separates two ideas:
+
+```text
+control_acknowledged
+  The target VST3 accepted the request on its local control path and applied the
+  host-visible Analysis Profile request on the JUCE message thread.
+
+telemetry_confirmed
+  A retained/fresh Analyzer frame also reports the requested profile.
+```
+
+The control ACK does **not** require DAW playback. Telemetry confirmation normally requires a new measurement frame, so it may remain false while transport/audio processing is stopped.
+
+Never claim a successful change when:
+
+```text
+ok = false
+control_acknowledged = false
+```
+
+Older VST3 builds do not expose the local control receiver. In that case the Analyzer MCP tool times out cleanly and reports failure instead of assuming the change happened. If the connected DAW-control MCP can write the historical `analysis_profile` host parameter, it may be used as a compatibility fallback, followed by Analyzer telemetry verification.
 
 ## Profiles
 
@@ -34,7 +72,7 @@ Enabled feature groups:
 Core
 ```
 
-Use for low-cost instance presence, signal detection, runtime identity, Identify mapping, and basic Peak/RMS/Crest state when deeper evidence is not currently required.
+Use for low-cost instance presence, signal detection, runtime identity, Identify mapping, transport context, and basic Peak/RMS/Crest state when deeper evidence is not currently required.
 
 Disabled/unavailable:
 
@@ -95,13 +133,13 @@ Semantic Chroma/single-F0 work is scheduled at a lower rate than hop-level FFT w
 Use these minimum profiles when a request needs the corresponding measurements:
 
 ```text
-Core / Identify / signal state       Eco
-LUFS / True Peak                     Balanced
-Spectrum / basic masking evidence    Balanced
-Deep Mid/Side / stereo evidence      Balanced
-Temporal profile/compare             Mix
-Stronger masking with temporal data  Mix
-Tonal / chroma / harmonic evidence   Full
+Core / Identify / transport / signal state  Eco
+LUFS / True Peak                            Balanced
+Spectrum / basic masking evidence           Balanced
+Deep Mid/Side / stereo evidence             Balanced
+Temporal profile/compare                    Mix
+Stronger masking with temporal data         Mix
+Tonal / chroma / harmonic evidence          Full
 ```
 
 A stronger profile includes the lower-profile groups, so `Full` can answer all existing measurement families. Do not switch profiles merely because a higher mode exists.
@@ -112,18 +150,26 @@ When many Analyzer instances are present, prefer targeted temporary escalation:
 
 ```text
 1. audio_analysis_status(target)
-2. remember current profile
-3. determine minimum profile required by the requested evidence
-4. if needed, use the real DAW-control MCP to change Analysis Profile
-5. read back the actual host parameter value
-6. call audio_analysis_status(target) until the requested feature group is reported enabled
-7. play/capture a sufficient comparable measurement window
+2. remember the current profile
+3. determine the minimum profile required by the requested evidence
+4. audio_set_analysis_profile(target, required_profile)
+5. require control acknowledgement when a change was needed
+6. when new frames are available, verify audio_analysis_status(target)
+7. play/capture a sufficient comparable measurement window/pass
 8. call the required Analyzer evidence tool
-9. restore the previous Analysis Profile through the DAW-control MCP when appropriate
-10. verify the restored Analyzer status
+9. restore the previous profile with audio_set_analysis_profile() when appropriate
+10. verify the restored Analyzer state when new telemetry is available
 ```
 
-Do not change every Analyzer to `Full` by default for a single-track question.
+For many intended targets, use:
+
+```text
+audio_set_project_analysis_profile(profile, tracks=[...])
+```
+
+Omit `tracks` only when the task really intends to change every currently live Analyzer instance.
+
+Do not set every Analyzer to `Full` by default for a single-track tonal question.
 
 ## Runtime telemetry
 
@@ -192,12 +238,8 @@ Profiles change **analysis computation**, not the audio signal and not the user'
 
 ## Relationship to closed-loop verification
 
-Profile changes are real host state changes. If profile switching is part of a controlled workflow:
-
-```text
-DAW-control MCP writes Analysis Profile
-→ DAW-control MCP reads it back
-→ audio_analysis_status verifies Analyzer feature-mask state
-```
+Changing Analysis Profile is an Analyzer configuration action, not an artistic Before/After intervention. Keep it separate from the user's sound-changing verification ledger.
 
 For an artistic plugin-parameter A/B, avoid changing Analysis Profile between Before and After unless the measurement procedure explicitly accounts for it, because different enabled evidence families can make the two observation states non-equivalent.
+
+The Analyzer-owned control ACK confirms that its own profile request was accepted. It does not replace actual host readback requirements for unrelated external DAW/plugin changes.
