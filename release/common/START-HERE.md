@@ -99,3 +99,5 @@ AI Audio Analyzer 1.2 支持 DAW 时间轴 Song Memory，LLM 即使晚几秒读�
 `Eco / Balanced / Mix / Full` Analysis Profile 只控制 Analyzer 的测量计算量，不会改变声音。当前 Analyzer MCP 可以通过本机控制通道修改 live Analyzer 自己的 Analysis Profile，并收到明确 ACK；这个写入范围只限 Analyzer 的测量负载，任何会改变声音或工程状态的 DAW/插件参数仍由真正的 DAW Control MCP 负责。
 
 当前 MCP 1.2 共提供 **38 个工具**。
+
+<!-- temporary P2 full-gate sentinel -->
