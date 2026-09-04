@@ -24,6 +24,7 @@ import server as entry  # noqa: E402
 import song_tools as song  # noqa: E402
 import stereo_tools as stereo  # noqa: E402
 import temporal_tools as temporal  # noqa: E402
+import track_story_tools as story  # noqa: E402
 import verification_tools as verification  # noqa: E402
 from mcp.server import MCPServer  # noqa: E402
 
@@ -171,7 +172,7 @@ def main() -> None:
 
     names = {tool.name for tool in asyncio.run(entry.mcp.list_tools())}
     assert names == entry.EXPECTED_TOOLS, sorted(names ^ entry.EXPECTED_TOOLS)
-    assert len(names) == 36
+    assert len(names) == 37
 
     reset_state()
 
@@ -585,11 +586,31 @@ def main() -> None:
     assert vocal_profile["selected_transport_epoch"] == 11
     assert float(kick_profile["active_ratio"]) > float(vocal_profile["active_ratio"])
 
+    kick_story = story.audio_track_story("mixer:1/slot:9", section_map["map_id"])
+    assert kick_story["available"] is True
+    assert kick_story["selected_transport_epoch"] == 3
+    assert kick_story["section_count"] == 3
+    assert kick_story["sufficient_coverage_section_count"] == 3
+    assert kick_story["sections"][0]["family_id"] == kick_story["sections"][2]["family_id"]
+    assert kick_story["sections"][1]["delta_from_previous"] is not None
+    assert float(kick_story["sections"][1]["active_ratio"]) > float(kick_story["sections"][0]["active_ratio"])
+    recurring_family = next(
+        item for item in kick_story["family_consistency"]
+        if item["family_id"] == kick_story["sections"][0]["family_id"]
+    )
+    assert recurring_family["occurrence_count"] == 2
+    assert recurring_family["sufficient_coverage_count"] == 2
+
+    vocal_story = story.audio_track_story("mixer:2/slot:9", section_map["map_id"])
+    assert vocal_story["available"] is True
+    assert vocal_story["selected_transport_epoch"] == 11
+    assert float(vocal_story["sections"][0]["active_ratio"]) > float(vocal_story["sections"][1]["active_ratio"])
+
     print(
-        f"AI Audio Analyzer MCP SDK {mcp_sdk_version}: 36 tools; "
+        f"AI Audio Analyzer MCP SDK {mcp_sdk_version}: 37 tools; "
         "V0.4 mapping + project A/B + temporal + masking + stereo + tonal + "
         "V1.0 verification + V1.1 adaptive performance + V1.2 transport/song-memory + "
-        "Analyzer-owned profile control + explainable section-structure regressions OK"
+        "Analyzer-owned profile control + explainable section structure + Track Story regressions OK"
     )
 
 
