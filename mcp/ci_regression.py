@@ -167,10 +167,11 @@ def main() -> None:
     assert entry.mcp is core.mcp
     assert entry.MCP_VERSION == "1.2"
     assert entry.OSC_PROTOCOL_VERSION == "1.2"
+    assert entry.CONTROL_PROTOCOL_VERSION == "1"
 
     names = {tool.name for tool in asyncio.run(entry.mcp.list_tools())}
     assert names == entry.EXPECTED_TOOLS, sorted(names ^ entry.EXPECTED_TOOLS)
-    assert len(names) == 34
+    assert len(names) == 36
 
     reset_state()
 
@@ -585,10 +586,10 @@ def main() -> None:
     assert float(kick_profile["active_ratio"]) > float(vocal_profile["active_ratio"])
 
     print(
-        f"AI Audio Analyzer MCP SDK {mcp_sdk_version}: 34 tools; "
+        f"AI Audio Analyzer MCP SDK {mcp_sdk_version}: 36 tools; "
         "V0.4 mapping + project A/B + temporal + masking + stereo + tonal + "
         "V1.0 verification + V1.1 adaptive performance + V1.2 transport/song-memory + "
-        "explainable section-structure regressions OK"
+        "Analyzer-owned profile control + explainable section-structure regressions OK"
     )
 
 
