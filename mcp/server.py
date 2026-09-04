@@ -16,6 +16,7 @@ Current layers:
 - control_tools: Analyzer-owned loopback Analysis Profile control
 - song_tools: DAW transport, continuous-pass song memory and latency-aware summaries
 - section_tools: explainable boundaries, neutral recurring families and section profiles
+- track_story_tools: per-track behavior across sections/families
 - verification_tools: controlled Before/After verification sessions
 
 Set AI_ANALYZER_SELF_TEST=1 to validate source or packaged runtime without
@@ -69,6 +70,7 @@ core._on_frame = song.on_frame_v12
 
 import control_tools as control  # noqa: E402
 import section_tools as structure  # noqa: E402
+import track_story_tools as story  # noqa: E402
 import verification_tools as verification  # noqa: E402,F401
 
 MCP_VERSION = "1.2"
@@ -109,6 +111,7 @@ EXPECTED_TOOLS = {
     "audio_song_overview",
     "audio_section_map",
     "audio_section_profile",
+    "audio_track_story",
     "audio_begin_verification",
     "audio_complete_verification",
     "audio_verification_status",
@@ -156,6 +159,7 @@ def self_test() -> None:
     _self_test_song_coverage()
     control_result = control._self_test()
     structure_result = structure._self_test()
+    story_result = story._self_test()
 
     print(
         json.dumps(
@@ -171,6 +175,7 @@ def self_test() -> None:
                 "song_memory_sparse_coverage": "ok",
                 "analyzer_profile_control": control_result,
                 "song_structure_synthetic": structure_result,
+                "track_story_synthetic": story_result,
             },
             ensure_ascii=False,
         )
