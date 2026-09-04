@@ -58,6 +58,7 @@ def _state_summary(state: dict[str, Any]) -> dict[str, Any]:
                 "display_name": track.get("display_name"),
                 "analysis_valid": bool(track.get("analysis_valid")),
                 "active_ratio": track.get("active_ratio"),
+                "feature_availability": copy.deepcopy(track.get("feature_availability") or {}),
                 "selected_transport_epoch": track.get("selected_transport_epoch"),
                 "coverage_ratio": track.get("range_coverage_ratio"),
                 "first_received_at": (track.get("range_provenance") or {}).get("first_received_at"),
@@ -127,7 +128,8 @@ def _comparison(
 
     missing_targets: list[str] = []
     invalid_targets: list[str] = []
-    feature_mask_mismatch_targets: list[str] = []
+    retained_feature_mismatch_targets: list[str] = []
+    live_feature_mask_mismatch_targets: list[str] = []
     dropped_block_regression_targets: list[str] = []
     stale_after_targets: list[str] = []
     target_rows: list[dict[str, Any]] = []
@@ -144,11 +146,17 @@ def _comparison(
         if not before_valid or not after_valid:
             invalid_targets.append(identity)
 
+        before_features = copy.deepcopy(before.get("feature_availability") or {})
+        after_features = copy.deepcopy(after.get("feature_availability") or {})
+        retained_features_compatible = before_features == after_features and bool(before_features)
+        if not retained_features_compatible:
+            retained_feature_mismatch_targets.append(identity)
+
         before_mask = baseline_feature_masks.get(identity)
         after_mask = after_feature_masks.get(identity)
-        feature_mask_compatible = before_mask is not None and before_mask == after_mask
-        if not feature_mask_compatible:
-            feature_mask_mismatch_targets.append(identity)
+        live_feature_mask_compatible = before_mask is not None and before_mask == after_mask
+        if not live_feature_mask_compatible:
+            live_feature_mask_mismatch_targets.append(identity)
 
         before_quality = (before.get("range_provenance") or {}).get("data_quality") or {}
         after_quality = (after.get("range_provenance") or {}).get("data_quality") or {}
@@ -182,7 +190,8 @@ def _comparison(
                     "coverage_ratio": before.get("range_coverage_ratio"),
                     "first_received_at": (before.get("range_provenance") or {}).get("first_received_at"),
                     "last_received_at": (before.get("range_provenance") or {}).get("last_received_at"),
-                    "feature_mask": before_mask,
+                    "feature_availability": before_features,
+                    "live_feature_mask_at_freeze": before_mask,
                     "dropped_blocks_cumulative": before_drops,
                 },
                 "after": {
@@ -191,13 +200,15 @@ def _comparison(
                     "coverage_ratio": after.get("range_coverage_ratio"),
                     "first_received_at": after_first_received,
                     "last_received_at": (after.get("range_provenance") or {}).get("last_received_at"),
-                    "feature_mask": after_mask,
+                    "feature_availability": after_features,
+                    "live_feature_mask_at_freeze": after_mask,
                     "dropped_blocks_cumulative": after_drops,
                     "post_baseline_receive_fence": after_is_new,
                 },
                 "analysis_valid_before": before_valid,
                 "analysis_valid_after": after_valid,
-                "feature_mask_compatible": feature_mask_compatible,
+                "retained_feature_availability_compatible": retained_features_compatible,
+                "live_feature_mask_compatible": live_feature_mask_compatible,
                 "dropped_block_regression": dropped_regression,
                 "active_ratio_before": before_active,
                 "active_ratio_after": after_active,
@@ -213,7 +224,7 @@ def _comparison(
         and topology_unchanged
         and not missing_targets
         and not invalid_targets
-        and not feature_mask_mismatch_targets
+        and not retained_feature_mismatch_targets
         and not dropped_block_regression_targets
         and not stale_after_targets
     )
@@ -229,8 +240,10 @@ def _comparison(
         warnings.append("Some requested targets are missing from Before or After.")
     if invalid_targets:
         warnings.append("Some targets do not have adequate retained coverage in both passes.")
-    if feature_mask_mismatch_targets:
-        warnings.append("Some targets used different live Analyzer feature masks at Before and After capture.")
+    if retained_feature_mismatch_targets:
+        warnings.append("Some targets retained different measurement families in Before and After, so their range evidence is not feature-compatible.")
+    if live_feature_mask_mismatch_targets:
+        warnings.append("Some live Analyzer feature masks differ at the Before/After freeze moments. This is audit context only; historical comparability is judged from retained range evidence.")
     if dropped_block_regression_targets:
         warnings.append("Some targets report a higher cumulative dropped-block count after the change.")
     if stale_after_targets:
@@ -244,7 +257,8 @@ def _comparison(
             "topology_unchanged": topology_unchanged,
             "missing_targets": missing_targets,
             "invalid_targets": invalid_targets,
-            "feature_mask_mismatch_targets": feature_mask_mismatch_targets,
+            "retained_feature_mismatch_targets": retained_feature_mismatch_targets,
+            "live_feature_mask_mismatch_targets": live_feature_mask_mismatch_targets,
             "dropped_block_regression_targets": dropped_block_regression_targets,
             "stale_after_targets": stale_after_targets,
             "warnings": warnings,
@@ -268,7 +282,8 @@ def _comparison(
             "delta_convention": "After - Before",
             "active_ratio": "Descriptive evidence only in same-range mode; it is not used as a proxy for passage identity.",
             "controlled_comparison": "Technical same-range comparability only. It does not mean the artistic change is better.",
-            "feature_mask": "Captured from the live Analyzer frame at each range-freeze step. Historical Song Memory does not yet retain a per-bin feature mask.",
+            "retained_feature_availability": "Derived from measurement families actually present in each retained range summary. It is the historical feature-compatibility gate for P4a.",
+            "live_feature_mask": "Captured from the live Analyzer frame at each freeze moment for audit context only. Song Memory does not yet retain an exact per-bin feature-mask bitfield.",
         },
     }
 
@@ -485,7 +500,7 @@ def audio_complete_range_verification(
     response["recommended_next_step"] = (
         "Use the measured same-range deltas plus specialized evidence to decide whether to keep, refine, or roll back the external DAW change."
         if closed_loop_complete
-        else "Resolve the reported coverage/new-pass/feature-mask/topology/readback gap before treating this as a complete verification."
+        else "Resolve the reported coverage/new-pass/retained-feature/topology/readback gap before treating this as a complete verification."
     )
     return response
 
