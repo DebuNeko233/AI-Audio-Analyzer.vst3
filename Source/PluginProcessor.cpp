@@ -282,6 +282,7 @@ void AIAnalyzerAudioProcessor::getStateInformation(juce::MemoryBlock& destData)
     xml.setAttribute("oscHost", currentHost);
     xml.setAttribute("oscPort", currentPort);
     xml.setAttribute("analysisProfile", getAnalysisProfileIndex());
+    xml.setAttribute("uiLanguage", getUiLanguageIndex());
     copyXmlToBinary(xml, destData);
 }
 
@@ -300,6 +301,10 @@ void AIAnalyzerAudioProcessor::setStateInformation(const void* data, int sizeInB
     setAnalysisProfileIndex(
         xml->getIntAttribute("analysisProfile", static_cast<int>(aianalyzer::AnalysisProfile::Full)),
         false);
+
+    // GUI language is a local preference, not a host automation parameter.
+    // Older projects default to English for backwards-compatible presentation.
+    setUiLanguageIndex(xml->getIntAttribute("uiLanguage", 0));
 }
 
 void AIAnalyzerAudioProcessor::setAnalyzerConfig(const juce::String& newInstanceId,
@@ -367,6 +372,16 @@ void AIAnalyzerAudioProcessor::setAnalysisProfileIndex(int profileIndex, bool no
     lastWorkerProfileIndex.store(profileIndex, std::memory_order_relaxed);
     analysisWorker.setAnalysisProfile(
         static_cast<aianalyzer::AnalysisProfile>(profileIndex));
+}
+
+int AIAnalyzerAudioProcessor::getUiLanguageIndex() const noexcept
+{
+    return juce::jlimit(0, 1, uiLanguageIndex.load(std::memory_order_relaxed));
+}
+
+void AIAnalyzerAudioProcessor::setUiLanguageIndex(int languageIndex) noexcept
+{
+    uiLanguageIndex.store(juce::jlimit(0, 1, languageIndex), std::memory_order_relaxed);
 }
 
 bool AIAnalyzerAudioProcessor::getLatestAnalysis(aianalyzer::AnalysisFrame& frame) const
