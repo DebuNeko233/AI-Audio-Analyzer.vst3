@@ -118,7 +118,7 @@ audio_section_profile(...)
 
 这些 A/B/C **不是自动识别的 Verse / Chorus / Drop 名称**。如果 DAW 中有 Marker、Playlist Label、Arrangement Metadata 或用户明确提供了结构，应优先使用这些精确信息。
 
-MCP 1.2 当前共有 **34 个工具**。
+MCP 1.2 当前共有 **36 个工具**。
 
 ## Analysis Profile
 
@@ -140,7 +140,25 @@ Full      Mix + Semantic
 
 `Full` 是兼容旧工程的默认值。
 
-Analyzer MCP 负责读取/验证 Profile；真实宿主参数写入由 DAW Control MCP 负责。
+当前 Analyzer MCP 可以直接控制 live VST3 自己的 Analysis Profile：
+
+```text
+audio_set_analysis_profile(track, profile)
+audio_set_project_analysis_profile(profile, tracks=None)
+```
+
+这条控制链路只走本机 loopback，并按 live Analyzer 的 Runtime UUID 定位实例；真正的 `analysis_profile` 宿主参数会在非实时 Audio Callback 的路径上应用，并返回明确 ACK。
+
+必须区分：
+
+```text
+control_acknowledged  目标 VST3 已接受/应用 Profile 请求
+telemetry_confirmed   新的测量帧也已经回报目标 Profile
+```
+
+即使 DAW 停止播放，也可以收到控制 ACK；而新的 Telemetry 通常需要宿主继续进行音频处理。
+
+这也是 Analyzer MCP **唯一允许的写入能力**。它不能修改 EQ、Compression、Gain、Pan、Routing、Synth、Automation、Arrangement 或其他 DAW/插件状态。所有会改变声音或工程状态的写入，以及真实宿主回读，仍然由真正的 DAW Control MCP 负责。
 
 ## 推荐第一次使用流程
 
@@ -153,6 +171,8 @@ audio_project_status()
 → 只对相关 Section 调用 audio_section_profile()
 → 再按问题选择 Temporal / Masking / Stereo / Tonal 工具
 ```
+
+如果所需证据家族当前被关闭，应只切换到满足任务要求的最低 Analysis Profile，而不是把所有 Analyzer 都设为 Full。
 
 Analyzer 返回的是测量证据，不会自动决定 EQ、Compression、Sidechain、Stereo Processing、母带响度目标、歌曲 Key 或 Verse/Chorus/Drop 名称。
 
@@ -170,6 +190,12 @@ Analyzer 返回的是测量证据，不会自动决定 EQ、Compression、Sidech
 - 优先使用生成的 `cherry-studio-mcp.json`，不要自己猜 MCP 路径；
 - 确认 MCP Server 已启用给同一个导入 Skill 的 Agent；
 - 刷新/重启 Agent 会话。
+
+如果 Analyzer Profile Control 工具超时：
+
+- 确认安装的 VST3 与 MCP Runtime 来自同一套当前 Release；
+- 旧版 VST3 没有本机 Profile Control Receiver；
+- 没有 ACK 时绝不能把请求当作成功写入。
 
 如果 macOS 阻止安装器，右键 `Install.command` → **打开**。当前包未做 Apple Notarization。
 
