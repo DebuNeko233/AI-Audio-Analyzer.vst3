@@ -1,6 +1,6 @@
 ---
 name: ai-analyzer-flstudio
-description: Technical usage skill for Cherry Studio + AI Audio Analyzer MCP. Teaches deterministic Analyzer discovery/binding, adaptive Analysis Profile control, transport-aware Song Memory, explainable song-section structure, Track Story across sections, latency/data-quality handling, measurement validity, evidence semantics, performance telemetry, and controlled Before/After verification around externally controlled DAW changes. It does not prescribe a mixing style, LUFS target, EQ/compression/sidechain/stereo recipe, semantic section label, key change, harmony edit, or aesthetic decision.
+description: Technical usage skill for Cherry Studio + AI Audio Analyzer MCP. Teaches deterministic Analyzer discovery/binding, adaptive Analysis Profile control, transport-aware Song Memory, explainable song-section structure, Track Story across sections, bounded section-aware relationship shortlisting, latency/data-quality handling, measurement validity, evidence semantics, performance telemetry, and controlled Before/After verification around externally controlled DAW changes. It does not prescribe a mixing style, LUFS target, EQ/compression/sidechain/stereo recipe, semantic section label, key change, harmony edit, or aesthetic decision.
 ---
 
 # AI Audio Analyzer MCP Usage Skill
@@ -10,7 +10,7 @@ Use this Skill for two things only:
 1. call **AI Audio Analyzer MCP** correctly;
 2. interpret returned measurements/evidence without overstating them.
 
-It is **not** a mixing, mastering, harmony, arrangement, tuning, or style guide. Measurements, section families, Track Story, transport memory, and Analysis Profiles do not imply a mandatory processor, parameter value, semantic section name, track role, key change, chord edit, stereo action, or aesthetic choice.
+It is **not** a mixing, mastering, harmony, arrangement, tuning, or style guide. Measurements, section families, Track Story, relationship shortlists, transport memory, and Analysis Profiles do not imply a mandatory processor, parameter value, semantic section name, track role, key change, chord edit, stereo action, or aesthetic choice.
 
 ## 1. Start with project state
 
@@ -51,6 +51,7 @@ Then choose the smallest follow-up:
 ```text
 audio_track_story(track, map_id)          # one track across the structure
 audio_section_profile(section_id, map_id) # many tracks inside one section
+audio_section_relationships(map_id)       # bounded pair shortlist across sections/families
 ```
 
 Use `audio_song_timeline()` only when the question still requires raw DAW-time evolution.
@@ -138,7 +139,7 @@ Masking with temporal interaction                 Mix
 Chroma / tonal / single-F0 evidence               Full
 ```
 
-A section map or Track Story can use whichever evidence was actually captured. Missing feature families remain unavailable rather than becoming zero-valued structural features.
+A section map, Track Story, or section-relationship shortlist can use whichever evidence was actually captured. Missing feature families remain unavailable rather than becoming zero-valued structural features.
 
 Current control-capable Analyzer builds expose:
 
@@ -213,8 +214,10 @@ audio_project_status()
 → audio_section_map()
 → audio_track_story() for tracks whose behavior across sections matters
 → audio_section_profile() for sections that need multi-track drill-down
+→ audio_section_relationships() when a bounded cross-track shortlist across sections/families is useful
 → audio_song_overview() when a compact pass-level summary helps
 → audio_song_timeline() only when raw time evolution is still required
+→ replay/select a target historical section before using recent-window pair tools as section-specific evidence
 → drill into Temporal / Masking / Stereo / Tonal evidence only as needed
 ```
 
@@ -270,7 +273,7 @@ Prefer the coarsest resolution that answers the question.
 
 Detailed rules: `references/song-memory.md`.
 
-## 5. Explainable song structure and Track Story
+## 5. Explainable song structure, Track Story, and section-aware relationships
 
 Use the structure layer to compress a captured song into boundaries and recurring contexts before doing detailed mix analysis.
 
@@ -418,6 +421,75 @@ per-track data quality
 
 Then choose only the deeper evidence that the question needs.
 
+### Section-aware relationships: bounded pair shortlist
+
+```text
+audio_section_relationships(
+  map_id=None,
+  max_pairs=12,
+  max_tracks=32,
+  include_master=False,
+  min_activity_overlap=0.15,
+  min_shortlist_priority=0.18
+)
+```
+
+Use this when the question is **which track pairs change across sections/families and merit deeper inspection**, not when the user already named one exact pair and only wants a recent-window measurement.
+
+The shortlist combines available retained evidence from:
+
+```text
+common activity
+coarse spectral-shape overlap
+relative RMS proximity
+stereo-width proximity
+coverage guards
+```
+
+It is deliberately bounded:
+
+```text
+Master excluded by default
+bounded tracks considered
+bounded active/covered candidates per section
+bounded returned pairs
+```
+
+`shortlist_priority` is only an inspection-ranking heuristic. It is **not**:
+
+```text
+masking probability
+audibility probability
+mix-problem probability
+quality score
+processing recommendation
+```
+
+Preserve directional evidence such as `rms_db_b_minus_a`, `stereo_width_b_minus_a`, and `spectral_region_b_minus_a_db` as **B - A**. Direction does not imply which track should be processed.
+
+Use family presence/absence and adjacent `entered_shortlist` / `left_shortlist` / relationship-change records as context evidence only. A pair appearing in one family and disappearing in another does not prove that either section is wrong.
+
+Coverage rules:
+
+```text
+missing coverage != silence
+insufficient pair coverage != no relationship
+insufficient pair coverage must not create a false conflict
+```
+
+Current detailed `audio_masking_evidence()`, `audio_stereo_compare()`, and `audio_temporal_compare()` tools are recent-window based. They are **not yet historical Section-range tools**. Before using them as deeper evidence for a historical section:
+
+```text
+identify the target section/time range
+→ use the real DAW-control layer to select/replay that range when available
+→ collect fresh comparable recent-window evidence
+→ then call the detailed pair tool
+```
+
+Do not silently use whatever is currently playing and label it as evidence for an older section.
+
+Detailed rules: `references/section-relationships.md`.
+
 `map_id` is bounded MCP-session memory, not a persistent project ID.
 
 Detailed structure rules: `references/section-structure.md`.
@@ -483,6 +555,15 @@ Track Story:
   sections[].data_quality
   sections[].delta_from_previous
   warnings
+
+Section Relationships:
+  pairs[].selected_transport_epochs
+  pairs[].section_evidence[].coverage_ratio_a
+  pairs[].section_evidence[].coverage_ratio_b
+  pairs[].section_evidence[].evidence_available
+  pairs[].section_evidence[].status
+  pairs[].family_presence
+  warnings
 ```
 
 The **feature mask is authoritative**; disabled measurements are unavailable even if append-only compatibility positions physically exist.
@@ -524,12 +605,13 @@ audio_song_status()
 audio_song_overview()
 ```
 
-Structural compression / section-aware single-track evolution:
+Structural compression / section-aware evolution / bounded relationships:
 
 ```text
 audio_section_map()
 audio_track_story(track, map_id)
 audio_section_profile(section_id, map_id)
+audio_section_relationships(map_id)
 ```
 
 Raw historical timeline only when needed:
@@ -686,7 +768,11 @@ Always keep these distinctions:
 - Track Story `active_ratio` is observed signal presence, not mute state or musical role.
 - Track Story adjacent deltas are descriptive differences, not processing instructions.
 - Track Story family spreads are independent dimensions, not one consistency/quality score.
+- Section Relationship `shortlist_priority` is inspection priority, not masking/mix-problem probability or quality.
+- a Section Relationship entering/leaving the shortlist is a context change, not proof that a section is wrong.
+- B-minus-A relationship descriptors preserve direction, not which track should be processed.
 - a Song Memory coverage gap is not silence or a section boundary.
+- insufficient pair coverage is missing evidence, not absence of interaction.
 - `map_id` is session memory, not a persistent project/arrangement ID.
 - topology fingerprint is not a persistent DAW-project hash.
 - `host_readback` is caller-supplied control-MCP evidence, not Analyzer-verified host state.
@@ -705,6 +791,7 @@ references/performance-evidence.md
 references/song-memory.md
 references/section-structure.md
 references/track-story.md
+references/section-relationships.md
 references/masking-evidence.md
 references/stereo-evidence.md
 references/tonal-evidence.md
@@ -722,6 +809,7 @@ read Analyzer state
 remember transport-aligned evidence
 infer explainable structural boundaries / neutral recurrence families
 summarize one Analyzer track across those sections (Track Story)
+shortlist bounded section/family track relationships for deeper inspection
 compare
 identity/binding evidence
 performance/profile readback
@@ -742,7 +830,7 @@ actual host state readback for those external changes
 
 The Analyzer's own Profile control is a narrow performance exception because it changes measurement computation only and never changes the audio signal. Do not expand that exception into general DAW control.
 
-Never invent control tools, controls, notes, write success, profile state, track roles, semantic section labels, or readback values.
+Never invent control tools, controls, notes, write success, profile state, track roles, semantic section labels, relationship certainty, or readback values.
 
 ## 13. Output discipline
 
@@ -753,6 +841,7 @@ instance / selector
 DAW-time range / transport epoch when Song Memory is used
 section_id / family_id / map_id when structure evidence is used
 Track Story coverage and delta/family context when used
+Section Relationship track A/B identity, selected epochs, coverage and shortlist context when used
 Analysis Profile / enabled feature group when relevant
 measurement window or timeline resolution
 signal validity / active ratio
@@ -772,6 +861,7 @@ Do not present these as Analyzer-measured facts:
 - a genre must hit a fixed LUFS number;
 - a frequency must be cut/boosted by a specific amount;
 - masking evidence automatically requires EQ/sidechain;
+- a section-relationship shortlist automatically means audible masking or a mix problem;
 - stereo evidence automatically requires mono/narrowing/widening/phase rotation;
 - the top tonal-center candidate is certainly the song key;
 - an F0 candidate is certainly the played note;
