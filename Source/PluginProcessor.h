@@ -3,12 +3,16 @@
 #include <JuceHeader.h>
 #include <atomic>
 #include <cstdint>
+#include <deque>
+#include <memory>
 #include <mutex>
 
 #include "AnalysisFrame.h"
 #include "AnalysisWorker.h"
+#include "AnalyzerControlChannel.h"
 
-class AIAnalyzerAudioProcessor final : public juce::AudioProcessor
+class AIAnalyzerAudioProcessor final : public juce::AudioProcessor,
+                                       private juce::AsyncUpdater
 {
 public:
     AIAnalyzerAudioProcessor();
@@ -54,6 +58,18 @@ public:
     std::uint64_t getDroppedBlocks() const noexcept;
 
 private:
+    struct ControlProfileRequest
+    {
+        int profileIndex = 3;
+        juce::String requestId;
+        int replyPort = 0;
+    };
+
+    void enqueueControlProfileRequest(int profileIndex,
+                                      juce::String requestId,
+                                      int replyPort);
+    void handleAsyncUpdate() override;
+
     mutable std::mutex configMutex;
     juce::String instanceId { "Track" };
     juce::String oscHost { "127.0.0.1" };
@@ -76,6 +92,13 @@ private:
     std::uint32_t transportEpoch = 0;
 
     aianalyzer::AnalysisWorker analysisWorker;
+    std::unique_ptr<aianalyzer::AnalyzerControlChannel> controlChannel;
+
+    // OSC control arrives on JUCE's network thread. Queue it here and use
+    // AsyncUpdater so host-visible parameter mutation always happens on the
+    // message thread, never on the network or audio thread.
+    std::mutex controlRequestMutex;
+    std::deque<ControlProfileRequest> pendingControlRequests;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(AIAnalyzerAudioProcessor)
 };
