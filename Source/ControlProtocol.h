@@ -29,16 +29,13 @@ constexpr std::array<int, kControlCandidateCount>
 controlCandidatePorts(std::string_view runtimeId) noexcept
 {
     std::array<int, kControlCandidateCount> ports {};
-    const auto start = static_cast<int>(controlFnv1a(runtimeId) % kControlPortSpan);
+    const auto digest = controlFnv1a(runtimeId);
+    const auto start = static_cast<int>(digest % kControlPortSpan);
 
     // Keep the step coprime with 40,000 (2^6 * 5^4), so the deterministic
     // probe sequence does not cycle through a small subset of the port range.
-    std::uint32_t step = 1u + controlFnv1a(std::string_view {}) % kControlStepModulo;
-
-    // controlFnv1a cannot directly concatenate at constexpr time. Derive a
-    // second independent-enough stream by mixing the first hash before the
-    // coprime adjustment. Python control_tools.py mirrors this exact operation.
-    step = 1u + ((controlFnv1a(runtimeId) ^ 0x9e3779b9u) % kControlStepModulo);
+    // Python control_tools.py mirrors this exact operation.
+    std::uint32_t step = 1u + ((digest ^ 0x9e3779b9u) % kControlStepModulo);
     while ((step % 2u) == 0u || (step % 5u) == 0u)
         ++step;
 
