@@ -506,7 +506,7 @@ def main() -> None:
         family_a = second < 24 or second >= 48
         master_bands = [value + (0.0 if family_a else 9.0) for value in shape_a]
         section_chroma = chroma_c_major if family_a else chroma_g_major
-        for offset in (0.05, 0.15, 0.25):
+        for offset in (0.05, 0.15, 0.25, 0.35):
             t = second + offset
             core._on_frame(
                 "/aianalyzer/frame",
