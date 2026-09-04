@@ -1,6 +1,6 @@
 # AI Audio Analyzer MCP Reference
 
-This reference describes MCP tools, selector rules, Analyzer-owned Analysis Profile control/readback, transport-aware song memory, explainable section structure, Track Story, call order, validity checks, controlled verification, and OSC compatibility.
+This reference describes MCP tools, selector rules, Analyzer-owned Analysis Profile control/readback, transport-aware song memory, explainable section structure, Track Story, section-aware relationship shortlisting, call order, validity checks, controlled verification, and OSC compatibility.
 
 Related semantics:
 
@@ -10,13 +10,14 @@ performance-evidence.md
 song-memory.md
 section-structure.md
 track-story.md
+section-relationships.md
 masking-evidence.md
 stereo-evidence.md
 tonal-evidence.md
 verification-evidence.md
 ```
 
-Current MCP 1.2 exposes **37 tools**:
+Current MCP 1.2 exposes **38 tools**:
 
 ```text
 audio_bridge_status()
@@ -53,6 +54,7 @@ audio_song_overview(transport_epoch=None, max_tracks=32)
 audio_section_map(reference_track=None, transport_epoch=None, min_section_seconds=8, sensitivity=0.55, family_similarity=0.78, max_sections=48, max_tracks=32)
 audio_section_profile(section_id, map_id=None, max_tracks=32, max_related=8)
 audio_track_story(track, map_id=None)
+audio_section_relationships(map_id=None, max_pairs=12, max_tracks=32, include_master=False, min_activity_overlap=0.15, min_shortlist_priority=0.18)
 audio_begin_verification(label, seconds=5, target_selectors=None)
 audio_complete_verification(verification_id, seconds=0, change_summary="", host_readback="")
 audio_verification_status(verification_id="")
@@ -60,7 +62,7 @@ audio_verification_status(verification_id="")
 
 ## Recommended hierarchy
 
-Do not call all 37 tools by default.
+Do not call all 38 tools by default.
 
 ```text
 project readiness
@@ -74,6 +76,7 @@ song structure / recurring arrangement context
 → audio_section_map()
 → audio_track_story() when one track's evolution across sections matters
 → audio_section_profile() when many tracks inside one section matter
+→ audio_section_relationships() when a bounded cross-track shortlist across sections/families matters
 → audio_song_timeline() only when raw track/time evolution is still needed
 
 many instances / performance concern
@@ -104,7 +107,7 @@ external DAW change + measured verification
 → audio_complete_verification()
 ```
 
-The LLM is not expected to poll the Analyzer continuously. Song Memory exists so the Analyzer can keep observing while the model is thinking or waiting for another tool. The section layer compresses remembered evidence into structural boundaries and recurring neutral families; Track Story then compresses one Analyzer instance's behavior across those contexts before the LLM chooses deeper tools.
+The LLM is not expected to poll the Analyzer continuously. Song Memory exists so the Analyzer can keep observing while the model is thinking or waiting for another tool. The section layer compresses remembered evidence into structural boundaries and recurring neutral families; Track Story compresses one Analyzer instance's behavior across those contexts; section-aware relationships then provide a bounded shortlist of pairs worth deeper inspection before the LLM chooses recent-window pair tools.
 
 ## Deterministic Identify mapping
 
@@ -288,7 +291,7 @@ Temporal                             Mix
 Tonal / chroma / harmonic            Full
 ```
 
-A section map or Track Story can use whichever evidence was actually captured. Missing feature families remain missing rather than being converted into zero-valued structure/story evidence.
+A section map, Track Story, or section-relationship shortlist can use whichever evidence was actually captured. Missing feature families remain missing rather than being converted into zero-valued structure/story/relationship evidence.
 
 ## Transport-aware song tools
 
@@ -350,9 +353,9 @@ Transport coordinates are estimates corrected for queued FIFO audio and FFT-wind
 
 Detailed semantics: `song-memory.md`.
 
-## Explainable section structure and Track Story
+## Explainable section structure, Track Story, and relationships
 
-The section and Track Story layers consume retained Song Memory; they do not add OSC fields or realtime DSP work.
+These layers consume retained Song Memory; they do not add OSC fields or realtime DSP work.
 
 ### `audio_section_map()`
 
@@ -470,9 +473,73 @@ A/B/C != Intro/Verse/Chorus/Drop
 descriptor delta != required processing move
 ```
 
-Section maps and Track Stories are bounded MCP-session state and are not persistent project identifiers/history.
+### `audio_section_relationships()`
 
-Detailed semantics: `section-structure.md` and `track-story.md`.
+Use after `audio_section_map()` when the question is which **bounded track pairs change across sections/families and deserve deeper inspection**.
+
+```text
+audio_section_relationships(
+  map_id=None,
+  max_pairs=12,
+  max_tracks=32,
+  include_master=False,
+  min_activity_overlap=0.15,
+  min_shortlist_priority=0.18
+)
+```
+
+The first pass is intentionally bounded and explainable:
+
+```text
+adequate retained coverage
++ common activity
++ coarse spectral-shape overlap
++ relative RMS proximity
++ stereo-width proximity
+→ shortlist_priority
+```
+
+Master is excluded by default to avoid trivial Master-vs-every-track pairs. The implementation also caps active/covered candidates considered inside each section and caps returned project-level pairs.
+
+Important returned evidence includes:
+
+```text
+map_id
+candidate_pair_count
+returned_pair_count
+pairs[].track_a / track_b
+pairs[].selected_transport_epochs
+pairs[].section_evidence[]
+pairs[].section_evidence[].coverage_ratio_a / coverage_ratio_b
+pairs[].section_evidence[].active_ratio_a / active_ratio_b
+pairs[].section_evidence[].shortlist_priority
+pairs[].section_evidence[].rms_db_b_minus_a
+pairs[].section_evidence[].stereo_width_b_minus_a
+pairs[].section_evidence[].spectral_region_b_minus_a_db
+pairs[].family_presence[]
+pairs[].adjacent_changes[]
+warnings
+```
+
+`shortlist_priority` is **inspection priority only**. It is not:
+
+```text
+masking probability
+audibility probability
+mix-problem probability
+quality score
+processing recommendation
+```
+
+B-minus-A fields preserve directionality but do not establish which track should change. A pair entering/leaving the shortlist across families is descriptive context change, not proof that one section is wrong.
+
+Current detailed masking/stereo/temporal pair tools are recent-window based. Until transport-anchored historical same-range pair analysis exists, replay/select the relevant section before using those tools as deeper evidence for that historical section.
+
+Sparse or missing coverage must remain unavailable evidence and must never create a false relationship/conflict.
+
+Section maps, Track Stories and relationship results are bounded MCP-session state and are not persistent project identifiers/history.
+
+Detailed semantics: `section-structure.md`, `track-story.md`, and `section-relationships.md`.
 
 ## Core / project tools
 
@@ -726,7 +793,7 @@ The frame remains append-only:
 149        "1.2" marker
 ```
 
-Existing indexes `0..149` are unchanged by Analyzer-owned Profile control, section structure, and Track Story.
+Existing indexes `0..149` are unchanged by Analyzer-owned Profile control, section structure, Track Story, and section-aware relationships.
 
 Feature-mask bits:
 
