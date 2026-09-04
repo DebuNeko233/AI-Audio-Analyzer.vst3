@@ -83,7 +83,8 @@ void AnalyzerControlChannel::oscMessageReceived(const juce::OSCMessage& message)
 
 void AnalyzerControlChannel::sendProfileAck(const juce::String& requestId,
                                             int profileIndex,
-                                            int replyPort)
+                                            int replyPort,
+                                            bool changed)
 {
     if (requestId.isEmpty() || replyPort < 1 || replyPort > 65535)
         return;
@@ -97,6 +98,9 @@ void AnalyzerControlChannel::sendProfileAck(const juce::String& requestId,
     message.addString(requestId);
     message.addInt32(juce::jlimit(0, 3, profileIndex));
     message.addString(juce::String(kControlRevision.data()));
+    // Append-only within local control revision 1. Older MCP readers that only
+    // inspect the first four ACK arguments remain compatible.
+    message.addInt32(changed ? 1 : 0);
     sender.send(message);
 }
 } // namespace aianalyzer
