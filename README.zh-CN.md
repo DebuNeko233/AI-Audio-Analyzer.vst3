@@ -4,7 +4,7 @@
 
 **AI Audio Analyzer** 是一个面向 AI / LLM 音乐制作工作流的 JUCE VST3 机器可读音频测量层。
 
-插件直接在 DAW 内测量音频，通过 OSC 将紧凑数据发送给 Analyzer MCP Bridge，再由 Cherry Studio 或其他 MCP 客户端结构化读取电平、响度、频谱、立体声、时间关系、遮蔽、调性、工程概览、DAW 时间轴整曲记忆、可解释歌曲结构、Track Story、A/B、性能状态和闭环验证证据。
+插件直接在 DAW 内测量音频，通过 OSC 将紧凑数据发送给 Analyzer MCP Bridge，再由 Cherry Studio 或其他 MCP 客户端结构化读取电平、响度、频谱、立体声、时间关系、遮蔽、调性、工程概览、DAW 时间轴整曲记忆、可解释歌曲结构、Track Story、Section-aware Mix Relationships、A/B、性能状态和闭环验证证据。
 
 当前产品版本：**1.2.0**。
 
@@ -13,7 +13,7 @@
 ```text
 AI Audio Analyzer
 ├─ VST3    DAW 内实时安全测量探针 + Transport Context
-├─ MCP     测量 / Analyzer 档位控制 / Song Memory / 结构 / Track Story / 比较 / 验证
+├─ MCP     测量 / Analyzer 档位控制 / Song Memory / 结构 / Relationships / 比较 / 验证
 └─ Skill   面向 LLM 的英文 MCP 调用与证据语义说明
 ```
 
@@ -54,6 +54,7 @@ FL Studio / DAW
                  ├─ 1 秒 Song Memory / 多分辨率聚合
                  ├─ 可解释 Section Boundary / A-B-C 重复结构家族
                  ├─ 单轨跨 Section/Family 的 Track Story
+                 ├─ 有界的 Section-aware 跨轨关系 Shortlist
                  ├─ Section Profile / Project Overview / Snapshot A-B
                  ├─ Temporal / Masking / Stereo / Tonal Evidence
                  └─ Closed-loop Verification
@@ -85,6 +86,7 @@ LLM **不属于实时测量链路**。模型在思考、调用工具或等待 DA
 - 多尺度可解释歌曲段落边界检测和中性的 A/B/C 重复结构家族；
 - 即使不同 Analyzer 的实例局部 Epoch 数字不同，也能按 DAW 时间重叠选择对应 Pass，生成 Section 级每轨 Profile；
 - 单轨跨 Section 的 Track Story，包括 Coverage-aware 相邻变化、同 Family 各维度变化范围和相对极值；
+- 有界的 Section-aware Pair Shortlist，用于说明某对轨的测量关系在哪些 Section/Family 出现、消失或发生变化，但不自动判定为“混音问题”；
 - Project Overview、Snapshot A/B、Masking Evidence、Controlled Verification 和性能遥测。
 
 ### Signal Validity
@@ -204,7 +206,7 @@ Worker Load、FIFO Fill、Estimated Analysis Lag、Dropped Blocks
 
 `OSC TX -> host:port` 只表示**测量帧**发送目标，不等于“MCP 已连接”。Analyzer Profile Control 使用独立的本机命令/ACK 链路。
 
-GUI 仍以观察和运行状态为主。Song Memory、Section Detection、Track Story、高层证据推理以及通用 DAW 写入不会搬进实时插件编辑器。
+GUI 仍以观察和运行状态为主。Song Memory、Section Detection、Track Story、Relationship Reasoning、高层证据推理以及通用 DAW 写入不会搬进实时插件编辑器。
 
 ## 面向 LLM 延迟的 Song Memory
 
@@ -247,7 +249,7 @@ Song Memory 使用 100 ms Coverage Slot，因此把 1 秒 Bin 聚合成 5/10/30 
 
 ## 可解释歌曲结构理解层
 
-第一版歌曲结构层完全建立在已有 Song Memory 上，**不增加实时 DSP，也不修改 OSC 1.2 Analysis Frame**。
+歌曲结构/推理层完全建立在已有 Song Memory 上，**不增加实时 DSP，也不修改 OSC 1.2 Analysis Frame**。
 
 ```text
 Song Memory
@@ -260,45 +262,16 @@ Song Memory
 → 中性 A / B / C / ... 重复结构家族
 ```
 
-工具：
+结构工具：
 
 ```text
-audio_section_map(
-  reference_track=None,
-  transport_epoch=None,
-  min_section_seconds=8,
-  sensitivity=0.55,
-  family_similarity=0.78,
-  max_sections=48,
-  max_tracks=32
-)
-
-audio_section_profile(section_id, map_id=None, max_tracks=32, max_related=8)
+audio_section_map(...)
+audio_section_profile(...)
 ```
-
-Boundary Detection 会综合可用的跨轨活动、Energy/Loudness、Spectral Balance、Chroma、Stereo、Dynamics 和 Temporal Change。
 
 `boundary strength` 只是**结构变化证据**，不是“这里一定是正式段落边界”的概率。
 
-Section 会得到类似：
-
-```text
-S01  A
-S02  B
-S03  C
-S04  B
-S05  C
-```
-
-这里的 A/B/C 只表示结构上的重复/相似，**绝不自动等于**：
-
-```text
-A = Intro
-B = Verse
-C = Chorus
-```
-
-如果 DAW MCP 能提供 Marker、Playlist Label、Pattern Name、Arrangement Metadata、MIDI/Project Annotation，或者用户明确给出了结构，那么这些精确工程信息优先用于命名。
+A/B/C 只表示结构上的重复/相似，**绝不自动等于 Intro / Verse / Chorus / Drop**。如果 DAW MCP 能提供 Marker、Playlist Label、Pattern Name、Arrangement Metadata、MIDI/Project Annotation，或者用户明确给出了结构，那么这些精确工程信息优先用于命名。
 
 跨轨 Section 分析不会要求各实例 Epoch 数字相同。它会在同一 DAW 时间范围内为每个支持轨选择覆盖最好的保留 Pass。
 
@@ -316,6 +289,29 @@ audio_track_story(track, map_id=None)
 
 Track Story 只描述证据：缺少 Coverage 不等于不活动，低 `active_ratio` 不自动等于 Muted，A/B/C 不等于语义段落名，任何 Delta 也不自动要求 EQ、Compression 或 Stereo 操作。
 
+### Section-aware Mix Relationships
+
+跨轨关系使用：
+
+```text
+audio_section_relationships(
+  map_id=None,
+  max_pairs=12,
+  max_tracks=32,
+  include_master=False,
+  min_activity_overlap=0.15,
+  min_shortlist_priority=0.18
+)
+```
+
+这个工具的目标是**有界筛选值得继续检查的 Pair/Section**，而不是输出全工程所有 Pair。它先要求足够 Coverage 和共同活动，再限制每个 Section 的候选轨数量，最后只返回优先级较高的关系。默认不包含 Master，避免 Master-vs-every-track 这种天然关系占满结果。
+
+`shortlist_priority` 由共同活动以及可用的粗频谱形状、RMS Level 和 Stereo Width 接近程度组合得到。它**不是** Masking Probability、Audibility Probability、Mix-problem Score、Quality Score，也不是处理指令。
+
+结果会保留 A/B 各自的 Coverage、Activity、RMS、Width、所选 Transport Epoch，以及方向明确的 `B - A` 证据，并指出某个 Pair 在哪些 Section/Family 进入 Shortlist、离开 Shortlist 或发生变化。
+
+当前 `audio_masking_evidence()`、`audio_temporal_compare()`、`audio_stereo_compare()` 等详细 Pair 工具仍然是 Recent-window。若 `audio_section_relationships()` 指出历史 `S02` 值得深挖，应先让 DAW 重放/定位到 S02，再调用详细 Pair 工具。不能因为 Shortlist 提到了 S02，就把几秒后当前窗口的结果冒充 S02 的历史深度证据。
+
 推荐整曲调用顺序：
 
 ```text
@@ -324,9 +320,11 @@ audio_project_status()
 → 播放/采集足够的目标 Pass
 → audio_section_map()
 → 关注某一条轨跨段变化时调用 audio_track_story()
+→ 关注跨轨关系变化时调用 audio_section_relationships()
+→ 选择真正相关的 Section + Pair
+→ 需要深度 Pair Evidence 时重放/定位目标 Section
+→ 再调用必要的 Masking / Stereo / Temporal 工具
 → 关注某一 Section 的多轨上下文时调用 audio_section_profile()
-→ 仍需原始时间变化时才调用 audio_song_timeline()
-→ 再针对具体关系调用 Temporal / Masking / Stereo / Tonal
 ```
 
 ## 其他证据层
@@ -392,7 +390,7 @@ Analyzer 自己的 Profile Control ACK 只确认 Analyzer 配置请求，不替�
 
 ## MCP 工具
 
-MCP **1.2 共 37 个工具**。高层整曲/结构/Profile 控制入口包括：
+MCP **1.2 共 38 个工具**。高层整曲/结构/Profile 控制入口包括：
 
 ```text
 audio_set_analysis_profile(...)
@@ -403,9 +401,10 @@ audio_song_timeline(...)
 audio_section_map(...)
 audio_section_profile(...)
 audio_track_story(...)
+audio_section_relationships(...)
 ```
 
-不要为了“完整”机械调用全部 37 个工具。应先高层理解整曲/Section，再按具体问题下钻。
+不要为了“完整”机械调用全部 38 个工具。应先高层理解整曲/Section，再按具体问题下钻。
 
 ## 用户安装
 
@@ -457,26 +456,28 @@ Product version             1.2.0
 MCP version                 1.2
 OSC analysis protocol       1.2
 Analyzer control protocol   本机 revision 1
-MCP tools                   37
+MCP tools                   38
 ```
 
 内部模块：
 
 ```text
-mcp/server.py             启动 / Self-test / Tool Registry
-mcp/analyzer_core.py      OSC State / Identity / Binding / Base Tools
-mcp/project_tools.py      Project Overview / Snapshot A-B
-mcp/temporal_tools.py     Temporal
-mcp/masking_tools.py      Masking Evidence
-mcp/stereo_tools.py       Mid/Side + Stereo
-mcp/semantic_tools.py     Chroma / Tonal-center / Harmonic Evidence
-mcp/performance_tools.py  Adaptive Profile / Worker Telemetry
-mcp/control_tools.py      本机 Analyzer Analysis Profile 控制
-mcp/song_tools.py         DAW Transport / Pass Memory / Song Summaries
-mcp/section_tools.py      Section Boundary / Recurrence / Section Profile
-mcp/track_story_tools.py  单轨跨 Section/Family 演化摘要
-mcp/verification_tools.py Controlled Verification
-mcp/ci_regression.py      仓库内 Synthetic Regression
+mcp/server.py                     启动 / Self-test / Tool Registry
+mcp/analyzer_core.py              OSC State / Identity / Binding / Base Tools
+mcp/project_tools.py              Project Overview / Snapshot A-B
+mcp/temporal_tools.py             Temporal
+mcp/masking_tools.py              Masking Evidence
+mcp/stereo_tools.py               Mid/Side + Stereo
+mcp/semantic_tools.py             Chroma / Tonal-center / Harmonic Evidence
+mcp/performance_tools.py          Adaptive Profile / Worker Telemetry
+mcp/control_tools.py              本机 Analyzer Analysis Profile 控制
+mcp/song_tools.py                 DAW Transport / Pass Memory / Song Summaries
+mcp/section_tools.py              Section Boundary / Recurrence / Section Profile
+mcp/track_story_tools.py          单轨跨 Section/Family 演化摘要
+mcp/section_relationship_tools.py 有界 Section-aware Pair Shortlist
+mcp/verification_tools.py         Controlled Verification
+mcp/ci_regression.py              仓库内 Synthetic Regression
+mcp/relationship_regression.py    仓库内 P2 End-to-end Regression
 ```
 
 ## OSC Analysis Protocol
@@ -519,7 +520,7 @@ Scope            仅 Analysis Profile
 ACK              Request-scoped 显式 ACK
 ```
 
-因此既有 `0..149` 索引没有被重新解释或追加。
+Track Story 和 Section Relationships 都只使用 MCP 已保留的证据，因此既有 `0..149` 索引没有被重新解释或追加。
 
 ## License
 
