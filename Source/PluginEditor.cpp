@@ -90,7 +90,9 @@ AIAnalyzerAudioProcessorEditor::AIAnalyzerAudioProcessorEditor(AIAnalyzerAudioPr
     fullButton.onClick = [this] { setProfileFromUi(3); };
 
     languageBox.addItem("English", 1);
-    languageBox.addItem(juce::String(L"中文"), 2);
+    languageBox.addItem(aianalyzer::uiText(aianalyzer::UiLanguage::Chinese,
+                                           aianalyzer::UiText::Chinese),
+                        2);
     languageBox.setSelectedId(ownerProcessor.getUiLanguageIndex() + 1,
                               juce::dontSendNotification);
     languageBox.onChange = [this]
@@ -268,13 +270,13 @@ void AIAnalyzerAudioProcessorEditor::paint(juce::Graphics& g)
 
         transportText += "   " + formatTransportTime(latestFrame.transportTimeSeconds);
         if (latestFrame.transportBpm > 0.0f)
-            transportText += "   ·   " + juce::String(latestFrame.transportBpm, 1) + " BPM";
-        transportText += "   ·   " + juce::String(latestFrame.transportTimeSignatureNumerator)
+            transportText += "   |   " + juce::String(latestFrame.transportBpm, 1) + " BPM";
+        transportText += "   |   " + juce::String(latestFrame.transportTimeSignatureNumerator)
                        + "/" + juce::String(latestFrame.transportTimeSignatureDenominator);
-        transportText += "   ·   " + aianalyzer::uiText(language, aianalyzer::UiText::Pass)
+        transportText += "   |   " + aianalyzer::uiText(language, aianalyzer::UiText::Pass)
                        + " " + juce::String(static_cast<int>(latestFrame.transportEpoch));
         if (latestFrame.transportIsLooping)
-            transportText += "   ·   " + aianalyzer::uiText(language, aianalyzer::UiText::Loop);
+            transportText += "   |   " + aianalyzer::uiText(language, aianalyzer::UiText::Loop);
         g.setColour(latestFrame.transportIsPlaying ? juce::Colours::lightgreen : juce::Colours::lightgrey);
     }
     g.drawFittedText(transportText, transportArea.toNearestInt(), juce::Justification::centredLeft, 1);
@@ -313,11 +315,11 @@ void AIAnalyzerAudioProcessorEditor::paint(juce::Graphics& g)
     {
         healthMetrics = aianalyzer::uiText(language, aianalyzer::UiText::Worker)
                       + " " + juce::String(latestFrame.workerLoadRatio * 100.0f, 0) + "%"
-                      + "   ·   " + aianalyzer::uiText(language, aianalyzer::UiText::Fifo)
+                      + "   |   " + aianalyzer::uiText(language, aianalyzer::UiText::Fifo)
                       + " " + juce::String(latestFrame.fifoFillRatio * 100.0f, 0) + "%"
-                      + "   ·   " + aianalyzer::uiText(language, aianalyzer::UiText::Lag)
+                      + "   |   " + aianalyzer::uiText(language, aianalyzer::UiText::Lag)
                       + " " + juce::String(latestFrame.estimatedAnalysisLagMs, 0) + " ms"
-                      + "   ·   " + aianalyzer::uiText(language, aianalyzer::UiText::Drops)
+                      + "   |   " + aianalyzer::uiText(language, aianalyzer::UiText::Drops)
                       + " " + juce::String(static_cast<juce::int64>(drops));
     }
     else
@@ -333,7 +335,7 @@ void AIAnalyzerAudioProcessorEditor::paint(juce::Graphics& g)
     ownerProcessor.getAnalyzerConfig(instance, host, port);
     g.setColour(juce::Colours::grey);
     g.drawFittedText(aianalyzer::uiText(language, aianalyzer::UiText::OscTx)
-                     + " → " + host + ":" + juce::String(port),
+                     + " -> " + host + ":" + juce::String(port),
                      healthArea.toNearestInt(), juce::Justification::centredLeft, 1);
 
     analysisArea.removeFromTop(8.0f);
@@ -416,34 +418,34 @@ void AIAnalyzerAudioProcessorEditor::paint(juce::Graphics& g)
                                 + " " + profileName(hostProfileIndex);
         if (profilePending)
             detailText += " (" + aianalyzer::uiText(language, aianalyzer::UiText::Pending) + ")";
-        detailText += "   ·   ";
+        detailText += "   |   ";
 
         if (latestFrame.signalPresent)
         {
             detailText += aianalyzer::uiText(language, aianalyzer::UiText::Signal)
-                       + "   ·   " + aianalyzer::uiText(language, aianalyzer::UiText::Detector)
+                       + "   |   " + aianalyzer::uiText(language, aianalyzer::UiText::Detector)
                        + " " + formatDb(latestFrame.detectorPeakDb);
             if (spectrumAvailable)
             {
-                detailText += "   ·   Centroid " + juce::String(latestFrame.spectralCentroidHz, 0) + " Hz"
-                           + "   ·   Rolloff " + juce::String(latestFrame.spectralRolloffHz, 0) + " Hz";
+                detailText += "   |   Centroid " + juce::String(latestFrame.spectralCentroidHz, 0) + " Hz"
+                           + "   |   Rolloff " + juce::String(latestFrame.spectralRolloffHz, 0) + " Hz";
             }
             else
             {
-                detailText += "   ·   " + aianalyzer::uiText(language, aianalyzer::UiText::SpectrumUnavailable);
+                detailText += "   |   " + aianalyzer::uiText(language, aianalyzer::UiText::SpectrumUnavailable);
             }
         }
         else
         {
             detailText += aianalyzer::uiText(language, aianalyzer::UiText::NoSignal)
-                       + " (< -50 dBFS)   ·   " + aianalyzer::uiText(language, aianalyzer::UiText::Detector)
+                       + " (< -50 dBFS)   |   " + aianalyzer::uiText(language, aianalyzer::UiText::Detector)
                        + " " + formatDb(latestFrame.detectorPeakDb)
-                       + "   ·   " + aianalyzer::uiText(language, aianalyzer::UiText::Silence)
+                       + "   |   " + aianalyzer::uiText(language, aianalyzer::UiText::Silence)
                        + " " + juce::String(latestFrame.silenceSeconds, 1) + " s";
         }
 
         if (loudnessAvailable)
-            detailText += "   ·   " + aianalyzer::uiText(language, aianalyzer::UiText::SessionMaxTp)
+            detailText += "   |   " + aianalyzer::uiText(language, aianalyzer::UiText::SessionMaxTp)
                        + " " + formatDbtp(latestFrame.maxTruePeakDbtp);
 
         g.drawFittedText(detailText,
