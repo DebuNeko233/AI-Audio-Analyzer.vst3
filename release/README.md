@@ -15,7 +15,7 @@ AI Audio Analyzer 1.2.0
 MCP 1.2
 OSC analysis protocol 1.2
 Analyzer control protocol local revision 1
-36 MCP tools
+37 MCP tools
 ```
 
 ## Release audience
@@ -67,6 +67,7 @@ performance_tools.py
 control_tools.py
 song_tools.py
 section_tools.py
+track_story_tools.py
 verification_tools.py
 ```
 
@@ -141,7 +142,7 @@ Before publication, verify at least:
 
 ```text
 source MCP syntax/self-test
-MCP 1.2 exact 36-tool registry
+MCP 1.2 exact 37-tool registry
 Analyzer control revision 1 parser / deterministic candidate-port regression
 historical measurement/evidence regressions
 transport 1.2 parser + Song Memory regressions
@@ -149,6 +150,8 @@ transport epoch separation / coverage regressions
 section-boundary + recurring-family synthetic regression
 end-to-end section tools through real OSC parser/Song Memory
 cross-instance section alignment with different epoch IDs
+Track Story synthetic adjacent-delta / low-coverage / family-spread regression
+Track Story end-to-end regression on a section map with different per-instance epoch IDs
 closed-loop verification positive/negative regressions
 adaptive Full/Eco validity regressions
 PyInstaller -F one-file build
@@ -221,28 +224,31 @@ Release notes may explain:
 
 Do not market `estimated_analysis_lag_ms` as total Agent/network latency. Do not claim Song Memory removes all latency; it makes delayed perception **recoverable and auditable**.
 
-## Explainable song-structure user-facing note
+## Explainable song-structure and Track Story user-facing note
 
 The current MCP 1.2 runtime additionally exposes:
 
 ```text
 audio_section_map
 audio_section_profile
-36 total MCP tools
+audio_track_story
+37 total MCP tools
 ```
 
-This layer consumes existing Song Memory and therefore does not change OSC analysis protocol 1.2.
+These layers consume existing Song Memory and therefore do not change OSC analysis protocol 1.2.
 
 Release notes may explain:
 
 - Analyzer can identify section-scale change points from multiple measured evidence families;
 - repeated sections can be grouped into neutral A/B/C/... structural families;
 - section profiles expose per-track evidence for a selected song range;
-- supporting tracks are matched by overlapping DAW time rather than requiring equal instance-local epoch numbers;
-- missing Song Memory is reported as missing coverage rather than interpreted as silence/structure;
-- the feature is explainable and lightweight; no neural structure model is required for this first implementation.
+- Track Story follows one Analyzer instance across the map and reports coverage-aware section observations, adjacent-section deltas, recurring-family per-dimension variation and relative extrema;
+- supporting/target tracks are matched by overlapping DAW time rather than requiring equal instance-local epoch numbers;
+- a Track Story target can resolve its own best-overlapping retained epoch even when it was not part of the map's original supporting-track set;
+- missing Song Memory is reported as missing coverage rather than interpreted as silence/inactivity/structure;
+- the feature is explainable and lightweight; no neural structure model is required for this implementation.
 
-Do **not** market A/B/C as automatic Verse/Chorus/Drop detection. Exact DAW markers/project labels remain authoritative when available. Boundary strength and family similarity are heuristic structural evidence, not calibrated probabilities or artistic judgments.
+Do **not** market A/B/C as automatic Verse/Chorus/Drop detection. Do not market Track Story as automatic Bass/Vocal/Drums role recognition or as an automatic processing recommender. Exact DAW markers/project labels/track names remain authoritative when available. Boundary strength, family similarity and Track Story comparisons are descriptive/heuristic evidence, not calibrated probabilities or artistic judgments.
 
 ## Analyzer control protocol compatibility
 
