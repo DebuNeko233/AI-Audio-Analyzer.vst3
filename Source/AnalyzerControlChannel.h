@@ -24,10 +24,13 @@ public:
     // Called on the processor/message thread after the host-visible parameter
     // request has been accepted. The ACK is sent to a temporary loopback port
     // supplied by the MCP caller, so stopped transport does not prevent control
-    // confirmation.
+    // confirmation. `changed` reports the actual host-parameter state observed
+    // immediately before applying this request, rather than inferring change
+    // from potentially stale Analyzer telemetry.
     void sendProfileAck(const juce::String& requestId,
                         int profileIndex,
-                        int replyPort);
+                        int replyPort,
+                        bool changed);
 
 private:
     void oscMessageReceived(const juce::OSCMessage& message) override;
