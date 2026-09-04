@@ -116,7 +116,7 @@ audio_section_profile(...)
 
 They can identify section-scale change points and group recurring sections into neutral A/B/C/... families. These are structural recurrence labels, **not automatic Verse/Chorus/Drop names**. Exact DAW markers/project metadata remain authoritative when available.
 
-MCP 1.2 currently exposes **34 tools**.
+MCP 1.2 currently exposes **36 tools**.
 
 ## Analysis Profiles
 
@@ -140,7 +140,25 @@ Full      Mix + Semantic
 
 `Full` remains the compatibility default.
 
-The Analyzer MCP reads/verifies profile state; actual host-parameter writes belong to the real DAW-control MCP.
+Current Analyzer MCP can control the live VST3's own profile directly:
+
+```text
+audio_set_analysis_profile(track, profile)
+audio_set_project_analysis_profile(profile, tracks=None)
+```
+
+The control path is local/loopback-only, addresses a live Analyzer runtime UUID, applies the real host-visible `analysis_profile` parameter outside the realtime audio callback, and returns an explicit acknowledgement.
+
+Keep these states separate:
+
+```text
+control_acknowledged  the target VST3 accepted/applied the request
+telemetry_confirmed   a fresh measurement frame reports the requested profile
+```
+
+Playback can be stopped and still produce a control ACK; fresh telemetry generally requires new audio processing.
+
+This is intentionally the **only** Analyzer MCP write capability. It cannot change EQ, compressors, gain, pan, routing, synths, automation, arrangement, or other DAW/plugin state. Those writes and their actual host readback remain the responsibility of the real DAW-control MCP.
 
 ## First use
 
@@ -155,6 +173,8 @@ audio_project_status()
 → audio_section_profile() only for relevant sections
 → use detailed Temporal / Masking / Stereo / Tonal tools only when required
 ```
+
+When a required evidence family is disabled, use the minimum suitable Analysis Profile rather than setting every Analyzer to Full.
 
 The Analyzer returns measurement evidence. It does not automatically decide EQ, compression, sidechain, stereo processing, mastering targets, song key, or semantic section names.
 
@@ -172,6 +192,12 @@ If the Agent cannot see Analyzer MCP tools:
 - use the generated `cherry-studio-mcp.json` rather than guessing the executable path;
 - make sure the MCP server is enabled for the same Agent that receives the Skill;
 - restart/refresh the Agent session.
+
+If Analyzer profile-control tools time out:
+
+- verify the installed VST3 and MCP runtime came from the same current Release;
+- older VST3 builds do not implement the local profile-control receiver;
+- never treat a request without an ACK as a successful profile write.
 
 If macOS blocks the installer, right-click `Install.command` and choose **Open**. Current builds are not notarized.
 
