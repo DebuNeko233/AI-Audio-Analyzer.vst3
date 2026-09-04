@@ -952,7 +952,7 @@ Implemented or currently merge-ready milestones include:
 - bilingual plugin GUI and transport/health visibility;
 - Analyzer-owned loopback Analysis Profile control with explicit ACK;
 - Track Story across sections/families (PR #19 merge-ready, not DONE until merged);
-- bounded section-aware Mix Relationships currently active on dependent PR #20.
+- bounded section-aware Mix Relationships implementation complete on dependent Draft PR #20; full-gate validation passed, but it remains blocked on PR #19 merge/reconciliation before it can be merge-ready.
 
 ---
 
@@ -978,20 +978,49 @@ Do not mark DONE until merged to `main`.
 
 ### P2 - Section-aware Mix Relationships
 
-Status: **ACTIVE** on dependent Draft PR #20.
+Status: **ACTIVE / IMPLEMENTATION COMPLETE / BLOCKED ON PR #19 MERGE** on dependent Draft PR #20.
+
+Implementation/full-gate validation head:
+
+```text
+072c598935a699547927e83b5a7b037dad521182
+workflow run 33907984090
+completed / success
+```
+
+Validated on that exact head:
+
+```text
+MCP 1.2 source/self-test
+exact 38-tool registry
+mcp/ci_regression.py
+mcp/relationship_regression.py
+MCP/Skill component packaging
+CI-only regression exclusion from component package
+Windows x64 VST3 build
+Windows WorkerSchedulingTests
+macOS arm64 VST3 build
+macOS WorkerSchedulingTests
+Windows development artifact
+macOS development artifact
+Windows Release installer validation
+macOS/Linux shell installer validation
+```
 
 Goal: bounded, coverage-aware relationship shortlisting across sections/families without O(N^2) output explosion or automatic processing prescriptions.
 
-Completion requires:
+Implemented completion evidence:
 
 - bounded project-level output;
 - section/family context;
-- explicit per-track coverage/activity evidence;
-- directional evidence where meaningful;
+- explicit per-track coverage/activity/RMS/width/selected-epoch evidence;
+- directional B-minus-A evidence where meaningful;
 - missing coverage cannot create false relationship changes;
 - synthetic family appearance/disappearance regression;
-- current tool count/docs/Release workflow synchronized;
-- full relevant CI green after #19 dependency is resolved.
+- current 38-tool count/docs/Skill/Release workflow synchronized;
+- full relevant exact-head CI green.
+
+Do **not** mark P2 DONE or merge PR #20 yet. PR #20 is stacked on P1 history. First merge PR #19, reconcile/rebase the P2 branch onto the resulting `main`, rerun exact-head CI, and only then consider PR #20 merge-ready.
 
 ### P3 - Exact DAW context integration
 
