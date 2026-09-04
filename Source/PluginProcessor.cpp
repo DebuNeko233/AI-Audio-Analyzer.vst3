@@ -390,11 +390,37 @@ void AIAnalyzerAudioProcessor::enqueueControlProfileRequest(int profileIndex,
                                                             juce::String requestId,
                                                             int replyPort)
 {
-    if (profileIndex < 0 || profileIndex > 3 || requestId.isEmpty())
+    if (profileIndex < 0
+        || profileIndex > 3
+        || requestId.isEmpty()
+        || replyPort < 1
+        || replyPort > 65535)
+    {
         return;
+    }
 
     {
         const std::scoped_lock lock(controlRequestMutex);
+
+        // MCP deliberately retransmits one request while waiting for its ACK.
+        // Coalesce exact retries so a temporarily busy message thread cannot
+        // turn one logical request into an unbounded queue of host mutations.
+        for (const auto& pending : pendingControlRequests)
+        {
+            if (pending.profileIndex == profileIndex
+                && pending.requestId == requestId
+                && pending.replyPort == replyPort)
+            {
+                return;
+            }
+        }
+
+        // Local loopback is still an external input boundary. Keep memory use
+        // bounded even if another local process floods valid-looking requests.
+        // Dropping the oldest request is safe because MCP retries until timeout.
+        if (pendingControlRequests.size() >= kMaxPendingControlRequests)
+            pendingControlRequests.pop_front();
+
         pendingControlRequests.push_back({ profileIndex, std::move(requestId), replyPort });
     }
     triggerAsyncUpdate();
@@ -410,14 +436,20 @@ void AIAnalyzerAudioProcessor::handleAsyncUpdate()
 
     for (const auto& request : requests)
     {
-        if (getAnalysisProfileIndex() != request.profileIndex)
+        const auto previousProfileIndex = getAnalysisProfileIndex();
+        const bool changed = previousProfileIndex != request.profileIndex;
+
+        if (changed)
             setAnalysisProfileIndex(request.profileIndex, true);
 
         if (controlChannel != nullptr)
+        {
             controlChannel->sendProfileAck(
                 request.requestId,
                 request.profileIndex,
-                request.replyPort);
+                request.replyPort,
+                changed);
+        }
     }
 }
 
