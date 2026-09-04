@@ -47,6 +47,9 @@ public:
     int getAnalysisProfileIndex() const noexcept;
     void setAnalysisProfileIndex(int profileIndex, bool notifyHost = true);
 
+    int getUiLanguageIndex() const noexcept;
+    void setUiLanguageIndex(int languageIndex) noexcept;
+
     bool getLatestAnalysis(aianalyzer::AnalysisFrame& frame) const;
     std::uint64_t getDroppedBlocks() const noexcept;
 
@@ -60,6 +63,7 @@ private:
     std::atomic<int> lastWorkerProfileIndex {
         static_cast<int>(aianalyzer::AnalysisProfile::Full)
     };
+    std::atomic<int> uiLanguageIndex { 0 };
 
     // Audio-thread-only transport continuity state. None of this is serialized:
     // reopening a project starts a fresh Analyzer/MCP observation session.
