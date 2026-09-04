@@ -65,6 +65,8 @@ private:
         int replyPort = 0;
     };
 
+    static constexpr std::size_t kMaxPendingControlRequests = 64;
+
     void enqueueControlProfileRequest(int profileIndex,
                                       juce::String requestId,
                                       int replyPort);
@@ -96,7 +98,8 @@ private:
 
     // OSC control arrives on JUCE's network thread. Queue it here and use
     // AsyncUpdater so host-visible parameter mutation always happens on the
-    // message thread, never on the network or audio thread.
+    // message thread, never on the network or audio thread. The queue is
+    // intentionally bounded and duplicate retries are coalesced before enqueue.
     std::mutex controlRequestMutex;
     std::deque<ControlProfileRequest> pendingControlRequests;
 
