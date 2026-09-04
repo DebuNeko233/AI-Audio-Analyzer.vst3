@@ -176,6 +176,7 @@ jobs:
             mcp/stereo_tools.py \
             mcp/semantic_tools.py \
             mcp/performance_tools.py \
+            mcp/control_tools.py \
             mcp/song_tools.py \
             mcp/section_tools.py \
             mcp/verification_tools.py \
@@ -197,6 +198,7 @@ jobs:
           cp mcp/stereo_tools.py dist/mcp/
           cp mcp/semantic_tools.py dist/mcp/
           cp mcp/performance_tools.py dist/mcp/
+          cp mcp/control_tools.py dist/mcp/
           cp mcp/song_tools.py dist/mcp/
           cp mcp/section_tools.py dist/mcp/
           cp mcp/verification_tools.py dist/mcp/
