@@ -213,6 +213,8 @@ jobs:
           cp mcp/requirements.txt dist/mcp/
           cp mcp/cherry-studio.example.json dist/mcp/
           cp -R skills/ai-analyzer-flstudio/. dist/skill/
+          test ! -e dist/mcp/ci_regression.py
+          test ! -e dist/mcp/relationship_regression.py
           find dist -maxdepth 3 -type f -print | sort
 
       - uses: actions/upload-artifact@v4
