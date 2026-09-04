@@ -54,7 +54,9 @@ After installation, the installer tells you where to find the generated `cherry-
 
 AI Audio Analyzer 1.2 adds DAW-time Song Memory so the Agent can query audio evidence after the passage has already played. The current MCP can also build an explainable section map and group recurring sections into neutral A/B/C families. These families are **not automatic Verse/Chorus/Drop labels**; exact DAW/project markers remain authoritative when available.
 
-Analysis Profiles (`Eco`, `Balanced`, `Mix`, `Full`) reduce unnecessary Analyzer work in projects with many plugin instances. They affect measurement computation only and do not change the audio.
+Analysis Profiles (`Eco`, `Balanced`, `Mix`, `Full`) reduce unnecessary Analyzer work in projects with many plugin instances. They affect measurement computation only and do not change the audio. Current Analyzer MCP can change a live Analyzer's own Analysis Profile through its local control channel and receive an explicit acknowledgement. This control is intentionally limited to Analyzer measurement workload; all sound-changing DAW/plugin parameters still belong to the actual DAW-control MCP.
+
+Current MCP 1.2 exposes **36 tools**.
 
 ---
 
@@ -94,4 +96,6 @@ Analysis Profiles (`Eco`, `Balanced`, `Mix`, `Full`) reduce unnecessary Analyzer
 
 AI Audio Analyzer 1.2 支持 DAW 时间轴 Song Memory，LLM 即使晚几秒读取也能查询已经播放过的证据；同时 MCP 可以生成可解释的歌曲 Section Map，并把重复结构归为中性的 A/B/C 家族。**A/B/C 不等于自动识别的 Verse/Chorus/Drop**，如果 DAW/工程里有精确 Marker，应优先使用真实工程信息。
 
-`Eco / Balanced / Mix / Full` Analysis Profile 只控制 Analyzer 的测量计算量，不会改变声音。
+`Eco / Balanced / Mix / Full` Analysis Profile 只控制 Analyzer 的测量计算量，不会改变声音。当前 Analyzer MCP 可以通过本机控制通道修改 live Analyzer 自己的 Analysis Profile，并收到明确 ACK；这个写入范围只限 Analyzer 的测量负载，任何会改变声音或工程状态的 DAW/插件参数仍由真正的 DAW Control MCP 负责。
+
+当前 MCP 1.2 共提供 **36 个工具**。
