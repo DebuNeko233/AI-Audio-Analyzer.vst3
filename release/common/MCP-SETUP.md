@@ -92,15 +92,26 @@ Replace `YOUR_NAME` if you are writing the configuration manually.
 
 The installer also installs the `skill` folder. Import that folder into Cherry Studio or make its instructions available to the same Agent that has the `ai-audio-analyzer` MCP server enabled.
 
-The MCP provides the tools. The Skill teaches the LLM how to call those tools, interpret measurement validity, choose the minimum Analysis Profile needed, and perform controlled Before/After verification.
+The MCP provides the tools. The Skill teaches the LLM how to call those tools, interpret measurement validity, choose the minimum Analysis Profile needed, use transport-aware Song Memory/section structure, and perform controlled Before/After verification.
 
 ### 4. Verify the Agent can see the tools
 
-After enabling the MCP server, start or refresh the Agent session. The AI Audio Analyzer MCP currently exposes 29 tools. A useful first call is:
+After enabling the MCP server, start or refresh the Agent session. AI Audio Analyzer MCP 1.2 currently exposes **36 tools**. A useful first call is:
 
 ```text
 audio_project_status()
 ```
+
+For Analyzer workload control, current builds also expose:
+
+```text
+audio_set_analysis_profile(track, profile)
+audio_set_project_analysis_profile(profile, tracks=None)
+```
+
+These two tools can change only AI Audio Analyzer's own `Analysis Profile` (`Eco / Balanced / Mix / Full`). The profile changes measurement computation and does **not** change the audio signal. The VST3 returns an explicit local acknowledgement. This capability is intentionally not a general DAW/plugin-control interface.
+
+All EQ, compression, gain, pan, routing, synth, automation, arrangement and other sound/project changes still belong to the actual DAW-control MCP.
 
 If the Agent cannot see the Analyzer tools:
 
@@ -108,7 +119,9 @@ If the Agent cannot see the Analyzer tools:
 2. confirm the `command` path points to the installed `ai-audio-analyzer-mcp` executable;
 3. confirm the MCP server is enabled for the current Agent/Assistant;
 4. restart or refresh the MCP client after changing its configuration;
-5. make sure another AI Audio Analyzer MCP process is not already occupying the same local OSC endpoint.
+5. make sure another AI Audio Analyzer MCP process is not already occupying the same local OSC measurement endpoint.
+
+If profile-control calls time out, confirm the installed VST3 is the same current build as the MCP runtime. Older Analyzer VST3 builds do not implement the local profile-control receiver and must not be reported as successfully changed without an acknowledgement.
 
 Do not point a normal Release configuration at Python source files. The Release contains a standalone one-file MCP executable and does not require Python.
 
@@ -200,15 +213,26 @@ cherry-studio-mcp.json
 
 安装器也会安装 `skill` 文件夹。把这个 Skill 导入 Cherry Studio，或让同一个已经启用 `ai-audio-analyzer` MCP 的 Agent 可以读取它。
 
-MCP 提供工具；Skill 告诉 LLM 应该怎样调用工具、怎样判断测量是否有效、怎样选择最低需要的 Analysis Profile，以及怎样做 Before/After 闭环验证。
+MCP 提供工具；Skill 告诉 LLM 应该怎样调用工具、怎样判断测量是否有效、怎样选择最低需要的 Analysis Profile、怎样使用 Song Memory / Section Structure，以及怎样做 Before/After 闭环验证。
 
 ### 4. 检查 Agent 是否已经看到工具
 
-启用 MCP 后，重新打开或刷新 Agent 会话。当前 AI Audio Analyzer MCP 共提供 29 个工具，建议先尝试：
+启用 MCP 后，重新打开或刷新 Agent 会话。当前 AI Audio Analyzer MCP 1.2 共提供 **36 个工具**，建议先尝试：
 
 ```text
 audio_project_status()
 ```
+
+当前版本还提供 Analyzer 自己的测量负载控制：
+
+```text
+audio_set_analysis_profile(track, profile)
+audio_set_project_analysis_profile(profile, tracks=None)
+```
+
+这两个工具**只能**修改 AI Audio Analyzer 自己的 `Eco / Balanced / Mix / Full` Analysis Profile。Profile 只改变 Analyzer 的测量计算量，不改变音频信号；VST3 会通过本机控制通道返回明确 ACK。这个能力不是通用 DAW/插件控制接口。
+
+EQ、Compression、Gain、Pan、Routing、Synth、Automation、Arrangement 等所有会改变声音或工程状态的操作，仍然由真正的 DAW Control MCP 负责。
 
 如果 Agent 看不到 Analyzer 工具：
 
@@ -216,6 +240,8 @@ audio_project_status()
 2. 确认 JSON 的 `command` 指向安装后的 `ai-audio-analyzer-mcp` 可执行文件；
 3. 确认这个 MCP Server 已经启用给当前 Agent/Assistant；
 4. 修改 MCP 配置后重启或刷新客户端；
-5. 确认电脑上没有另一个 AI Audio Analyzer MCP 进程正在占用同一个本地 OSC 端点。
+5. 确认电脑上没有另一个 AI Audio Analyzer MCP 进程正在占用同一个本地 OSC 测量端点。
+
+如果修改 Profile 的工具超时，请确认当前安装的 VST3 和 MCP Runtime 都是同一套新版文件。旧版 Analyzer VST3 没有本机 Profile Control Receiver，没有 ACK 时绝不能把写入报告为成功。
 
 普通 Release 不需要 Python，也不要把 Agent 配置指向仓库里的 Python 源码。懒人包使用的是已经打包好的单文件 MCP 程序。
