@@ -76,12 +76,13 @@ def _pair_id(runtime_a: str, runtime_b: str) -> str:
     return f"{left}::{right}"
 
 
-def _track_public(runtime_id: str) -> dict[str, Any]:
+def _track_public(runtime_id: str, selection: dict[str, Any] | None = None) -> dict[str, Any]:
     return {
         "runtime_id": runtime_id,
         "selector": song._binding_selector(runtime_id),
         "display_name": song._display_name(runtime_id),
         "is_master": song._is_master(runtime_id),
+        "selected_transport_epoch": None if selection is None else selection.get("epoch"),
     }
 
 
@@ -129,6 +130,8 @@ def _pair_section_evidence(
             "shortlisted": False,
             "status": "missing_track_evidence",
             "coverage_ratio_min": None,
+            "coverage_ratio_a": None,
+            "coverage_ratio_b": None,
         }
 
     coverage_a = _safe_float(a.get("coverage_ratio")) or 0.0
@@ -141,6 +144,8 @@ def _pair_section_evidence(
             "shortlisted": False,
             "status": "insufficient_coverage",
             "coverage_ratio_min": round(coverage_min, 4),
+            "coverage_ratio_a": round(coverage_a, 4),
+            "coverage_ratio_b": round(coverage_b, 4),
         }
 
     active_a = _safe_float(a.get("active_ratio"))
@@ -152,6 +157,8 @@ def _pair_section_evidence(
             "shortlisted": False,
             "status": "missing_activity_evidence",
             "coverage_ratio_min": round(coverage_min, 4),
+            "coverage_ratio_a": round(coverage_a, 4),
+            "coverage_ratio_b": round(coverage_b, 4),
         }
 
     active_overlap = _clamp(min(active_a, active_b))
@@ -193,7 +200,15 @@ def _pair_section_evidence(
         "shortlisted": shortlisted,
         "status": status,
         "coverage_ratio_min": round(coverage_min, 4),
+        "coverage_ratio_a": round(coverage_a, 4),
+        "coverage_ratio_b": round(coverage_b, 4),
+        "active_ratio_a": round(active_a, 5),
+        "active_ratio_b": round(active_b, 5),
         "activity_overlap": round(active_overlap, 5),
+        "rms_db_a": None if rms_a is None else round(rms_a, 5),
+        "rms_db_b": None if rms_b is None else round(rms_b, 5),
+        "stereo_width_a": None if width_a is None else round(width_a, 5),
+        "stereo_width_b": None if width_b is None else round(width_b, 5),
         "coarse_spectral_shape_overlap": None if spectral is None else round(spectral, 5),
         "level_proximity": None if level_proximity is None else round(level_proximity, 5),
         "stereo_width_proximity": None if stereo_proximity is None else round(stereo_proximity, 5),
@@ -409,8 +424,8 @@ def audio_section_relationships(
         ]
         relationships.append({
             "pair_id": key,
-            "track_a": _track_public(runtime_a),
-            "track_b": _track_public(runtime_b),
+            "track_a": _track_public(runtime_a, selections.get(runtime_a)),
+            "track_b": _track_public(runtime_b, selections.get(runtime_b)),
             "shortlisted_section_ids": [
                 item["section_id"] for item in section_evidence if item.get("shortlisted")
             ],
