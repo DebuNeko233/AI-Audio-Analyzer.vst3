@@ -330,10 +330,12 @@ def audio_section_relationships(
     section_track_truncation = False
 
     for section in cached["sections"]:
-        entries = {
-            runtime_id: story._build_section_entry(section, selection)
-            for runtime_id, selection in selections.items()
-        }
+        entries: dict[str, dict[str, Any]] = {}
+        for runtime_id, selection in selections.items():
+            entry = story._build_section_entry(section, selection)
+            entry["runtime_id"] = runtime_id
+            entries[runtime_id] = entry
+
         section_entries[str(section["section_id"])] = entries
         observed = [
             entry for entry in entries.values()
