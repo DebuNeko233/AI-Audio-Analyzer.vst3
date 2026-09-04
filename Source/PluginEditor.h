@@ -18,6 +18,9 @@ private:
     void timerCallback() override;
     void applyConfig();
     void updateLocalizedText();
+    void updateProfileButtons();
+    void updateSettingsVisibility();
+    void setProfileFromUi(int profileIndex);
     void drawSpectrum(juce::Graphics&, juce::Rectangle<float> bounds) const;
     aianalyzer::UiLanguage currentLanguage() const noexcept;
 
@@ -31,12 +34,17 @@ private:
     juce::TextEditor instanceEditor;
     juce::TextEditor hostEditor;
     juce::TextEditor portEditor;
-    juce::ComboBox profileBox;
     juce::ComboBox languageBox;
+    juce::TextButton ecoButton { "Eco" };
+    juce::TextButton balancedButton { "Balanced" };
+    juce::TextButton mixButton { "Mix" };
+    juce::TextButton fullButton { "Full" };
+    juce::TextButton settingsButton;
     juce::TextButton applyButton;
 
     aianalyzer::AnalysisFrame latestFrame;
     bool hasFrame = false;
+    bool settingsExpanded = false;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(AIAnalyzerAudioProcessorEditor)
 };
