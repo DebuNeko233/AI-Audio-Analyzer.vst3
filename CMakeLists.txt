@@ -75,6 +75,13 @@ target_sources(AIAnalyzer PRIVATE
 
 target_compile_features(AIAnalyzer PRIVATE cxx_std_20)
 
+# Source files and localized UI text are UTF-8. MSVC otherwise interprets
+# BOM-less source through the active Windows code page, which can corrupt CJK
+# literals at compile time. /utf-8 fixes both source and execution character sets.
+if(MSVC)
+    target_compile_options(AIAnalyzer PRIVATE /utf-8)
+endif()
+
 target_compile_definitions(AIAnalyzer PUBLIC
     JUCE_WEB_BROWSER=0
     JUCE_USE_CURL=0
@@ -102,6 +109,9 @@ if(AI_ANALYZER_BUILD_TESTS)
         tests/WorkerSchedulingTests.cpp
     )
     target_compile_features(AIAnalyzerWorkerSchedulingTests PRIVATE cxx_std_20)
+    if(MSVC)
+        target_compile_options(AIAnalyzerWorkerSchedulingTests PRIVATE /utf-8)
+    endif()
     target_include_directories(AIAnalyzerWorkerSchedulingTests PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/Source
         ${libebur128_SOURCE_DIR}/ebur128
