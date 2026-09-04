@@ -182,10 +182,13 @@ jobs:
             mcp/song_tools.py \
             mcp/section_tools.py \
             mcp/track_story_tools.py \
+            mcp/section_relationship_tools.py \
             mcp/verification_tools.py \
-            mcp/ci_regression.py
+            mcp/ci_regression.py \
+            mcp/relationship_regression.py
           AI_ANALYZER_SELF_TEST=1 python mcp/server.py
           python mcp/ci_regression.py
+          python mcp/relationship_regression.py
 
       - name: Package MCP and Skill folders
         shell: bash
@@ -205,6 +208,7 @@ jobs:
           cp mcp/song_tools.py dist/mcp/
           cp mcp/section_tools.py dist/mcp/
           cp mcp/track_story_tools.py dist/mcp/
+          cp mcp/section_relationship_tools.py dist/mcp/
           cp mcp/verification_tools.py dist/mcp/
           cp mcp/requirements.txt dist/mcp/
           cp mcp/cherry-studio.example.json dist/mcp/
