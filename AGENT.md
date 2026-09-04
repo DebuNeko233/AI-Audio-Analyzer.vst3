@@ -1020,7 +1020,7 @@ Implemented completion evidence:
 - current 38-tool count/docs/Skill/Release workflow synchronized;
 - full relevant exact-head CI green.
 
-A later AGENT/docs-only commit may move the PR head without changing P2 implementation. Such a head still needs its own path-aware CI to be green, while `072c598935a699547927e83b5a7b037dad521182` remains the recorded full implementation gate.
+Later AGENT/docs-only commits may move the PR head without changing P2 implementation. Those heads still need their own path-aware CI to be green, while `072c598935a699547927e83b5a7b037dad521182` remains the recorded full implementation gate.
 
 Do **not** mark P2 DONE or merge PR #20 yet. PR #20 is stacked on P1 history. First merge PR #19, reconcile/rebase the P2 branch onto the resulting `main`, rerun exact-head CI, and only then consider PR #20 merge-ready.
 
