@@ -17,6 +17,8 @@ enum class UiText
     Port,
     Profile,
     Apply,
+    Settings,
+    HideSettings,
     Language,
     English,
     Chinese,
@@ -66,6 +68,8 @@ inline juce::String uiText(UiLanguage language, UiText key)
         case UiText::Port: return zh ? juce::String(L"端口") : "Port";
         case UiText::Profile: return zh ? juce::String(L"分析档位") : "Profile";
         case UiText::Apply: return zh ? juce::String(L"应用") : "Apply";
+        case UiText::Settings: return zh ? juce::String(L"设置") : "Settings";
+        case UiText::HideSettings: return zh ? juce::String(L"收起设置") : "Hide settings";
         case UiText::Language: return zh ? juce::String(L"语言") : "Language";
         case UiText::English: return "English";
         case UiText::Chinese: return juce::String(L"中文");
