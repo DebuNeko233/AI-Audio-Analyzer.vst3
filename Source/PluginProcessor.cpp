@@ -56,10 +56,22 @@ AIAnalyzerAudioProcessor::AIAnalyzerAudioProcessor()
         std::memory_order_relaxed);
     analysisWorker.setAnalysisProfile(aianalyzer::AnalysisProfile::Full);
     analysisWorker.setOscConfig(instanceId, oscHost, oscPort);
+
+    // Analyzer-owned control is intentionally narrow: only the measurement
+    // profile can be changed. The receiver listens on loopback only and routes
+    // requests to this processor's message thread through AsyncUpdater.
+    controlChannel = std::make_unique<aianalyzer::AnalyzerControlChannel>(
+        analysisWorker.getRuntimeUuid(),
+        [this](int profileIndex, juce::String requestId, int replyPort)
+        {
+            enqueueControlProfileRequest(profileIndex, std::move(requestId), replyPort);
+        });
 }
 
 AIAnalyzerAudioProcessor::~AIAnalyzerAudioProcessor()
 {
+    cancelPendingUpdate();
+    controlChannel.reset();
     analysisWorker.shutdown();
 }
 
@@ -372,6 +384,41 @@ void AIAnalyzerAudioProcessor::setAnalysisProfileIndex(int profileIndex, bool no
     lastWorkerProfileIndex.store(profileIndex, std::memory_order_relaxed);
     analysisWorker.setAnalysisProfile(
         static_cast<aianalyzer::AnalysisProfile>(profileIndex));
+}
+
+void AIAnalyzerAudioProcessor::enqueueControlProfileRequest(int profileIndex,
+                                                            juce::String requestId,
+                                                            int replyPort)
+{
+    if (profileIndex < 0 || profileIndex > 3 || requestId.isEmpty())
+        return;
+
+    {
+        const std::scoped_lock lock(controlRequestMutex);
+        pendingControlRequests.push_back({ profileIndex, std::move(requestId), replyPort });
+    }
+    triggerAsyncUpdate();
+}
+
+void AIAnalyzerAudioProcessor::handleAsyncUpdate()
+{
+    std::deque<ControlProfileRequest> requests;
+    {
+        const std::scoped_lock lock(controlRequestMutex);
+        requests.swap(pendingControlRequests);
+    }
+
+    for (const auto& request : requests)
+    {
+        if (getAnalysisProfileIndex() != request.profileIndex)
+            setAnalysisProfileIndex(request.profileIndex, true);
+
+        if (controlChannel != nullptr)
+            controlChannel->sendProfileAck(
+                request.requestId,
+                request.profileIndex,
+                request.replyPort);
+    }
 }
 
 int AIAnalyzerAudioProcessor::getUiLanguageIndex() const noexcept
