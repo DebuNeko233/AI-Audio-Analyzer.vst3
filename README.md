@@ -149,6 +149,24 @@ semantic_runs_per_second
 
 The actual Analysis Profile write remains the responsibility of the DAW-control MCP. Disabled feature families are explicitly marked unavailable in MCP.
 
+## Plugin GUI
+
+The VST3 editor has built-in **English / 中文** switching. The selected language is stored as the non-automatable `uiLanguage` GUI preference inside `AIAnalyzerState`; older project states default to English. Language selection affects presentation only and never changes host parameter IDs, OSC fields, MCP tool names, or LLM-facing Skill content.
+
+The editor also exposes operational context that already exists in protocol 1.2:
+
+```text
+DAW play / stop / record state
+DAW time, BPM, time signature, loop state and transport pass/epoch
+Analysis Profile and signal validity
+Worker load, FIFO fill, estimated analysis lag and cumulative dropped blocks
+configured OSC TX target
+```
+
+`OSC TX → host:port` is the configured send target. It is **not** an MCP-connected indicator because the VST3 has no MCP acknowledgement channel.
+
+The GUI remains an observation/status surface. Song Memory, section detection, higher-level evidence reasoning and DAW writes stay outside the realtime plugin editor.
+
 ## Transport-aware Song Memory
 
 Protocol 1.2 adds DAW-time context so delayed LLM calls do not need to catch an event while it is happening.
