@@ -62,8 +62,8 @@ inline juce::String uiText(UiLanguage language, UiText key)
     const bool zh = language == UiLanguage::Chinese;
 
     // Keep localized wide-string payloads in universal character escapes.
-    // This makes the compiled UI independent of the source-file/system code page;
-    // MSVC is additionally built with /utf-8 as a repository-wide safeguard.
+    // Decorative separators/arrows stay ASCII-only so rendering never depends
+    // on source encoding or optional symbol glyphs in the host's UI font.
     switch (key)
     {
         case UiText::Instance: return zh ? juce::String(L"\u5b9e\u4f8b") : "Instance";
@@ -76,7 +76,7 @@ inline juce::String uiText(UiLanguage language, UiText key)
         case UiText::Language: return zh ? juce::String(L"\u8bed\u8a00") : "Language";
         case UiText::English: return "English";
         case UiText::Chinese: return juce::String(L"\u4e2d\u6587");
-        case UiText::Subtitle: return zh ? juce::String(L"\u81ea\u9002\u5e94\u97f3\u9891\u5206\u6790 \u2192 OSC \u2192 MCP") : "Adaptive audio analysis \xe2\x86\x92 OSC \xe2\x86\x92 MCP";
+        case UiText::Subtitle: return zh ? juce::String(L"\u81ea\u9002\u5e94\u97f3\u9891\u5206\u6790 -> OSC -> MCP") : "Adaptive audio analysis -> OSC -> MCP";
         case UiText::WaitingForAudio: return zh ? juce::String(L"\u7b49\u5f85\u97f3\u9891\u8f93\u5165...") : "Waiting for audio...";
         case UiText::SampleTruePeak: return zh ? juce::String(L"\u91c7\u6837\u5cf0\u503c / \u771f\u5cf0\u503c") : "Sample / True Peak";
         case UiText::RmsCrest: return zh ? juce::String(L"RMS / \u5cf0\u5747\u6bd4") : "RMS / Crest";
