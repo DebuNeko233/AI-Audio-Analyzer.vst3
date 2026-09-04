@@ -92,11 +92,11 @@ Replace `YOUR_NAME` if you are writing the configuration manually.
 
 The installer also installs the `skill` folder. Import that folder into Cherry Studio or make its instructions available to the same Agent that has the `ai-audio-analyzer` MCP server enabled.
 
-The MCP provides the tools. The Skill teaches the LLM how to call those tools, interpret measurement validity, choose the minimum Analysis Profile needed, use transport-aware Song Memory / explainable section structure / Track Story, and perform controlled Before/After verification.
+The MCP provides the tools. The Skill teaches the LLM how to call those tools, interpret measurement validity, choose the minimum Analysis Profile needed, use transport-aware Song Memory / explainable section structure / Track Story / section-aware relationship shortlisting, and perform controlled Before/After verification.
 
 ### 4. Verify the Agent can see the tools
 
-After enabling the MCP server, start or refresh the Agent session. AI Audio Analyzer MCP 1.2 currently exposes **37 tools**. A useful first call is:
+After enabling the MCP server, start or refresh the Agent session. AI Audio Analyzer MCP 1.2 currently exposes **38 tools**. A useful first call is:
 
 ```text
 audio_project_status()
@@ -109,9 +109,12 @@ audio_song_status()
 audio_section_map()
 audio_track_story(track, map_id=None)
 audio_section_profile(section_id, map_id=None)
+audio_section_relationships(map_id=None)
 ```
 
 `audio_track_story()` summarizes one Analyzer instance across the section map. It keeps coverage gaps explicit, does not infer Bass/Vocal/Drums roles, does not rename neutral A/B/C families as Verse/Chorus/Drop, and does not prescribe processing.
+
+`audio_section_relationships()` returns a bounded shortlist of track pairs whose measured relationship is worth deeper inspection in specific sections/families. Its `shortlist_priority` is an inspection-ranking heuristic only: it is not a masking probability, mix-problem probability, quality score, or automatic EQ/sidechain instruction. Until historical same-range pair analysis exists, replay/select the relevant section before using recent-window masking/stereo/temporal pair tools as deeper evidence for that section.
 
 For Analyzer workload control, current builds also expose:
 
@@ -224,11 +227,11 @@ cherry-studio-mcp.json
 
 安装器也会安装 `skill` 文件夹。把这个 Skill 导入 Cherry Studio，或让同一个已经启用 `ai-audio-analyzer` MCP 的 Agent 可以读取它。
 
-MCP 提供工具；Skill 告诉 LLM 应该怎样调用工具、怎样判断测量是否有效、怎样选择最低需要的 Analysis Profile、怎样使用 Song Memory / Section Structure / Track Story，以及怎样做 Before/After 闭环验证。
+MCP 提供工具；Skill 告诉 LLM 应该怎样调用工具、怎样判断测量是否有效、怎样选择最低需要的 Analysis Profile、怎样使用 Song Memory / Section Structure / Track Story / Section-aware Relationships，以及怎样做 Before/After 闭环验证。
 
 ### 4. 检查 Agent 是否已经看到工具
 
-启用 MCP 后，重新打开或刷新 Agent 会话。当前 AI Audio Analyzer MCP 1.2 共提供 **37 个工具**，建议先尝试：
+启用 MCP 后，重新打开或刷新 Agent 会话。当前 AI Audio Analyzer MCP 1.2 共提供 **38 个工具**，建议先尝试：
 
 ```text
 audio_project_status()
@@ -241,9 +244,12 @@ audio_song_status()
 audio_section_map()
 audio_track_story(track, map_id=None)
 audio_section_profile(section_id, map_id=None)
+audio_section_relationships(map_id=None)
 ```
 
 `audio_track_story()` 用于看一个 Analyzer 实例在多个 Section 中怎样变化。它会显式保留 Coverage 缺失，不会根据音频测量自动判定 Bass/Vocal/Drums，也不会把中性的 A/B/C 自动命名成 Verse/Chorus/Drop，更不会自动给出 EQ/Compression/Stereo 指令。
+
+`audio_section_relationships()` 用于筛出“哪些轨道组合在某个 Section/Family 值得继续检查”。其中的 `shortlist_priority` 只是检查优先级启发式，不是 Masking 概率、Mix Problem 概率、质量分数，也不等于必须做 EQ/Sidechain。当前深度 Pair 工具仍主要看最近窗口，因此在把它们作为某个历史 Section 的深度证据前，应先定位/重放对应 Section。
 
 当前版本还提供 Analyzer 自己的测量负载控制：
 
