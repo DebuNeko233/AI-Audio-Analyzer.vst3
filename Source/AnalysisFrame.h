@@ -109,5 +109,23 @@ struct AnalysisFrame
     float fifoFillRatio = 0.0f;
     float fftRunsPerSecond = 0.0f;
     float semanticRunsPerSecond = 0.0f;
+
+    // Protocol 1.2 transport/data-quality tail. These are measurement-context
+    // fields, not artistic controls. transportTimeSeconds/PPQ are estimates for
+    // the analyzed FFT window after compensating for queued FIFO audio.
+    bool transportSupported = false;
+    float transportTimeSeconds = 0.0f;
+    float transportPpqPosition = 0.0f;
+    float transportBpm = 0.0f;
+    int transportTimeSignatureNumerator = 4;
+    int transportTimeSignatureDenominator = 4;
+    bool transportIsPlaying = false;
+    bool transportIsRecording = false;
+    bool transportIsLooping = false;
+    float transportLoopStartPpq = 0.0f;
+    float transportLoopEndPpq = 0.0f;
+    std::uint32_t transportEpoch = 0;
+    float estimatedAnalysisLagMs = 0.0f;
+    std::uint64_t droppedBlocks = 0;
 };
 } // namespace aianalyzer

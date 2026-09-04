@@ -19,6 +19,16 @@ public:
         droppedBlocks.store(0, std::memory_order_relaxed);
     }
 
+    // Consumer-only fast discard. Unlike reset(), this never rewinds the
+    // producer index and intentionally preserves the cumulative drop counter.
+    // It is used when the DAW transport jumps so queued audio from the previous
+    // transport epoch cannot be analyzed as if it belonged to the new pass.
+    void discardAllFromConsumer() noexcept
+    {
+        const auto w = writeIndex.load(std::memory_order_acquire);
+        readIndex.store(w, std::memory_order_release);
+    }
+
     bool push(const float* left, const float* right, int numSamples) noexcept
     {
         if (left == nullptr || numSamples <= 0)

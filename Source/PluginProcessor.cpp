@@ -1,6 +1,7 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 
+#include <cmath>
 #include <functional>
 #include <utility>
 
@@ -68,6 +69,15 @@ void AIAnalyzerAudioProcessor::prepareToPlay(double sampleRate, int)
     lastWorkerProfileIndex.store(currentProfileIndex, std::memory_order_relaxed);
     analysisWorker.setAnalysisProfile(
         static_cast<aianalyzer::AnalysisProfile>(currentProfileIndex));
+
+    previousTransportValid = false;
+    previousTransportPlaying = false;
+    previousTransportHadSamples = false;
+    previousTransportSamplePosition = 0;
+    previousTransportTimeSeconds = 0.0;
+    previousTransportBlockSamples = 0;
+    transportEpoch = 0;
+
     analysisWorker.prepare(sampleRate);
 
     juce::String currentInstance;
@@ -114,6 +124,141 @@ void AIAnalyzerAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer,
         analysisWorker.setAnalysisProfileRealtimeSafe(
             static_cast<aianalyzer::AnalysisProfile>(currentProfileIndex));
     }
+
+    // Capture host transport while AudioPlayHead information is valid. No lock,
+    // allocation, OSC, or worker wake occurs here. A transport epoch identifies
+    // one continuous forward playback pass; starts, seeks and loop jumps split
+    // the history so delayed LLM/tool calls cannot blend unrelated song ranges.
+    bool transportSupported = false;
+    float transportTimeSeconds = 0.0f;
+    float transportPpqPosition = 0.0f;
+    float transportBpm = 0.0f;
+    int timeSignatureNumerator = 4;
+    int timeSignatureDenominator = 4;
+    bool isPlaying = false;
+    bool isRecording = false;
+    bool isLooping = false;
+    float loopStartPpq = 0.0f;
+    float loopEndPpq = 0.0f;
+    bool hasSamplePosition = false;
+    std::int64_t samplePosition = 0;
+    double preciseTimeSeconds = 0.0;
+
+    if (auto* playHead = getPlayHead())
+    {
+        if (auto position = playHead->getPosition())
+        {
+            isPlaying = position->getIsPlaying();
+            isRecording = position->getIsRecording();
+            isLooping = position->getIsLooping();
+
+            if (const auto bpm = position->getBpm())
+                transportBpm = static_cast<float>(*bpm);
+
+            if (const auto timeSignature = position->getTimeSignature())
+            {
+                timeSignatureNumerator = std::max(1, timeSignature->numerator);
+                timeSignatureDenominator = std::max(1, timeSignature->denominator);
+            }
+
+            if (const auto ppq = position->getPpqPosition())
+                transportPpqPosition = static_cast<float>(*ppq);
+
+            if (const auto loopPoints = position->getLoopPoints())
+            {
+                loopStartPpq = static_cast<float>(loopPoints->ppqStart);
+                loopEndPpq = static_cast<float>(loopPoints->ppqEnd);
+            }
+
+            if (const auto samples = position->getTimeInSamples())
+            {
+                hasSamplePosition = true;
+                samplePosition = *samples;
+            }
+
+            if (const auto seconds = position->getTimeInSeconds())
+            {
+                preciseTimeSeconds = *seconds;
+                transportSupported = std::isfinite(preciseTimeSeconds);
+            }
+            else if (hasSamplePosition)
+            {
+                const auto currentSampleRate = std::max(1.0, getSampleRate());
+                preciseTimeSeconds = static_cast<double>(samplePosition) / currentSampleRate;
+                transportSupported = true;
+            }
+
+            if (transportSupported)
+                transportTimeSeconds = static_cast<float>(std::max(0.0, preciseTimeSeconds));
+        }
+    }
+
+    if (transportSupported)
+    {
+        bool newEpoch = false;
+        if (isPlaying && (!previousTransportValid || !previousTransportPlaying))
+        {
+            newEpoch = true;
+        }
+        else if (isPlaying && previousTransportValid && previousTransportPlaying)
+        {
+            if (hasSamplePosition && previousTransportHadSamples)
+            {
+                const auto expected = previousTransportSamplePosition
+                                    + static_cast<std::int64_t>(previousTransportBlockSamples);
+                const auto delta = samplePosition >= expected
+                    ? samplePosition - expected
+                    : expected - samplePosition;
+                const auto tolerance = static_cast<std::int64_t>(
+                    std::max(2048, buffer.getNumSamples() * 4));
+                if (delta > tolerance)
+                    newEpoch = true;
+            }
+            else
+            {
+                const auto currentSampleRate = std::max(1.0, getSampleRate());
+                const auto expectedSeconds = previousTransportTimeSeconds
+                    + static_cast<double>(previousTransportBlockSamples) / currentSampleRate;
+                const auto toleranceSeconds = std::max(
+                    0.05,
+                    static_cast<double>(buffer.getNumSamples() * 4) / currentSampleRate);
+                if (std::abs(preciseTimeSeconds - expectedSeconds) > toleranceSeconds)
+                    newEpoch = true;
+            }
+        }
+
+        if (newEpoch)
+            ++transportEpoch;
+
+        previousTransportValid = true;
+        previousTransportPlaying = isPlaying;
+        previousTransportHadSamples = hasSamplePosition;
+        previousTransportSamplePosition = samplePosition;
+        previousTransportTimeSeconds = preciseTimeSeconds;
+        previousTransportBlockSamples = buffer.getNumSamples();
+    }
+    else
+    {
+        previousTransportValid = false;
+        previousTransportPlaying = false;
+        previousTransportHadSamples = false;
+        previousTransportBlockSamples = buffer.getNumSamples();
+    }
+
+    analysisWorker.setTransportStateRealtimeSafe(
+        transportSupported,
+        transportTimeSeconds,
+        transportPpqPosition,
+        transportBpm,
+        timeSignatureNumerator,
+        timeSignatureDenominator,
+        isPlaying,
+        isRecording,
+        isLooping,
+        loopStartPpq,
+        loopEndPpq,
+        transportEpoch,
+        buffer.getNumSamples());
 
     const auto* left = buffer.getReadPointer(0);
     const auto* right = numInputChannels > 1 ? buffer.getReadPointer(1) : nullptr;

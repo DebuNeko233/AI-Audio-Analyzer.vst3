@@ -161,7 +161,7 @@ jobs:
           cache: pip
           cache-dependency-path: mcp/requirements.txt
 
-      - name: Validate MCP 1.1 source and regressions
+      - name: Validate MCP 1.2 source and regressions
         shell: bash
         run: |
           set -euo pipefail
@@ -176,10 +176,11 @@ jobs:
             mcp/stereo_tools.py \
             mcp/semantic_tools.py \
             mcp/performance_tools.py \
+            mcp/song_tools.py \
             mcp/verification_tools.py \
             mcp/ci_regression.py
           AI_ANALYZER_SELF_TEST=1 python mcp/server.py
-          PYTHONPATH=mcp python mcp/ci_regression.py
+          python mcp/ci_regression.py
 
       - name: Package MCP and Skill folders
         shell: bash
@@ -195,6 +196,7 @@ jobs:
           cp mcp/stereo_tools.py dist/mcp/
           cp mcp/semantic_tools.py dist/mcp/
           cp mcp/performance_tools.py dist/mcp/
+          cp mcp/song_tools.py dist/mcp/
           cp mcp/verification_tools.py dist/mcp/
           cp mcp/requirements.txt dist/mcp/
           cp mcp/cherry-studio.example.json dist/mcp/

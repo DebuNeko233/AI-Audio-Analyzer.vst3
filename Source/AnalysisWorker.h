@@ -37,6 +37,51 @@ public:
             std::memory_order_release);
     }
 
+    // DAW transport is sampled in processBlock(), where AudioPlayHead state is
+    // valid, and handed to the worker using atomics only. Floats are deliberate:
+    // they are lock-free on supported targets and match OSC float32 precision.
+    //
+    // A discontinuity is a two-phase handoff. The producer first publishes the
+    // new requested epoch and marks transport unavailable. Only after the worker
+    // has acknowledged that epoch (and discarded/reset old queued state) may a
+    // later audio block publish coordinates again. This prevents an old audio
+    // window from being labelled with post-seek/post-loop DAW coordinates.
+    void setTransportStateRealtimeSafe(bool supported,
+                                       float timeSeconds,
+                                       float ppqPosition,
+                                       float bpm,
+                                       int timeSignatureNumerator,
+                                       int timeSignatureDenominator,
+                                       bool isPlaying,
+                                       bool isRecording,
+                                       bool isLooping,
+                                       float loopStartPpq,
+                                       float loopEndPpq,
+                                       std::uint32_t epoch,
+                                       int blockSamples) noexcept
+    {
+        if (activeTransportEpoch.load(std::memory_order_acquire) != epoch)
+        {
+            transportSupported.store(false, std::memory_order_release);
+            requestedTransportEpoch.store(epoch, std::memory_order_release);
+            return;
+        }
+
+        transportTimeSeconds.store(timeSeconds, std::memory_order_relaxed);
+        transportPpqPosition.store(ppqPosition, std::memory_order_relaxed);
+        transportBpm.store(bpm, std::memory_order_relaxed);
+        transportTimeSignatureNumerator.store(timeSignatureNumerator, std::memory_order_relaxed);
+        transportTimeSignatureDenominator.store(timeSignatureDenominator, std::memory_order_relaxed);
+        transportIsPlaying.store(isPlaying, std::memory_order_relaxed);
+        transportIsRecording.store(isRecording, std::memory_order_relaxed);
+        transportIsLooping.store(isLooping, std::memory_order_relaxed);
+        transportLoopStartPpq.store(loopStartPpq, std::memory_order_relaxed);
+        transportLoopEndPpq.store(loopEndPpq, std::memory_order_relaxed);
+        transportBlockSamples.store(std::max(0, blockSamples), std::memory_order_relaxed);
+        requestedTransportEpoch.store(epoch, std::memory_order_relaxed);
+        transportSupported.store(supported, std::memory_order_release);
+    }
+
     AnalysisProfile getAnalysisProfile() const noexcept;
 
     void requestIdentify() noexcept
@@ -63,6 +108,7 @@ private:
     void resetTemporalAccumulator() noexcept;
     void resetSemanticCache() noexcept;
     void applyProfileChangeIfNeeded();
+    void applyTransportEpochChangeIfNeeded();
     void updateSignalState();
     void processLoudnessHop();
     bool loudnessMetricsDue(double lastMetricsMs, double nowMs) noexcept
@@ -109,6 +155,25 @@ private:
     std::atomic<bool> identifyRequested { false };
     std::atomic<int> requestedProfile { static_cast<int>(AnalysisProfile::Full) };
     AnalysisProfile activeProfile = AnalysisProfile::Full;
+
+    // Realtime transport handoff. Epoch is incremented by the processor on a
+    // playback start or discontinuity. requestedTransportEpoch is producer
+    // intent; activeTransportEpoch is the worker acknowledgement. Coordinates
+    // stay unavailable while those two epochs differ.
+    std::atomic<bool> transportSupported { false };
+    std::atomic<float> transportTimeSeconds { 0.0f };
+    std::atomic<float> transportPpqPosition { 0.0f };
+    std::atomic<float> transportBpm { 0.0f };
+    std::atomic<int> transportTimeSignatureNumerator { 4 };
+    std::atomic<int> transportTimeSignatureDenominator { 4 };
+    std::atomic<bool> transportIsPlaying { false };
+    std::atomic<bool> transportIsRecording { false };
+    std::atomic<bool> transportIsLooping { false };
+    std::atomic<float> transportLoopStartPpq { 0.0f };
+    std::atomic<float> transportLoopEndPpq { 0.0f };
+    std::atomic<int> transportBlockSamples { 0 };
+    std::atomic<std::uint32_t> requestedTransportEpoch { 0 };
+    std::atomic<std::uint32_t> activeTransportEpoch { 0 };
 
     std::array<float, kHopSize> hopLeft {};
     std::array<float, kHopSize> hopRight {};
