@@ -7,9 +7,9 @@ This Skill targets:
 - AI Audio Analyzer MCP 1.2;
 - optional FL Studio control MCP: https://github.com/rosasynthesiz/flstudio-mcp
 
-Its purpose is to help an LLM **call Analyzer MCP correctly, interpret measurements correctly, manage multi-instance mapping, choose only the analysis work required by the request, use transport-aware song memory instead of chasing realtime frames, judge latency/data quality, and run auditable Before/After verification around externally controlled DAW changes**.
+Its purpose is to help an LLM **call Analyzer MCP correctly, interpret measurements correctly, manage multi-instance mapping, choose only the analysis work required by the request, use transport-aware Song Memory and explainable section structure instead of chasing realtime frames, judge latency/data quality, and run auditable Before/After verification around externally controlled DAW changes**.
 
-It does **not** provide fixed mixing style, LUFS targets, EQ/compression/sidechain/stereo recipes, key-change rules, harmony-edit rules, or mastering chains.
+It does **not** provide fixed mixing style, LUFS targets, EQ/compression/sidechain/stereo recipes, forced Verse/Chorus/Drop labels, key-change rules, harmony-edit rules, or mastering chains.
 
 ## Current capability layers
 
@@ -19,6 +19,7 @@ Identify → FL Mixer Track/Slot deterministic mapping
 Project Status / Mix Overview / Snapshot A-B
 Adaptive Analysis profiles + worker/FIFO performance telemetry
 DAW Transport / continuous playback epochs / latency-aware Song Memory
+Explainable section boundaries / neutral recurring A-B-C families / section profiles
 Spectral Flux / RMS Rise / temporal profile / band-envelope comparison
 ERB-rebinned spectral + relative-level + temporal masking evidence
 Mid/Side RMS / Side spectrum / frequency-dependent Side-Mid / negative-cross evidence
@@ -26,7 +27,7 @@ Mid/Side RMS / Side spectrum / frequency-dependent Side-Mid / negative-cross evi
 controlled closed-loop Before/After verification around external DAW changes
 ```
 
-The current append-only OSC protocol is **1.2**. Existing indexes `0..134` are unchanged; transport/data-quality metadata is appended at `135..149`.
+The current append-only OSC protocol is **1.2**. Existing indexes `0..134` are unchanged; transport/data-quality metadata is appended at `135..149`. The section layer adds no OSC fields and consumes retained Song Memory in MCP.
 
 ## Recommended initialization
 
@@ -53,13 +54,25 @@ After binding, prefer:
 mixer:<index>/slot:<slot>
 ```
 
-For whole-song or latency-sensitive work, immediately inspect:
+For whole-song or latency-sensitive work:
 
 ```text
 audio_song_status()
 ```
 
-When project performance or feature availability matters, inspect:
+After enough of the intended pass is captured, prefer:
+
+```text
+audio_section_map()
+```
+
+Then inspect only the relevant sections:
+
+```text
+audio_section_profile(section_id, map_id)
+```
+
+When project performance or feature availability matters:
 
 ```text
 audio_project_performance()
@@ -71,8 +84,10 @@ audio_analysis_status(track)
 ```text
 project readiness               audio_project_status()
 whole-song readiness / latency  audio_song_status()
+structural map / recurrence      audio_section_map()
+selected-section detail         audio_section_profile()
 whole-pass compact summary      audio_song_overview()
-track / DAW-time history         audio_song_timeline()
+raw track / DAW-time history    audio_song_timeline()
 project performance             audio_project_performance()
 one-instance analysis state     audio_analysis_status()
 project recent overview         audio_mix_overview()
@@ -82,25 +97,21 @@ current single frame            audio_snapshot()
 single-track temporal           audio_temporal_profile()
 deep single-track stereo        audio_stereo_profile()
 single-track tonal evidence     audio_tonal_profile()
-two-track basic spectrum        audio_compare_tracks()
 two-track detailed masking      audio_masking_evidence()
 custom-band temporal            audio_temporal_compare()
 two-track stereo comparison     audio_stereo_compare()
 two-track tonal comparison      audio_tonal_compare()
-legacy stereo bands             audio_stereo_bands()
 Snapshot management             audio_capture_snapshot() / audio_list_snapshots()
 manual Snapshot A/B             audio_compare_snapshots()
 controlled change verification  audio_begin_verification() / audio_complete_verification()
 verification recovery/status    audio_verification_status()
 ```
 
-MCP 1.2 exposes **32 tools**. Full signatures are in `references/analyzer-mcp.md`.
+MCP 1.2 exposes **34 tools**. Full signatures are in `references/analyzer-mcp.md`.
 
 ## Whole-song memory and Agent latency
 
 Do not build an Agent loop that assumes the LLM must read every frame while playback is happening.
-
-The intended model is:
 
 ```text
 DAW keeps playing
@@ -108,19 +119,7 @@ DAW keeps playing
 → DAW-time evidence is retained in one-second bins
 → LLM may think/call other tools for seconds
 → LLM later queries the remembered pass
-```
-
-Use:
-
-```text
-audio_song_status()
-audio_song_overview()
-audio_song_timeline(
-  "mixer:4/slot:9",
-  resolution_seconds=5,
-  start_seconds=60,
-  end_seconds=90
-)
+→ section map compresses the pass into relevant structural contexts
 ```
 
 Important semantics:
@@ -133,28 +132,76 @@ Important semantics:
 - `data_age_seconds` is wall-clock age of retained evidence and does not make an explicitly requested historical range invalid;
 - non-zero `dropped_blocks` means some input audio was not measured;
 - `coverage_ratio` describes how much of a requested/coarse range is actually represented;
-- transport coordinates are estimates for song/section reasoning, not sample-accurate edits;
-- automatic Verse/Chorus/Bridge labeling is not implemented yet.
+- transport coordinates are estimates for song/section reasoning, not sample-accurate edits.
 
-Choose the coarsest useful timeline resolution. Prefer a compact `audio_song_overview()` or 10–30 second bins for macro song reasoning; use 1–2 second bins only when the question genuinely needs that detail.
+Choose the coarsest useful timeline resolution. Prefer structure/overview tools for macro reasoning; use 1–2 second bins only when genuinely necessary.
 
 See `references/song-memory.md`.
 
+## Explainable song structure
+
+The first structure layer is intentionally lightweight and interpretable. It uses multi-scale changes in available evidence such as:
+
+```text
+cross-track activity
+RMS / LUFS-S
+spectral centroid / broad spectral balance
+chroma
+stereo relation
+crest / spectral flux
+```
+
+Use:
+
+```text
+audio_section_map()
+```
+
+to obtain:
+
+```text
+structural boundary candidates
+boundary strength + dominant evidence
+S01/S02/... ranges
+neutral A/B/C/... recurring families
+strong section-to-section similarity pairs
+coverage gaps / warnings
+```
+
+Then:
+
+```text
+audio_section_profile("S02", map_id)
+```
+
+returns section-level per-track evidence and related/same-family sections.
+
+Critical rules:
+
+- boundary strength is novelty evidence, not calibrated probability;
+- A/B/C are recurrence families, **not** automatic Intro/Verse/Chorus/Drop labels;
+- exact DAW markers, Playlist labels, project metadata or explicit user structure are authoritative for exact naming;
+- missing Song Memory is not silence and is not automatically a boundary;
+- supporting tracks are aligned by overlapping DAW time, not equal instance-local epoch numbers;
+- `map_id` is MCP-session memory, not a persistent project ID;
+- no structure result implies a processing action.
+
+See `references/section-structure.md`.
+
 ## Adaptive Analysis and performance control
 
-The VST3 exposes a real host parameter:
+The VST3 exposes:
 
 ```text
 Parameter ID: analysis_profile
 Display name: Analysis Profile
-
 0 Eco
 1 Balanced
 2 Mix
 3 Full
 ```
 
-Profiles control Analyzer computation only; they do not alter the audio signal or define an artistic mode.
+Profiles control Analyzer computation only:
 
 ```text
 Eco       Core
@@ -165,31 +212,7 @@ Full      Mix + Semantic
 
 `Full` remains the default for backward compatibility.
 
-Minimum profiles for common evidence families:
-
-```text
-Transport / Identify / signal / core     Eco
-LUFS / True Peak                         Balanced
-Spectrum / basic masking / stereo        Balanced
-Temporal evidence                        Mix
-Masking with temporal interaction        Mix
-Tonal / chroma / harmonic evidence       Full
-```
-
-Analyzer MCP does **not** change `Analysis Profile`. If a lower/higher profile is needed:
-
-```text
-audio_analysis_status(target)
-→ remember current profile
-→ use the actual FL Studio control MCP to find and change Analysis Profile
-→ read back the actual host parameter state
-→ audio_analysis_status(target)
-→ verify the required feature group is really enabled
-→ collect the required measurement window
-→ call only the needed Analyzer evidence tool
-→ restore the previous profile through the control MCP when appropriate
-→ verify the restored status
-```
+Analyzer MCP does **not** change `Analysis Profile`. Use the actual FL Studio control MCP for host writes/readback, then verify with `audio_analysis_status()`.
 
 Runtime telemetry:
 
@@ -206,33 +229,24 @@ See `references/performance-evidence.md`.
 
 ## Closed-loop verification
 
-Use the verification session when a user asks the agent to **change the DAW and verify the measured result**.
-
-Canonical flow:
+Use verification when the user asks the Agent to **change the DAW and verify the measured result**.
 
 ```text
 audio_project_status()
 → deterministic Identify binding if needed
-→ ensure the target Analysis Profile exposes the required evidence
+→ ensure required evidence is enabled
 → play the intended comparison passage
 → audio_begin_verification(...)
 → inspect ready_for_external_change / baseline_blockers
 → external FL Studio control MCP makes the intended change
-→ external FL Studio control MCP reads back the actual host value/state
-→ replay the same intended passage
+→ external control MCP reads back actual host state
+→ replay a comparable passage
 → audio_complete_verification(...)
-→ inspect controlled_comparison / closed_loop_complete
 ```
 
-Important semantics:
+`controlled_comparison=true` means only that technical A/B guardrails passed. `closed_loop_complete=true` additionally requires caller-supplied actual host readback. Neither means the change is better or should be kept.
 
-- Analyzer MCP does not perform the DAW change;
-- `host_readback` is supplied from the external control MCP and stored for auditability;
-- `controlled_comparison=true` means only that the stated technical A/B guardrails passed;
-- `closed_loop_complete=true` additionally requires caller-supplied actual host readback;
-- neither Boolean means the change is better, correct, or worth keeping;
-- current verification is still recent-window based, not yet transport-anchored to an exact DAW-time range;
-- verification state is Bridge-session memory only.
+Current verification remains recent-window based, not yet transport-anchored to an exact DAW-time range.
 
 See `references/verification-evidence.md`.
 
@@ -245,7 +259,7 @@ audio_tonal_profile()
 audio_tonal_compare()
 ```
 
-Keep chroma, tonal-center ranking, entropy, coverage and single-F0 evidence separate. Exact DAW/MIDI note/key/chord metadata should be preferred for exact symbolic facts.
+Keep chroma, tonal-center ranking, entropy, coverage and single-F0 evidence separate. Prefer exact DAW/MIDI symbolic data for exact facts.
 
 Stereo:
 
@@ -291,37 +305,25 @@ transport_epoch
 estimated_analysis_lag_ms
 dropped_blocks
 data_quality.coverage_ratio
+section reference.coverage_ratio
+section coverage_gaps / warnings
 ```
 
 `null` means unavailable, not zero.
-
-## Snapshot A/B versus verification
-
-Manual Snapshot A/B remains useful for simple measurement comparisons:
-
-```text
-audio_capture_snapshot("before", 5)
-# some external event/change
-audio_capture_snapshot("after", 5)
-audio_compare_snapshots("before", "after")
-```
-
-Snapshot tools do not independently reset Loudness. For protocol-1.2 instances, LUFS-I and pass-max True Peak accumulate inside the current transport epoch; a playback start/seek/loop discontinuity creates a new epoch and loudness state. Legacy instances retain historical reset/prepare scope.
-
-When the agent coordinates a real DAW change through an external control MCP, prefer verification because it records technical comparability and host readback context.
 
 ## Suggested Agent instruction
 
 ```text
 Use the ai-analyzer-flstudio Skill only as a technical MCP usage and measurement-semantics reference.
 Start with audio_project_status and establish deterministic Identify bindings for unbound Analyzer instances.
-For whole-song, past-passage, or latency-sensitive work, call audio_song_status and prefer audio_song_overview/audio_song_timeline over chasing the latest frame. The Analyzer observes continuously while the LLM may reason later.
-Treat transport_epoch as an instance-local continuous playback pass. Inspect DAW-time spans, data age, estimated Analyzer lag, dropped blocks, and coverage before making timeline-wide claims.
+For whole-song, past-passage, or latency-sensitive work, call audio_song_status. After sufficient Song Memory exists, prefer audio_section_map and then audio_section_profile for relevant sections before requesting raw timeline bins or specialized evidence.
+Treat A/B/C section families only as neutral structural recurrence evidence. Never invent Verse/Chorus/Drop labels when exact DAW/project structure is unavailable; prefer exact markers/project metadata when available.
+Treat transport_epoch as an instance-local continuous playback pass. For cross-track structure, align by DAW-time coverage rather than numeric epoch equality.
+Inspect data age, estimated Analyzer lag, dropped blocks, coverage gaps, and coverage ratios before song-wide claims. Missing evidence is not silence.
 Use the minimum Analysis Profile that exposes the required evidence. Analyzer MCP does not write DAW parameters; real writes and host readback belong to the actual FL Studio control MCP.
 Treat null as unavailable, not zero. Prefer exact DAW/MIDI/project metadata for exact symbolic facts.
 When the task changes the DAW and asks for verification, call audio_begin_verification before the external write, read actual host state back, replay a comparable passage, and then call audio_complete_verification.
-Treat controlled_comparison only as a technical comparability guardrail and closed_loop_complete only as comparability plus supplied host readback. Neither is an artistic quality judgment.
-Never turn Analyzer measurements, transport memory, or performance profiles into automatic mixing, mastering, key-change, harmony-edit, tuning, or processing instructions.
+Never turn Analyzer measurements, section families, transport memory, or performance profiles into automatic mixing, mastering, harmony, tuning, semantic section, or processing instructions.
 ```
 
 ## References
@@ -331,6 +333,7 @@ references/analyzer-mcp.md          MCP tools and selector rules
 references/parameters.md            measurement parameter semantics
 references/performance-evidence.md  adaptive profiles and performance telemetry
 references/song-memory.md           transport timeline, pass and latency semantics
+references/section-structure.md      boundary / recurrence / section-profile semantics
 references/masking-evidence.md      masking evidence and limitations
 references/stereo-evidence.md       Mid/Side/stereo evidence semantics
 references/tonal-evidence.md        chroma/tonal/harmonic evidence semantics
