@@ -263,6 +263,31 @@ def _build_default_map() -> tuple[str | None, dict[str, Any] | None]:
         return map_id, structure._section_maps.get(map_id)
 
 
+def _map_is_usable(cached: dict[str, Any] | None) -> bool:
+    return bool(
+        isinstance(cached, dict)
+        and isinstance(cached.get("public"), dict)
+        and cached["public"].get("available") is True
+        and isinstance(cached.get("sections"), list)
+    )
+
+
+def _selection_for_track(runtime_id: str, cached: dict[str, Any]) -> dict[str, Any] | None:
+    existing = cached.get("track_epochs", {}).get(runtime_id)
+    if existing is not None:
+        return existing
+
+    start = _safe_float(cached.get("start_seconds"))
+    end = _safe_float(cached.get("end_seconds"))
+    if start is None or end is None or end <= start:
+        return None
+
+    epoch, rows, covered = structure._select_epoch_for_range(runtime_id, start, end)
+    if epoch is None or not rows:
+        return None
+    return {"epoch": epoch, "rows": rows, "covered_seconds": covered}
+
+
 @core.mcp.tool()
 def audio_track_story(track: str, map_id: str | None = None) -> dict[str, Any]:
     """Summarize one Analyzer track across structural sections and recurring families."""
@@ -272,20 +297,22 @@ def audio_track_story(track: str, map_id: str | None = None) -> dict[str, Any]:
 
     if cached is None and map_id is None:
         resolved_map_id, cached = _build_default_map()
-        generated_map = cached is not None and bool(cached.get("public", {}).get("available"))
+        generated_map = _map_is_usable(cached)
 
-    if cached is None or resolved_map_id is None or cached.get("public", {}).get("available") is False:
+    if not _map_is_usable(cached) or resolved_map_id is None:
         reason = "No usable cached section map. Call audio_section_map() after collecting transport-aligned Song Memory."
         if isinstance(cached, dict) and cached.get("reason"):
             reason = str(cached["reason"])
-        return {"available": False, "runtime_id": runtime_id, "reason": reason}
+        return {
+            "available": False,
+            "runtime_id": runtime_id,
+            "selector": song._binding_selector(runtime_id),
+            "display_name": song._display_name(runtime_id),
+            "map_id": resolved_map_id,
+            "reason": reason,
+        }
 
-    selection = cached.get("track_epochs", {}).get(runtime_id)
-    if selection is None and map_id is None:
-        resolved_map_id, cached = _build_default_map()
-        generated_map = True
-        selection = None if cached is None else cached.get("track_epochs", {}).get(runtime_id)
-
+    selection = _selection_for_track(runtime_id, cached)
     if selection is None:
         return {
             "available": False,
