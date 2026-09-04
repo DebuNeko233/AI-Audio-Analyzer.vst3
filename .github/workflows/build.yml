@@ -177,6 +177,7 @@ jobs:
             mcp/semantic_tools.py \
             mcp/performance_tools.py \
             mcp/song_tools.py \
+            mcp/section_tools.py \
             mcp/verification_tools.py \
             mcp/ci_regression.py
           AI_ANALYZER_SELF_TEST=1 python mcp/server.py
@@ -197,6 +198,7 @@ jobs:
           cp mcp/semantic_tools.py dist/mcp/
           cp mcp/performance_tools.py dist/mcp/
           cp mcp/song_tools.py dist/mcp/
+          cp mcp/section_tools.py dist/mcp/
           cp mcp/verification_tools.py dist/mcp/
           cp mcp/requirements.txt dist/mcp/
           cp mcp/cherry-studio.example.json dist/mcp/
