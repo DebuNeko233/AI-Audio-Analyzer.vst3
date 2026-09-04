@@ -107,16 +107,19 @@ audio_song_timeline(...)
 
 The MCP retains bounded one-second DAW-time Song Memory. Playback starts, seeks and loop jumps create separate continuous playback epochs so unrelated positions are not silently blended.
 
-The current MCP also provides explainable structure tools:
+The current MCP also provides explainable structure and Track Story tools:
 
 ```text
 audio_section_map(...)
 audio_section_profile(...)
+audio_track_story(...)
 ```
 
-They can identify section-scale change points and group recurring sections into neutral A/B/C/... families. These are structural recurrence labels, **not automatic Verse/Chorus/Drop names**. Exact DAW markers/project metadata remain authoritative when available.
+`audio_section_map()` can identify section-scale change points and group recurring sections into neutral A/B/C/... families. `audio_section_profile()` inspects many Analyzer tracks inside one selected section. `audio_track_story()` follows one Analyzer instance across the map and summarizes coverage-aware activity, energy, spectrum, stereo, temporal and tonal evidence, adjacent-section deltas, recurring-family per-dimension variation and relative extrema.
 
-MCP 1.2 currently exposes **36 tools**.
+A/B/C are structural recurrence labels, **not automatic Verse/Chorus/Drop names**. Track Story does not infer Bass/Vocal/Drums roles from measurements alone and does not prescribe EQ/compression/stereo actions. Exact DAW markers/project metadata remain authoritative when available.
+
+MCP 1.2 currently exposes **37 tools**.
 
 ## Analysis Profiles
 
@@ -170,13 +173,14 @@ audio_project_status()
 → audio_song_status() for whole-song work
 → play/capture enough of the intended pass
 → audio_section_map() for structural context
-→ audio_section_profile() only for relevant sections
+→ audio_track_story() for tracks whose behavior across sections matters
+→ audio_section_profile() for sections that need multi-track drill-down
 → use detailed Temporal / Masking / Stereo / Tonal tools only when required
 ```
 
 When a required evidence family is disabled, use the minimum suitable Analysis Profile rather than setting every Analyzer to Full.
 
-The Analyzer returns measurement evidence. It does not automatically decide EQ, compression, sidechain, stereo processing, mastering targets, song key, or semantic section names.
+The Analyzer returns measurement evidence. It does not automatically decide EQ, compression, sidechain, stereo processing, mastering targets, song key, track roles, or semantic section names.
 
 ## Troubleshooting
 

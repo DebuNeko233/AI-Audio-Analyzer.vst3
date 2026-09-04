@@ -107,18 +107,19 @@ audio_song_timeline(...)
 
 MCP 会保存有界的 1 秒 DAW 时间轴 Song Memory。重新播放、Seek、Loop 跳回会建立新的 Continuous Playback Epoch，避免把无关时间位置混在一起。
 
-现在还提供可解释歌曲结构工具：
+现在还提供可解释歌曲结构和 Track Story 工具：
 
 ```text
 audio_section_map(...)
 audio_section_profile(...)
+audio_track_story(...)
 ```
 
-它们可以发现 Section 级变化点，并把重复结构归为中性的 A/B/C/... 家族。
+`audio_section_map()` 可以发现 Section 级变化点，并把重复结构归为中性的 A/B/C/... 家族；`audio_section_profile()` 用于查看一个 Section 内多条 Analyzer 轨道；`audio_track_story()` 则用于查看一个 Analyzer 实例在整首歌各个 Section 中怎样变化，包括 Coverage-aware 活动度、Energy、Spectrum、Stereo、Temporal、Tonal 证据、相邻 Section Delta、同 Family 各维度变化和相对极值。
 
-这些 A/B/C **不是自动识别的 Verse / Chorus / Drop 名称**。如果 DAW 中有 Marker、Playlist Label、Arrangement Metadata 或用户明确提供了结构，应优先使用这些精确信息。
+这些 A/B/C **不是自动识别的 Verse / Chorus / Drop 名称**。Track Story 也不会根据测量自动把轨道判定成 Bass/Vocal/Drums，更不会自动产生 EQ、Compression 或 Stereo 操作。如果 DAW 中有 Marker、Playlist Label、Arrangement Metadata、Mixer Track Name 或用户明确提供了结构，应优先使用这些精确信息。
 
-MCP 1.2 当前共有 **36 个工具**。
+MCP 1.2 当前共有 **37 个工具**。
 
 ## Analysis Profile
 
@@ -168,13 +169,14 @@ audio_project_status()
 → 整曲任务调用 audio_song_status()
 → 播放/采集足够的目标 Pass
 → audio_section_map() 获取结构上下文
-→ 只对相关 Section 调用 audio_section_profile()
+→ 对需要看“跨 Section 变化”的轨调用 audio_track_story()
+→ 对需要看“一个 Section 内多轨状态”的位置调用 audio_section_profile()
 → 再按问题选择 Temporal / Masking / Stereo / Tonal 工具
 ```
 
 如果所需证据家族当前被关闭，应只切换到满足任务要求的最低 Analysis Profile，而不是把所有 Analyzer 都设为 Full。
 
-Analyzer 返回的是测量证据，不会自动决定 EQ、Compression、Sidechain、Stereo Processing、母带响度目标、歌曲 Key 或 Verse/Chorus/Drop 名称。
+Analyzer 返回的是测量证据，不会自动决定 EQ、Compression、Sidechain、Stereo Processing、母带响度目标、歌曲 Key、轨道角色或 Verse/Chorus/Drop 名称。
 
 ## 常见问题
 

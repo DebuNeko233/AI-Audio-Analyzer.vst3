@@ -4,7 +4,7 @@
 
 **AI Audio Analyzer** is a JUCE VST3 machine-readable audio measurement layer for AI/LLM-assisted music-production workflows.
 
-The plugin measures audio inside the DAW, emits compact OSC data to the Analyzer MCP Bridge, and exposes structured level, loudness, spectrum, stereo, temporal, masking, tonal, project, transport-aligned Song Memory, explainable song-structure, A/B, performance, and verification evidence to Cherry Studio or another MCP client.
+The plugin measures audio inside the DAW, emits compact OSC data to the Analyzer MCP Bridge, and exposes structured level, loudness, spectrum, stereo, temporal, masking, tonal, project, transport-aligned Song Memory, explainable song-structure, Track Story, A/B, performance, and verification evidence to Cherry Studio or another MCP client.
 
 Current product version: **1.2.0**.
 
@@ -13,7 +13,7 @@ Current product version: **1.2.0**.
 ```text
 AI Audio Analyzer
 ├─ VST3    realtime-safe measurement probe + DAW transport context
-├─ MCP     measurement / profile control / Song Memory / structure / comparison / verification tools
+├─ MCP     measurement / profile control / Song Memory / structure / Track Story / comparison / verification tools
 └─ Skill   English LLM-facing instructions for correct MCP use and evidence semantics
 ```
 
@@ -51,6 +51,7 @@ FL Studio / DAW
                  ├─ DAW transport + continuous playback epochs
                  ├─ one-second Song Memory + coarse aggregation
                  ├─ explainable section boundaries + A/B/C recurrence families
+                 ├─ per-track Track Story across sections/families
                  ├─ section profiles / project overview / Snapshot A-B
                  ├─ temporal / masking / stereo / tonal evidence
                  └─ closed-loop verification sessions
@@ -81,6 +82,7 @@ Core capabilities include:
 - bounded one-second Song Memory with 100 ms coverage accounting and 1/2/5/10/15/30-second query aggregation;
 - explainable multi-scale song-section boundary detection and neutral recurring A/B/C families;
 - section-level per-track profiles aligned by overlapping DAW time even when instance-local epoch numbers differ;
+- per-track Track Story across sections, with coverage-aware adjacent deltas, same-family variation statistics and per-metric relative extrema;
 - project overview, Snapshot A/B, masking evidence, controlled Before/After verification, and adaptive-analysis performance telemetry.
 
 ### Signal validity
@@ -185,9 +187,9 @@ configured OSC TX target
 
 The four `Eco / Balanced / Mix / Full` buttons use the same host-visible `analysis_profile` parameter as DAW automation and Analyzer-owned MCP profile control. There is no separate GUI-only profile state.
 
-`OSC TX → host:port` still means the configured **measurement** destination, not a generic MCP-connected indicator. Analyzer profile control uses a separate loopback-only command/ACK path.
+`OSC TX -> host:port` still means the configured **measurement** destination, not a generic MCP-connected indicator. Analyzer profile control uses a separate loopback-only command/ACK path.
 
-The GUI remains primarily an observation/status surface. Song Memory, section detection, higher-level evidence reasoning and general DAW writes stay outside the realtime plugin editor.
+The GUI remains primarily an observation/status surface. Song Memory, section detection, Track Story, higher-level evidence reasoning and general DAW writes stay outside the realtime plugin editor.
 
 ## Transport-aware Song Memory
 
@@ -293,6 +295,18 @@ Exact DAW markers, Playlist/arrangement labels, MIDI/project annotations, or exp
 
 Supporting tracks are aligned by overlapping **DAW-time coverage**, not equal numeric `transport_epoch` values. Missing Song Memory is reported as missing coverage; a gap is not interpreted as silence or a structural transition.
 
+### Track Story
+
+After a section map exists, one track can be summarized across the whole structure:
+
+```text
+audio_track_story(track, map_id=None)
+```
+
+The tool returns per-section evidence, current-minus-previous deltas, same-family per-dimension variation, coverage/lag/drop metadata and relative per-metric extrema. A target track can resolve its own best overlapping retained pass even if it was not part of the original section map's `max_tracks` support set.
+
+Track Story is descriptive. Missing coverage is not inactivity, low `active_ratio` is not automatically a mute state, neutral family IDs are not semantic section names, and no observed delta implies a processor/action.
+
 Recommended whole-song path:
 
 ```text
@@ -300,7 +314,8 @@ audio_project_status()
 → audio_song_status()
 → capture/play enough of the intended pass
 → audio_section_map()
-→ audio_section_profile() for relevant sections
+→ audio_track_story() when one track's evolution matters
+→ audio_section_profile() when one section's multi-track context matters
 → audio_song_timeline() only if raw time evolution is still needed
 → specialized Temporal / Masking / Stereo / Tonal tools only for the relationships that matter
 ```
@@ -370,7 +385,7 @@ Current verification remains recent-window based; transport-anchored same-range 
 
 ## MCP tools
 
-MCP **1.2 exposes 36 tools**. High-level whole-song/structure/profile-control tools include:
+MCP **1.2 exposes 37 tools**. High-level whole-song/structure/profile-control tools include:
 
 ```text
 audio_set_analysis_profile(...)
@@ -380,9 +395,10 @@ audio_song_overview()
 audio_song_timeline(...)
 audio_section_map(...)
 audio_section_profile(...)
+audio_track_story(...)
 ```
 
-Do not mechanically run all 36 tools. Start high-level, then drill down only where the song/section context requires it.
+Do not mechanically run all 37 tools. Start high-level, then drill down only where the song/section context requires it.
 
 ## User installation
 
@@ -436,7 +452,7 @@ Product version             1.2.0
 MCP version                 1.2
 OSC analysis protocol       1.2
 Analyzer control protocol   local revision 1
-MCP tools                   36
+MCP tools                   37
 ```
 
 Internal modules:
@@ -453,6 +469,7 @@ mcp/performance_tools.py  adaptive profile / worker telemetry layer
 mcp/control_tools.py      loopback-only Analyzer Analysis Profile control
 mcp/song_tools.py         DAW transport / pass memory / latency-aware song summaries
 mcp/section_tools.py      explainable boundaries / recurring families / section profiles
+mcp/track_story_tools.py  per-track section/family evolution summaries
 mcp/verification_tools.py controlled verification sessions
 mcp/ci_regression.py      repository-only synthetic regression suite
 ```
@@ -469,6 +486,7 @@ skills/ai-analyzer-flstudio/references/parameters.md
 skills/ai-analyzer-flstudio/references/performance-evidence.md
 skills/ai-analyzer-flstudio/references/song-memory.md
 skills/ai-analyzer-flstudio/references/section-structure.md
+skills/ai-analyzer-flstudio/references/track-story.md
 skills/ai-analyzer-flstudio/references/masking-evidence.md
 skills/ai-analyzer-flstudio/references/stereo-evidence.md
 skills/ai-analyzer-flstudio/references/tonal-evidence.md

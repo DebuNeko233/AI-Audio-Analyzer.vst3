@@ -4,7 +4,7 @@
 
 **AI Audio Analyzer** 是一个面向 AI / LLM 音乐制作工作流的 JUCE VST3 机器可读音频测量层。
 
-插件直接在 DAW 内测量音频，通过 OSC 将紧凑数据发送给 Analyzer MCP Bridge，再由 Cherry Studio 或其他 MCP 客户端结构化读取电平、响度、频谱、立体声、时间关系、遮蔽、调性、工程概览、DAW 时间轴整曲记忆、可解释歌曲结构、A/B、性能状态和闭环验证证据。
+插件直接在 DAW 内测量音频，通过 OSC 将紧凑数据发送给 Analyzer MCP Bridge，再由 Cherry Studio 或其他 MCP 客户端结构化读取电平、响度、频谱、立体声、时间关系、遮蔽、调性、工程概览、DAW 时间轴整曲记忆、可解释歌曲结构、Track Story、A/B、性能状态和闭环验证证据。
 
 当前产品版本：**1.2.0**。
 
@@ -13,7 +13,7 @@
 ```text
 AI Audio Analyzer
 ├─ VST3    DAW 内实时安全测量探针 + Transport Context
-├─ MCP     测量 / Analyzer 档位控制 / Song Memory / 结构 / 比较 / 验证
+├─ MCP     测量 / Analyzer 档位控制 / Song Memory / 结构 / Track Story / 比较 / 验证
 └─ Skill   面向 LLM 的英文 MCP 调用与证据语义说明
 ```
 
@@ -53,6 +53,7 @@ FL Studio / DAW
                  ├─ DAW Transport / Continuous Playback Epoch
                  ├─ 1 秒 Song Memory / 多分辨率聚合
                  ├─ 可解释 Section Boundary / A-B-C 重复结构家族
+                 ├─ 单轨跨 Section/Family 的 Track Story
                  ├─ Section Profile / Project Overview / Snapshot A-B
                  ├─ Temporal / Masking / Stereo / Tonal Evidence
                  └─ Closed-loop Verification
@@ -83,6 +84,7 @@ LLM **不属于实时测量链路**。模型在思考、调用工具或等待 DA
 - 每实例最多 1200 个 1 秒 Song Memory Bin，使用 100 ms Coverage Slot，可按 1/2/5/10/15/30 秒聚合查询；
 - 多尺度可解释歌曲段落边界检测和中性的 A/B/C 重复结构家族；
 - 即使不同 Analyzer 的实例局部 Epoch 数字不同，也能按 DAW 时间重叠选择对应 Pass，生成 Section 级每轨 Profile；
+- 单轨跨 Section 的 Track Story，包括 Coverage-aware 相邻变化、同 Family 各维度变化范围和相对极值；
 - Project Overview、Snapshot A/B、Masking Evidence、Controlled Verification 和性能遥测。
 
 ### Signal Validity
@@ -200,9 +202,9 @@ Worker Load、FIFO Fill、Estimated Analysis Lag、Dropped Blocks
 
 四档按钮与宿主唯一的 `analysis_profile` 参数双向同步，因此 GUI 点击、DAW Automation、工程恢复以及 Analyzer MCP 自有 Profile Control 最终都反映同一个真实宿主参数状态。
 
-`OSC TX → host:port` 只表示**测量帧**发送目标，不等于“MCP 已连接”。Analyzer Profile Control 使用独立的本机命令/ACK 链路。
+`OSC TX -> host:port` 只表示**测量帧**发送目标，不等于“MCP 已连接”。Analyzer Profile Control 使用独立的本机命令/ACK 链路。
 
-GUI 仍以观察和运行状态为主。Song Memory、Section Detection、高层证据推理以及通用 DAW 写入不会搬进实时插件编辑器。
+GUI 仍以观察和运行状态为主。Song Memory、Section Detection、Track Story、高层证据推理以及通用 DAW 写入不会搬进实时插件编辑器。
 
 ## 面向 LLM 延迟的 Song Memory
 
@@ -302,6 +304,18 @@ C = Chorus
 
 缺失 Song Memory 不会被当成静音或段落边界；`coverage_gaps` 会显式报告缺失数据。
 
+### Track Story
+
+生成 Section Map 后，可以查看单条轨在整首结构中的变化：
+
+```text
+audio_track_story(track, map_id=None)
+```
+
+它会返回每个 Section 的测量证据、相对前一 Section 的 `Current - Previous` Delta、同一 Family 内各维度的变化范围、Coverage/Lag/Drop 信息以及不同指标的相对极值。即使目标轨没有进入原 Section Map 的 `max_tracks` Supporting Set，只要存在同一 DAW 时间范围的 Song Memory，也可以独立选择覆盖最佳的 Retained Pass。
+
+Track Story 只描述证据：缺少 Coverage 不等于不活动，低 `active_ratio` 不自动等于 Muted，A/B/C 不等于语义段落名，任何 Delta 也不自动要求 EQ、Compression 或 Stereo 操作。
+
 推荐整曲调用顺序：
 
 ```text
@@ -309,7 +323,8 @@ audio_project_status()
 → audio_song_status()
 → 播放/采集足够的目标 Pass
 → audio_section_map()
-→ 只对相关 Section 调用 audio_section_profile()
+→ 关注某一条轨跨段变化时调用 audio_track_story()
+→ 关注某一 Section 的多轨上下文时调用 audio_section_profile()
 → 仍需原始时间变化时才调用 audio_song_timeline()
 → 再针对具体关系调用 Temporal / Masking / Stereo / Tonal
 ```
@@ -377,7 +392,7 @@ Analyzer 自己的 Profile Control ACK 只确认 Analyzer 配置请求，不替�
 
 ## MCP 工具
 
-MCP **1.2 共 36 个工具**。高层整曲/结构/Profile 控制入口包括：
+MCP **1.2 共 37 个工具**。高层整曲/结构/Profile 控制入口包括：
 
 ```text
 audio_set_analysis_profile(...)
@@ -387,9 +402,10 @@ audio_song_overview()
 audio_song_timeline(...)
 audio_section_map(...)
 audio_section_profile(...)
+audio_track_story(...)
 ```
 
-不要为了“完整”机械调用全部 36 个工具。应先高层理解整曲/Section，再按具体问题下钻。
+不要为了“完整”机械调用全部 37 个工具。应先高层理解整曲/Section，再按具体问题下钻。
 
 ## 用户安装
 
@@ -441,7 +457,7 @@ Product version             1.2.0
 MCP version                 1.2
 OSC analysis protocol       1.2
 Analyzer control protocol   本机 revision 1
-MCP tools                   36
+MCP tools                   37
 ```
 
 内部模块：
@@ -458,6 +474,7 @@ mcp/performance_tools.py  Adaptive Profile / Worker Telemetry
 mcp/control_tools.py      本机 Analyzer Analysis Profile 控制
 mcp/song_tools.py         DAW Transport / Pass Memory / Song Summaries
 mcp/section_tools.py      Section Boundary / Recurrence / Section Profile
+mcp/track_story_tools.py  单轨跨 Section/Family 演化摘要
 mcp/verification_tools.py Controlled Verification
 mcp/ci_regression.py      仓库内 Synthetic Regression
 ```

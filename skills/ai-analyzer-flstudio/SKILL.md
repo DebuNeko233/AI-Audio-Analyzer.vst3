@@ -1,6 +1,6 @@
 ---
 name: ai-analyzer-flstudio
-description: Technical usage skill for Cherry Studio + AI Audio Analyzer MCP. Teaches deterministic Analyzer discovery/binding, adaptive Analysis Profile control, transport-aware Song Memory, explainable song-section structure, latency/data-quality handling, measurement validity, evidence semantics, performance telemetry, and controlled Before/After verification around externally controlled DAW changes. It does not prescribe a mixing style, LUFS target, EQ/compression/sidechain/stereo recipe, semantic section label, key change, harmony edit, or aesthetic decision.
+description: Technical usage skill for Cherry Studio + AI Audio Analyzer MCP. Teaches deterministic Analyzer discovery/binding, adaptive Analysis Profile control, transport-aware Song Memory, explainable song-section structure, Track Story across sections, latency/data-quality handling, measurement validity, evidence semantics, performance telemetry, and controlled Before/After verification around externally controlled DAW changes. It does not prescribe a mixing style, LUFS target, EQ/compression/sidechain/stereo recipe, semantic section label, key change, harmony edit, or aesthetic decision.
 ---
 
 # AI Audio Analyzer MCP Usage Skill
@@ -10,7 +10,7 @@ Use this Skill for two things only:
 1. call **AI Audio Analyzer MCP** correctly;
 2. interpret returned measurements/evidence without overstating them.
 
-It is **not** a mixing, mastering, harmony, arrangement, tuning, or style guide. Measurements, section families, transport memory, and Analysis Profiles do not imply a mandatory processor, parameter value, semantic section name, key change, chord edit, stereo action, or aesthetic choice.
+It is **not** a mixing, mastering, harmony, arrangement, tuning, or style guide. Measurements, section families, Track Story, transport memory, and Analysis Profiles do not imply a mandatory processor, parameter value, semantic section name, track role, key change, chord edit, stereo action, or aesthetic choice.
 
 ## 1. Start with project state
 
@@ -46,10 +46,11 @@ If enough of the intended pass has been captured, prefer a structural compressio
 audio_section_map()
 ```
 
-Then inspect only the sections that matter:
+Then choose the smallest follow-up:
 
 ```text
-audio_section_profile(section_id, map_id)
+audio_track_story(track, map_id)          # one track across the structure
+audio_section_profile(section_id, map_id) # many tracks inside one section
 ```
 
 Use `audio_song_timeline()` only when the question still requires raw DAW-time evolution.
@@ -137,7 +138,7 @@ Masking with temporal interaction                 Mix
 Chroma / tonal / single-F0 evidence               Full
 ```
 
-A section map can use whichever evidence was actually captured. Missing feature families remain unavailable rather than becoming zero-valued structural features.
+A section map or Track Story can use whichever evidence was actually captured. Missing feature families remain unavailable rather than becoming zero-valued structural features.
 
 Current control-capable Analyzer builds expose:
 
@@ -210,7 +211,8 @@ audio_project_status()
 → play/capture the song or target passage
 → allow Analyzer to keep collecting while the Agent reasons/works
 → audio_section_map()
-→ audio_section_profile() for relevant sections
+→ audio_track_story() for tracks whose behavior across sections matters
+→ audio_section_profile() for sections that need multi-track drill-down
 → audio_song_overview() when a compact pass-level summary helps
 → audio_song_timeline() only when raw time evolution is still required
 → drill into Temporal / Masking / Stereo / Tonal evidence only as needed
@@ -268,7 +270,7 @@ Prefer the coarsest resolution that answers the question.
 
 Detailed rules: `references/song-memory.md`.
 
-## 5. Explainable song structure
+## 5. Explainable song structure and Track Story
 
 Use the structure layer to compress a captured song into boundaries and recurring contexts before doing detailed mix analysis.
 
@@ -356,9 +358,49 @@ warnings
 
 If coverage is weak, prefer replaying the target range over lowering quality expectations merely to force a section map.
 
-### Section drill-down
+### Track Story: one track across sections
 
 After a map is generated:
+
+```text
+audio_track_story(track, map_id)
+```
+
+Use it when the question is about how one track evolves across the arrangement rather than what all tracks do inside one section.
+
+It exposes:
+
+```text
+section-scoped active_ratio / RMS / LUFS-S / crest
+centroid + coarse spectral regions
+stereo correlation / width
+temporal spectral flux
+chroma + strongest pitch classes
+per-section coverage / lag / drops
+current-minus-previous section deltas
+same-family per-dimension min/max/mean/spread
+relative per-metric extrema across adequately covered sections
+```
+
+Important rules:
+
+```text
+missing coverage != silence
+low active_ratio != muted
+low-frequency energy != Bass role
+centered mid-forward signal != Vocal role
+family A/B/C != Intro/Verse/Chorus
+```
+
+`delta_from_previous` is descriptive current-minus-previous evidence. Do not automatically translate a positive or negative delta into an inverse EQ/compression/stereo action.
+
+Same-family variation remains per-dimension. Do not invent one overall "track consistency" or "quality" score.
+
+If `map_id` is omitted, the tool uses the latest cached map and can create a default map when none is available. For deterministic multi-step analysis, pass the exact `map_id` returned by `audio_section_map()`.
+
+Detailed rules: `references/track-story.md`.
+
+### Section drill-down: many tracks inside one section
 
 ```text
 audio_section_profile("S02", map_id)
@@ -378,7 +420,7 @@ Then choose only the deeper evidence that the question needs.
 
 `map_id` is bounded MCP-session memory, not a persistent project ID.
 
-Detailed rules: `references/section-structure.md`.
+Detailed structure rules: `references/section-structure.md`.
 
 ## 6. Validate data before interpretation
 
@@ -434,6 +476,13 @@ Section structure:
   boundaries[].context_coverage
   coverage_gaps
   warnings
+
+Track Story:
+  sections[].coverage_ratio
+  sections[].evidence_available
+  sections[].data_quality
+  sections[].delta_from_previous
+  warnings
 ```
 
 The **feature mask is authoritative**; disabled measurements are unavailable even if append-only compatibility positions physically exist.
@@ -475,11 +524,12 @@ audio_song_status()
 audio_song_overview()
 ```
 
-Structural compression:
+Structural compression / section-aware single-track evolution:
 
 ```text
 audio_section_map()
-audio_section_profile()
+audio_track_story(track, map_id)
+audio_section_profile(section_id, map_id)
 ```
 
 Raw historical timeline only when needed:
@@ -633,6 +683,9 @@ Always keep these distinctions:
 - `data_age_seconds` is not the same thing as invalid historical evidence.
 - section `boundary strength` is novelty evidence, not formal-boundary probability.
 - section `family_id` is recurrence evidence, not Verse/Chorus/Drop identity.
+- Track Story `active_ratio` is observed signal presence, not mute state or musical role.
+- Track Story adjacent deltas are descriptive differences, not processing instructions.
+- Track Story family spreads are independent dimensions, not one consistency/quality score.
 - a Song Memory coverage gap is not silence or a section boundary.
 - `map_id` is session memory, not a persistent project/arrangement ID.
 - topology fingerprint is not a persistent DAW-project hash.
@@ -651,6 +704,7 @@ references/parameters.md
 references/performance-evidence.md
 references/song-memory.md
 references/section-structure.md
+references/track-story.md
 references/masking-evidence.md
 references/stereo-evidence.md
 references/tonal-evidence.md
@@ -667,6 +721,7 @@ measure
 read Analyzer state
 remember transport-aligned evidence
 infer explainable structural boundaries / neutral recurrence families
+summarize one Analyzer track across those sections (Track Story)
 compare
 identity/binding evidence
 performance/profile readback
@@ -687,7 +742,7 @@ actual host state readback for those external changes
 
 The Analyzer's own Profile control is a narrow performance exception because it changes measurement computation only and never changes the audio signal. Do not expand that exception into general DAW control.
 
-Never invent control tools, controls, notes, write success, profile state, semantic section labels, or readback values.
+Never invent control tools, controls, notes, write success, profile state, track roles, semantic section labels, or readback values.
 
 ## 13. Output discipline
 
@@ -697,6 +752,7 @@ When citing Analyzer evidence, include enough context to make it auditable:
 instance / selector
 DAW-time range / transport epoch when Song Memory is used
 section_id / family_id / map_id when structure evidence is used
+Track Story coverage and delta/family context when used
 Analysis Profile / enabled feature group when relevant
 measurement window or timeline resolution
 signal validity / active ratio
@@ -720,6 +776,9 @@ Do not present these as Analyzer-measured facts:
 - the top tonal-center candidate is certainly the song key;
 - an F0 candidate is certainly the played note;
 - `A/B/C` section families are certainly Intro/Verse/Chorus/Drop;
+- Track Story proves a track is Bass/Vocal/Drums from its measurements;
+- a Track Story section with low activity is certainly muted when coverage is incomplete;
+- a Track Story delta necessarily requires the inverse processing move;
 - a structure boundary necessarily requires a processing change;
 - `controlled_comparison=true` means After is better;
 - `Full` means higher audio quality than `Eco`;

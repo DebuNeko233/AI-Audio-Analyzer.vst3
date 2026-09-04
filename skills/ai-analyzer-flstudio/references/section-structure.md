@@ -34,9 +34,16 @@ audio_section_profile(
   max_tracks=32,
   max_related=8
 )
+
+audio_track_story(
+  track,
+  map_id=None
+)
 ```
 
-Current MCP 1.2 exposes the structure tools without changing the OSC wire format. They consume already-retained protocol-1.2 Song Memory.
+Current MCP 1.2 exposes these reasoning tools without changing the OSC wire format. They consume already-retained protocol-1.2 Song Memory.
+
+`audio_track_story()` is documented in detail in `track-story.md`; this reference focuses on the shared section/family map it consumes.
 
 ## Recommended Agent flow
 
@@ -49,7 +56,8 @@ audio_project_status()
 → ensure enough of the target song/pass has been captured
 → audio_section_map()
 → inspect neutral section boundaries/families
-→ audio_section_profile() only for sections that matter to the question
+→ audio_track_story() for tracks whose cross-section evolution matters
+→ audio_section_profile() for sections that need multi-track context
 → use audio_song_timeline() only if raw time evolution is still needed
 → drill into Temporal / Masking / Stereo / Tonal tools only when a specific relationship needs deeper evidence
 ```
@@ -125,6 +133,8 @@ The structure detector does not interpret a gap in retained Song Memory as silen
 
 Boundary contexts require meaningful retained coverage. Low-coverage regions can therefore produce no boundary candidate rather than a fabricated confident result.
 
+Track Story inherits the same rule: a structurally valid Section may remain visible while a particular track has insufficient evidence there. That section must not be treated as silence, muting, absence, or a role change for the target track.
+
 If the reference pass has weak overall coverage, warnings are returned. Replaying the target range is preferable to lowering evidence-quality expectations merely to obtain a boundary.
 
 ## Cross-instance epoch alignment
@@ -146,6 +156,8 @@ Vocal epoch 11
 ```
 
 as long as those passes cover the same song-time region.
+
+Track Story follows the same principle for its target track. If the target was not one of the map's original supporting tracks, it can still select that track's best-overlapping retained epoch over the map range.
 
 This is evidence alignment by DAW time, not a persistent project-wide pass identity.
 
@@ -263,20 +275,31 @@ selected transport epoch for every supporting Analyzer
 per-track data quality
 ```
 
-This is the preferred bridge from large-scale song structure into section-aware mixing/mastering reasoning.
+This is the preferred bridge from large-scale song structure into **multi-track reasoning inside one section**.
+
+## `audio_track_story()` relationship
+
+Use Track Story for the orthogonal question: **how one Analyzer instance changes across the section map**.
+
+It reuses the same `section_id`, `family_id`, DAW-time ranges, and coverage semantics, then adds per-track section observations, adjacent-section deltas, recurring-family per-dimension variation, and relative extrema.
 
 Example conceptual use:
 
 ```text
-Section B and B2 recur strongly.
-→ inspect B/B2 track profiles
-→ determine whether the Vocal/Kick/Bass roles are consistent
-→ only then call detailed masking/stereo/temporal tools for the relationship that matters
+Family B returns as S02 and S04.
+→ inspect one target track with audio_track_story()
+→ compare that track's measured energy/spectrum/stereo/temporal dimensions across S02/S04
+→ if a specific cross-track relationship matters, inspect the relevant section profile
+→ only then call detailed masking/stereo/temporal tools for that relationship
 ```
+
+Do not infer a musical role from Track Story measurements alone. Exact Mixer/project names or explicit user context are the proper source for exact track roles.
 
 ## Map lifetime
 
 `map_id` identifies a recently generated structure map inside the running MCP process. Maps are bounded session memory, not persistent project IDs.
+
+Track Story based on that map is likewise session-scoped reasoning, not persistent project history.
 
 If the MCP process restarts, call `audio_section_map()` again.
 
@@ -284,7 +307,7 @@ If the song arrangement or captured pass changes materially, regenerate the map 
 
 ## Limitations
 
-The first structure layer is intentionally lightweight and explainable. It is not:
+The current structure layer is intentionally lightweight and explainable. It is not:
 
 ```text
 a neural music-structure model
@@ -298,4 +321,4 @@ a sample-accurate segmentation system
 
 The current one-second Song Memory sets the practical structural time resolution. The detector is intended for section-scale reasoning, not transient slicing.
 
-No structure output implies a mixing/mastering action. Use it only to determine **where**, **when**, and **which recurring context** should be measured more deeply.
+No structure or Track Story output implies a mixing/mastering action. Use structure to determine **where**, **when**, and **which recurring context** should be measured more deeply; use Track Story to describe **how one observed track changes across those contexts**.

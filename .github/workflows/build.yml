@@ -12,6 +12,7 @@ on:
       - 'assets/**'
       - 'mcp/**'
       - 'skills/ai-analyzer-flstudio/**'
+      - 'release/README.md'
       - 'release/common/START-HERE.md'
       - 'release/common/MCP-SETUP.md'
       - 'release/common/INSTALL.en.md'
@@ -34,6 +35,7 @@ on:
       - 'assets/**'
       - 'mcp/**'
       - 'skills/ai-analyzer-flstudio/**'
+      - 'release/README.md'
       - 'release/common/START-HERE.md'
       - 'release/common/MCP-SETUP.md'
       - 'release/common/INSTALL.en.md'
@@ -105,7 +107,7 @@ jobs:
               Source/*|tests/*|CMakeLists.txt|cmake/*|Resources/*|assets/*) plugin=true ;;
               mcp/*) mcp=true ;;
               skills/ai-analyzer-flstudio/*) skill=true ;;
-              release/common/START-HERE.md|release/common/MCP-SETUP.md|release/common/INSTALL.en.md|release/common/INSTALL.zh-CN.md|release/windows/Install.ps1|release/windows/Install.cmd|release/macos/install.sh|release/macos/Install.command|.github/workflows/release.yml) release=true ;;
+              release/README.md|release/common/START-HERE.md|release/common/MCP-SETUP.md|release/common/INSTALL.en.md|release/common/INSTALL.zh-CN.md|release/windows/Install.ps1|release/windows/Install.cmd|release/macos/install.sh|release/macos/Install.command|.github/workflows/release.yml) release=true ;;
               .github/workflows/build.yml) workflow=true ;;
             esac
           done <<< "$CHANGED"
@@ -179,6 +181,7 @@ jobs:
             mcp/control_tools.py \
             mcp/song_tools.py \
             mcp/section_tools.py \
+            mcp/track_story_tools.py \
             mcp/verification_tools.py \
             mcp/ci_regression.py
           AI_ANALYZER_SELF_TEST=1 python mcp/server.py
@@ -201,6 +204,7 @@ jobs:
           cp mcp/control_tools.py dist/mcp/
           cp mcp/song_tools.py dist/mcp/
           cp mcp/section_tools.py dist/mcp/
+          cp mcp/track_story_tools.py dist/mcp/
           cp mcp/verification_tools.py dist/mcp/
           cp mcp/requirements.txt dist/mcp/
           cp mcp/cherry-studio.example.json dist/mcp/

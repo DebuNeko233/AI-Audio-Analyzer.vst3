@@ -1,6 +1,6 @@
 # AI Audio Analyzer MCP Reference
 
-This reference describes MCP tools, selector rules, Analyzer-owned Analysis Profile control/readback, transport-aware song memory, explainable section structure, call order, validity checks, controlled verification, and OSC compatibility.
+This reference describes MCP tools, selector rules, Analyzer-owned Analysis Profile control/readback, transport-aware song memory, explainable section structure, Track Story, call order, validity checks, controlled verification, and OSC compatibility.
 
 Related semantics:
 
@@ -9,13 +9,14 @@ parameters.md
 performance-evidence.md
 song-memory.md
 section-structure.md
+track-story.md
 masking-evidence.md
 stereo-evidence.md
 tonal-evidence.md
 verification-evidence.md
 ```
 
-Current MCP 1.2 exposes **36 tools**:
+Current MCP 1.2 exposes **37 tools**:
 
 ```text
 audio_bridge_status()
@@ -51,6 +52,7 @@ audio_song_timeline(track, resolution_seconds=5, transport_epoch=None, start_sec
 audio_song_overview(transport_epoch=None, max_tracks=32)
 audio_section_map(reference_track=None, transport_epoch=None, min_section_seconds=8, sensitivity=0.55, family_similarity=0.78, max_sections=48, max_tracks=32)
 audio_section_profile(section_id, map_id=None, max_tracks=32, max_related=8)
+audio_track_story(track, map_id=None)
 audio_begin_verification(label, seconds=5, target_selectors=None)
 audio_complete_verification(verification_id, seconds=0, change_summary="", host_readback="")
 audio_verification_status(verification_id="")
@@ -58,7 +60,7 @@ audio_verification_status(verification_id="")
 
 ## Recommended hierarchy
 
-Do not call all 36 tools by default.
+Do not call all 37 tools by default.
 
 ```text
 project readiness
@@ -70,7 +72,8 @@ whole-song / delayed Agent context
 
 song structure / recurring arrangement context
 → audio_section_map()
-→ audio_section_profile() only for relevant sections
+→ audio_track_story() when one track's evolution across sections matters
+→ audio_section_profile() when many tracks inside one section matter
 → audio_song_timeline() only when raw track/time evolution is still needed
 
 many instances / performance concern
@@ -101,7 +104,7 @@ external DAW change + measured verification
 → audio_complete_verification()
 ```
 
-The LLM is not expected to poll the Analyzer continuously. Song Memory exists so the Analyzer can keep observing while the model is thinking or waiting for another tool. The section layer then compresses that remembered evidence into structural boundaries and recurring neutral families before the LLM chooses deeper tools.
+The LLM is not expected to poll the Analyzer continuously. Song Memory exists so the Analyzer can keep observing while the model is thinking or waiting for another tool. The section layer compresses remembered evidence into structural boundaries and recurring neutral families; Track Story then compresses one Analyzer instance's behavior across those contexts before the LLM chooses deeper tools.
 
 ## Deterministic Identify mapping
 
@@ -285,7 +288,7 @@ Temporal                             Mix
 Tonal / chroma / harmonic            Full
 ```
 
-A section map can use whichever evidence was actually captured. Missing feature families remain missing rather than being converted into zero-valued structure evidence.
+A section map or Track Story can use whichever evidence was actually captured. Missing feature families remain missing rather than being converted into zero-valued structure/story evidence.
 
 ## Transport-aware song tools
 
@@ -347,9 +350,9 @@ Transport coordinates are estimates corrected for queued FIFO audio and FFT-wind
 
 Detailed semantics: `song-memory.md`.
 
-## Explainable section structure
+## Explainable section structure and Track Story
 
-The section layer consumes retained Song Memory; it does not add OSC fields or realtime DSP work.
+The section and Track Story layers consume retained Song Memory; they do not add OSC fields or realtime DSP work.
 
 ### `audio_section_map()`
 
@@ -398,7 +401,7 @@ Missing Song Memory is exposed as coverage gaps and must not be interpreted as s
 
 ### `audio_section_profile()`
 
-Call after `audio_section_map()` when one section needs deeper context. Keep the returned `map_id` for deterministic follow-up.
+Call after `audio_section_map()` when one section needs deeper multi-track context. Keep the returned `map_id` for deterministic follow-up.
 
 The profile returns:
 
@@ -414,9 +417,62 @@ data quality
 
 Use it to decide which tracks/relationships deserve deeper Temporal, Masking, Stereo or Tonal queries. It does not prescribe processing.
 
-Section maps are bounded MCP-session memory and are not persistent project identifiers.
+### `audio_track_story()`
 
-Detailed semantics: `section-structure.md`.
+Call after `audio_section_map()` when the question is how **one Analyzer instance changes across the arrangement**.
+
+```text
+audio_track_story(track, map_id=None)
+```
+
+For deterministic follow-up, pass the exact `map_id` from `audio_section_map()`. If omitted, Track Story uses the latest cached map and can create a default map when no usable map exists.
+
+Important returned fields include:
+
+```text
+map_id
+runtime_id / selector / display_name
+selected_transport_epoch
+section_count
+sufficient_coverage_section_count
+coverage_ratio_statistics
+sections[]
+sections[].section_id / family_id
+sections[].coverage_ratio
+sections[].evidence_available
+sections[].active_ratio
+sections[].rms_db / lufs_s / crest_db
+sections[].centroid_hz / spectral_regions
+sections[].stereo_correlation / stereo_width
+sections[].spectral_flux_mean
+sections[].chroma / top_pitch_classes
+sections[].data_quality
+sections[].delta_from_previous
+family_consistency[]
+relative_extrema
+warnings
+```
+
+`delta_from_previous` uses **current minus previous** for comparable dimensions. It is withheld unless both adjacent sections have adequate retained coverage.
+
+`family_consistency` intentionally exposes independent per-dimension statistics such as `mean / min / max / spread`; it is not one consistency or quality score.
+
+A target track does not have to be one of the tracks originally retained in the map's `track_epochs` set. If that track has Song Memory over the map's DAW-time range, Track Story selects its own best-overlapping instance-local epoch.
+
+Critical semantics:
+
+```text
+missing coverage != silence
+low active_ratio != muted
+low-frequency energy != Bass role
+mid-forward centered energy != Vocal role
+A/B/C != Intro/Verse/Chorus/Drop
+descriptor delta != required processing move
+```
+
+Section maps and Track Stories are bounded MCP-session state and are not persistent project identifiers/history.
+
+Detailed semantics: `section-structure.md` and `track-story.md`.
 
 ## Core / project tools
 
@@ -670,7 +726,7 @@ The frame remains append-only:
 149        "1.2" marker
 ```
 
-Existing indexes `0..149` are unchanged by Analyzer-owned Profile control.
+Existing indexes `0..149` are unchanged by Analyzer-owned Profile control, section structure, and Track Story.
 
 Feature-mask bits:
 
