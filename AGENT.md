@@ -92,7 +92,7 @@ Product version             1.2.0
 MCP_VERSION                 1.2
 OSC analysis protocol       1.2
 Analyzer control revision   1
-MCP tool count              36
+MCP tool count              37
 ```
 
 Do not invent a new product/MCP/OSC version merely because an MCP-derived feature or a local Analyzer-owned control helper is added. Version bumps require a real compatibility/release reason.
@@ -134,7 +134,7 @@ Current editor behavior:
 - Instance / OSC Host / Port live under collapsible Settings;
 - status area exposes DAW transport, pass/epoch, signal validity, worker load, FIFO fill, estimated analysis lag, drops, and configured OSC TX target.
 
-`OSC TX → host:port` means the configured **measurement-frame destination**. It is not a generic “MCP connected” indicator.
+`OSC TX -> host:port` means the configured **measurement-frame destination**. It is not a generic “MCP connected” indicator.
 
 ## 5. Adaptive Analysis Profiles
 
@@ -189,10 +189,10 @@ Purpose:
 
 ```text
 Analyzer MCP
-→ request Eco / Balanced / Mix / Full
-→ target live Analyzer runtime UUID
-→ VST3 applies host-visible analysis_profile
-→ explicit ACK
+-> request Eco / Balanced / Mix / Full
+-> target live Analyzer runtime UUID
+-> VST3 applies host-visible analysis_profile
+-> explicit ACK
 ```
 
 ### Security/scope invariants
@@ -302,7 +302,7 @@ Current scheduling/measurement invariants:
 hop size                    1024 samples
 FFT                         4096 samples
 measurement OSC update      about 10 Hz
-worker short-FIFO wait      bounded 1–20 ms
+worker short-FIFO wait      bounded 1-20 ms
 true peak read              every loudness-enabled hop
 LUFS-S / LUFS-I polling     about every 100 ms
 ```
@@ -380,12 +380,12 @@ Epoch change invariant:
 
 ```text
 producer detects discontinuity
-→ publishes requested epoch atomically
-→ transport temporarily unavailable
-→ worker acknowledges epoch
-→ worker discards old queued FIFO content
-→ FFT/Temporal/Semantic/Loudness pass state resets as appropriate
-→ new epoch coordinates become valid
+-> publishes requested epoch atomically
+-> transport temporarily unavailable
+-> worker acknowledges epoch
+-> worker discards old queued FIFO content
+-> FFT/Temporal/Semantic/Loudness pass state resets as appropriate
+-> new epoch coordinates become valid
 ```
 
 Prefer a short coverage gap over `old audio + new DAW position` mislabeling.
@@ -405,28 +405,29 @@ scope                    running MCP session
 
 Coverage aggregation must use observed coverage slots. Sparse canonical bins must **not** become false 100% coverage after coarse aggregation.
 
-## 10. Explainable song structure
+## 10. Explainable song structure and Track Story
 
-The structure layer lives entirely in MCP and consumes retained Song Memory. It adds **no realtime DSP** and **no analysis-frame OSC fields**.
+The structure/reasoning layer lives entirely in MCP and consumes retained Song Memory. It adds **no realtime DSP** and **no analysis-frame OSC fields**.
 
 Current tools:
 
 ```text
 audio_section_map()
 audio_section_profile()
+audio_track_story()
 ```
 
-Current detector:
+Current section detector:
 
 ```text
 one-second reference Song Memory
-→ robust feature normalization
-→ multi-scale 2/4/8-second left/right comparison
-→ explainable novelty components
-→ adaptive threshold
-→ local novelty peaks
-→ minimum-section spacing
-→ sections S01/S02/...
+-> robust feature normalization
+-> multi-scale 2/4/8-second left/right comparison
+-> explainable novelty components
+-> adaptive threshold
+-> local novelty peaks
+-> minimum-section spacing
+-> sections S01/S02/...
 ```
 
 Evidence families include:
@@ -445,9 +446,25 @@ Recurring structure:
 
 ```text
 section summaries
-→ transparent weighted similarity
-→ neutral A/B/C/... families
+-> transparent weighted similarity
+-> neutral A/B/C/... families
 ```
+
+Track Story then summarizes one Analyzer instance across those sections:
+
+```text
+section-level activity / RMS / LUFS-S / crest
+spectral centroid + coarse spectral regions
+stereo correlation / width
+temporal flux
+chroma / top pitch-class evidence
+coverage / lag / drops
+adjacent-section deltas
+same-family per-dimension variation
+relative per-metric extrema
+```
+
+Track Story must not collapse those independent dimensions into one quality/consistency score.
 
 A/B/C are **not** semantic arrangement labels. Never automatically map:
 
@@ -461,7 +478,7 @@ Exact DAW markers, Playlist labels, pattern/arrangement metadata, MIDI/project a
 
 Supporting tracks are aligned to the reference DAW-time range by the retained pass with the strongest overlapping coverage. Do **not** require equal instance-local epoch numbers.
 
-Missing Song Memory is missing evidence. A coverage gap is **not silence** and must **not** become a structural boundary merely because data disappeared.
+Missing Song Memory is missing evidence. A coverage gap is **not silence** and must **not** become a structural boundary or an inactive Track Story section merely because data disappeared.
 
 `map_id` is bounded MCP-session state, not a persistent project identifier.
 
@@ -489,13 +506,14 @@ mcp/performance_tools.py  adaptive-profile / worker-performance telemetry
 mcp/control_tools.py      loopback-only Analyzer Analysis Profile control
 mcp/song_tools.py         transport parser / song-pass memory / summaries
 mcp/section_tools.py      explainable boundaries / recurrence / section profiles
+mcp/track_story_tools.py  per-track section/family evolution summaries
 mcp/verification_tools.py controlled closed-loop verification sessions
 mcp/ci_regression.py      repository-only synthetic MCP regression suite
 ```
 
 The source directory is `mcp/`. Do not reintroduce a parallel `bridge/` source tree. “Bridge” may remain as a conceptual/runtime term and in historical tool names such as `audio_bridge_status`.
 
-### Current 36-tool registry
+### Current 37-tool registry
 
 The exact registry is enforced by `mcp/server.py` self-test. The two Analyzer-owned write tools are:
 
@@ -531,6 +549,7 @@ Skill scope includes:
 - measurement validity;
 - transport/Song Memory semantics;
 - structure boundary/recurrence semantics;
+- Track Story and section-to-section evolution semantics;
 - latency/data quality;
 - worker performance telemetry;
 - temporal/masking/stereo/tonal evidence;
@@ -550,11 +569,11 @@ Unavailable evidence remains unavailable.
 Append-only compatibility fields can physically remain in a packet when a profile disables their computation. MCP parsing must invalidate disabled families.
 
 ```text
-Loudness off  → LUFS / True Peak unavailable
-Spectrum off  → spectrum validity false / arrays unavailable
-Stereo off    → stereo validity false / deep stereo unavailable
-Temporal off  → temporal validity false / temporal descriptors unavailable
-Semantic off  → semantic validity false / chroma/harmonic unavailable
+Loudness off  -> LUFS / True Peak unavailable
+Spectrum off  -> spectrum validity false / arrays unavailable
+Stereo off    -> stereo validity false / deep stereo unavailable
+Temporal off  -> temporal validity false / temporal descriptors unavailable
+Semantic off  -> semantic validity false / chroma/harmonic unavailable
 ```
 
 Transport/Core context may remain available under Eco.
@@ -564,17 +583,18 @@ Transport/Core context may remain available under Eco.
 Do not collapse:
 
 ```text
-correlation + Side/Mid + negative-cross → one stereo score
-chroma + entropy + tonal ranking + F0 → one music confidence score
-verification topology + coverage + readback → one change-quality score
-worker load + FIFO + lag + drops + age → one performance score
-structure boundary + recurrence + semantic naming → one form-confidence score
-control ACK + telemetry readback → one undifferentiated success flag
+correlation + Side/Mid + negative-cross -> one stereo score
+chroma + entropy + tonal ranking + F0 -> one music confidence score
+verification topology + coverage + readback -> one change-quality score
+worker load + FIFO + lag + drops + age -> one performance score
+structure boundary + recurrence + semantic naming -> one form-confidence score
+Track Story activity + energy + spectrum + stereo + temporal -> one track-quality score
+control ACK + telemetry readback -> one undifferentiated success flag
 ```
 
 ### Heuristics/estimates must be labelled
 
-Spectral overlap, temporal overlap, ERB evidence, negative-cross evidence, tonal-center ranking, harmonic alignment, transport-window alignment, FIFO-derived lag, section boundary strength and recurrence similarity are evidence/heuristics/estimates unless replaced by validated stronger models.
+Spectral overlap, temporal overlap, ERB evidence, negative-cross evidence, tonal-center ranking, harmonic alignment, transport-window alignment, FIFO-derived lag, section boundary strength, recurrence similarity and Track Story relative comparisons are evidence/heuristics/estimates unless replaced by validated stronger models.
 
 ### Prefer exact project data for exact symbolic facts
 
@@ -586,11 +606,11 @@ Controlled Before/After verification for real project/plugin changes remains ext
 
 ```text
 Before baseline
-→ external DAW-control MCP write
-→ actual host readback
-→ comparable After capture
-→ comparability guardrails
-→ After-minus-Before deltas
+-> external DAW-control MCP write
+-> actual host readback
+-> comparable After capture
+-> comparability guardrails
+-> After-minus-Before deltas
 ```
 
 The Analyzer-owned Analysis Profile control ACK is **not** a substitute for host readback of unrelated DAW/plugin changes.
@@ -703,78 +723,286 @@ The current product incorporates these milestones:
 - explainable section-scale novelty detection, neutral recurrence families and section-level project profiles built on Song Memory;
 - bilingual English/Chinese plugin GUI with transport/health visibility;
 - direct four-button Eco/Balanced/Mix/Full GUI synchronized to the real host parameter;
-- Analyzer-owned loopback Analysis Profile control with explicit ACK and a strict no-general-DAW-write boundary.
+- Analyzer-owned loopback Analysis Profile control with explicit ACK and a strict no-general-DAW-write boundary;
+- section-aware Track Story that exposes per-section observations, adjacent deltas, recurring-family per-dimension variation and coverage guardrails without assigning artistic roles.
 
-## 18. Roadmap / genuine future gaps
+## 18. Long-term roadmap / ordered genuine gaps
 
-There is no automatic next stage. Only implement a milestone when an observed workflow/reliability gap justifies it.
+This roadmap is the persistent development order for the current architecture. Do not invent artificial stage numbers or version bumps to advance it. Reorder only when a concrete reliability/workflow dependency justifies the change, and record the reason here.
 
-Current genuine gaps include:
-
-- transport time/PPQ remain approximate, not sample-accurate;
-- PPQ correction uses current BPM, not full historical tempo-map reconstruction;
-- Song Memory is MCP RAM/session-scoped;
-- section maps are session-scoped;
-- section detector operates at one-second retained-summary scale, not beat/transient segmentation;
-- structure is explainable/heuristic, not learned;
-- no automatic semantic Verse/Chorus/Drop naming by design;
-- no direct exact FL Studio marker/Playlist metadata integration yet;
-- epoch IDs are instance-local, not project-global pass IDs;
-- cross-instance section alignment uses DAW-time overlap, not stable global pass UUID;
-- estimated analysis lag excludes OSC/MCP/LLM/DAW-control latency;
-- verification is still recent-window rather than exact transport-anchored same-range;
-- no routing graph;
-- no persistent project cache;
-- no Track Story layer yet;
-- no section-aware Mix Relationships layer yet.
-
-### Strong next reasoning layer: Track Story
-
-A future Track Story layer should summarize what each Analyzer/track does across detected sections rather than returning only isolated section snapshots.
-
-Potential output shape:
+Status vocabulary:
 
 ```text
-Track: Vocal
-S01/A  inactive/low
-S02/B  active, center, mid-forward
-S03/C  active, louder, wider doubles
-S04/B  similar to S02
-S05/C  similar to S03 but brighter
+ACTIVE       implementation is currently being developed/validated
+QUEUED       intended next work after earlier dependencies
+LATER        useful but not yet a near-term dependency
+BLOCKED      requires external DAW/project capability or unresolved design work
+DONE         implemented, documented and regression-covered on main
 ```
 
-Potential tool:
+### P1 - Track Story across sections
+
+Status: **ACTIVE** on the current development branch; mark **DONE** only after merge and exact-head MCP CI passes.
+
+Goal:
 
 ```text
-audio_track_story(track, map_id=None, ...)
+one Analyzer instance
++ cached section map
+-> per-section behavior
+-> adjacent-section deltas
+-> recurring-family variation
+-> coverage-aware whole-track narrative evidence
+```
+
+Required evidence:
+
+- active ratio;
+- RMS / LUFS-S;
+- crest;
+- centroid + coarse spectral regions;
+- stereo correlation / width;
+- temporal flux;
+- chroma / pitch-class evidence;
+- selected per-instance transport epoch;
+- coverage / lag / drops;
+- adjacent deltas only when both sections have adequate coverage;
+- same-family per-dimension min/max/mean/spread rather than a single score.
+
+Completion criteria:
+
+- `audio_track_story(track, map_id=None)` exists;
+- no realtime/VST3/OSC changes;
+- missing coverage never becomes inactivity;
+- no inferred track role or Verse/Chorus/Drop naming;
+- synthetic test covers different instance-local epochs and low-coverage guards;
+- README/Skill/Release docs and tool counts agree;
+- MCP self-test and `mcp/ci_regression.py` pass on the exact implementation head.
+
+### P2 - Section-aware Mix Relationships
+
+Status: **QUEUED**.
+
+Goal: explain where relationships between relevant tracks change across sections/families, instead of doing only isolated pair comparisons.
+
+Design constraints:
+
+- avoid O(N^2) all-pairs output explosion;
+- shortlist pairs using overlapping activity + coarse spectral/stereo evidence;
+- then reuse deeper masking/stereo/temporal tools only for relevant pairs;
+- preserve directionality where the evidence has direction;
+- return section/family context and coverage for every relationship;
+- do not turn overlap into an automatic EQ/sidechain recommendation.
+
+Completion criteria:
+
+- project-level shortlist remains bounded on large track counts;
+- output identifies which section/family changed and which evidence dimension changed;
+- sparse/missing track coverage cannot create false conflicts;
+- synthetic project regression includes at least one relationship that appears in one family and disappears in another.
+
+### P3 - Exact DAW context integration
+
+Status: **BLOCKED** on companion DAW-control capability/contract details.
+
+Target exact context:
+
+```text
+project identity
+Mixer track names and stable IDs
+plugin chain and slot identity
+routing/sends
+Playlist markers/labels
+clips/patterns where available
+MIDI/symbolic notes where available
+actual plugin parameter readback
 ```
 
 Rules:
 
-- derive from existing section evidence;
-- missing coverage != inactive;
-- low active ratio != automatically muted;
-- do not invent role names without exact mapping/name/context;
-- compare consistency/variation inside recurring families;
-- remain descriptive/evidence-oriented, not processor-prescriptive.
+- exact project metadata wins over audio inference for exact symbolic claims;
+- Analyzer runtime UUID remains runtime identity, not project identity;
+- do not duplicate a general DAW-control layer inside Analyzer MCP.
 
-### Later: section-aware Mix Relationships
+Completion criteria:
 
-After Track Story, compare relevant track pairs inside each section/family so the Agent can answer where a relationship changes or becomes problematic.
+- stable external project + track identifiers can be joined to Analyzer runtime mappings;
+- exact section names/markers can annotate neutral A/B/C evidence without overwriting the evidence itself;
+- reconnect/reload behavior is deterministic and documented.
 
-Avoid all-pairs explosion. Shortlist using activity overlap and coarse spectral evidence, then drill down only where useful.
+### P4 - Transport-anchored same-range verification
 
-Other later candidates, only when justified:
+Status: **QUEUED** after stable section/time-range selection is mature.
 
-- transport-anchored same-range verification;
-- change ledger / Agent cursor-digest;
-- whole-pass mastering distributions such as LRA/PLR/percentiles;
-- energy-aware stereo/mono-fold evidence;
-- reference-track comparison;
-- persistent project cache with stable external project ID;
-- stronger tonal representation (HPCP/CQT/tuning);
-- offline fast scan;
-- optional learned music embeddings if explainable structure proves insufficient;
-- routing graph.
+Goal:
 
-Do not invent artificial milestone/version numbers simply to continue development.
+```text
+Before DAW range X..Y
+-> external change + actual host readback
+-> After exact same DAW range X..Y
+-> comparable deltas
+```
+
+Completion criteria:
+
+- exact requested DAW range is retained separately from recent-window history;
+- Before/After coverage/profile/topology compatibility is explicit;
+- loop/seek/replay epochs cannot silently mix;
+- failed range recapture returns incomplete verification rather than optimistic success.
+
+### P5 - Persistent project memory and stable external identity
+
+Status: **BLOCKED** until P3 provides a trustworthy project identity.
+
+Goal: preserve useful Song Memory derivatives across MCP/DAW restarts without confusing different projects or stale audio.
+
+Persist candidates:
+
+```text
+project_id / track_id mappings
+section maps
+Track Stories
+analysis digests
+verification/change history
+coverage metadata
+schema/version metadata
+```
+
+Rules:
+
+- raw long-term audio is not required;
+- stale cache must be detectable;
+- runtime UUID and instance-local epoch are never used as permanent project IDs;
+- cache schema must be migratable or safely discardable.
+
+### P6 - Dynamics/mastering distributions
+
+Status: **QUEUED**.
+
+Target evidence:
+
+```text
+RMS/LUFS percentiles
+peak/crest distributions
+LRA
+PLR-like evidence where semantics are valid
+section-aware dynamic range
+transient density/distribution
+```
+
+Rules:
+
+- distinguish complete-song coverage from partial playback;
+- do not expose a whole-song Integrated LUFS claim from an incomplete pass;
+- keep descriptive distribution evidence separate from loudness-target advice.
+
+### P7 - Energy-aware mono-fold / stereo compatibility evidence
+
+Status: **QUEUED**.
+
+Target evidence:
+
+```text
+mono-fold RMS delta
+bandwise mono-fold energy loss
+mono-fold peak delta
+spectral delta after L+R fold
+```
+
+This complements, not replaces:
+
+```text
+correlation
+Side/Mid
+negative-cross energy
+frequency-dependent stereo
+```
+
+Do not compress them into one stereo-quality score.
+
+### P8 - Reference-track comparison
+
+Status: **LATER**.
+
+Goal: level-aware, section-aware comparison against a user-selected reference without copying the reference as a processing recipe.
+
+Required guardrails:
+
+- explicit reference identity/source;
+- loudness/level matching where appropriate;
+- comparable section/range selection;
+- distributions rather than only one average;
+- observed difference != required correction.
+
+### P9 - Stronger tonal representation
+
+Status: **LATER**.
+
+Candidates:
+
+```text
+HPCP/CQT-style tonal evidence
+better tuning-offset handling
+multi-pitch evidence
+tonal-centroid/Tonnetz-like relationships
+key/chord likelihood with explicit uncertainty
+```
+
+Rules:
+
+- exact MIDI/project symbolic data wins when available;
+- audio-derived key/chord remains probabilistic evidence;
+- do not add a learned model merely because it is fashionable; require measured improvement over explainable evidence.
+
+### P10 - Offline fast scan
+
+Status: **LATER / BLOCKED** on input/render workflow design.
+
+Goal: analyze rendered songs/stems faster than realtime while preserving a compatible evidence schema.
+
+Possible implementation surfaces:
+
+```text
+standalone CLI/file analyzer
+DAW offline-render integration
+rendered stem ingestion
+```
+
+Do not put file I/O or offline scanning onto the realtime audio callback.
+
+### Cross-cutting reliability gaps
+
+These are not separate product milestones, but every relevant milestone should improve them when possible:
+
+- transport time/PPQ are approximate, not sample-accurate;
+- PPQ correction uses current BPM, not full historical tempo-map reconstruction;
+- Song Memory and section maps are currently MCP-session scoped;
+- section detection operates at one-second retained-summary scale, not beat/transient segmentation;
+- structure is explainable/heuristic, not learned;
+- epoch IDs are instance-local, not project-global pass IDs;
+- estimated analysis lag excludes OSC/MCP/LLM/DAW-control latency;
+- no routing graph until exact DAW context supplies one;
+- semantic arrangement naming remains intentionally external/contextual.
+
+### Optional future candidates after P1-P10 dependencies
+
+Only pursue these when evidence shows they solve a real workflow gap:
+
+- change ledger / Agent cursor-digest for avoiding repeated edits;
+- more explicit spectral tilt/balance summaries derived from existing 32 bands;
+- beat-aware structure refinement;
+- learned music embeddings if explainable structure/tonal features prove insufficient;
+- richer offline/project interchange.
+
+## 19. Roadmap maintenance rule
+
+Whenever a roadmap item changes state:
+
+1. update its status in this file;
+2. move durable completed behavior into Section 17 history/current architecture sections;
+3. update tool counts/source layout if applicable;
+4. update README/Skill/Release docs as required by Section 2;
+5. add or update a regression that proves the completion criterion;
+6. do not mark **DONE** until the implementation head has the required green CI and the change is on `main`.
+
+Do not use conversation memory alone as the project roadmap. `AGENT.md` is the repository source of truth for planned architectural work.
