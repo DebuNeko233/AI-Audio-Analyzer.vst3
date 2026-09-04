@@ -173,7 +173,8 @@ def main() -> None:
         assert comparison["controlled_comparison"] is True, comparison
         assert result["closed_loop_complete"] is True
         assert comparison["comparability"]["stale_after_targets"] == []
-        assert comparison["comparability"]["feature_mask_mismatch_targets"] == []
+        assert comparison["comparability"]["retained_feature_mismatch_targets"] == []
+        assert comparison["comparability"]["live_feature_mask_mismatch_targets"] == []
         assert comparison["comparability"]["dropped_block_regression_targets"] == []
         targets = {item["identity"]: item for item in comparison["targets"]}
         assert targets["mixer:1/slot:1"]["before"]["selected_transport_epoch"] == 3
@@ -184,7 +185,7 @@ def main() -> None:
 
         print(
             "transport-range verification regression: ok "
-            "(fractional normalization, coverage-first pass selection, cross-instance epochs, post-fence replay, readback gate)"
+            "(fractional normalization, coverage-first pass selection, cross-instance epochs, post-fence replay, retained-feature compatibility, readback gate)"
         )
     finally:
         with core._lock:
