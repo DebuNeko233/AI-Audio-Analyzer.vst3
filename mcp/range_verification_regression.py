@@ -23,6 +23,18 @@ def _frame(runtime_id: str, track: str) -> dict:
     }
 
 
+def _bind(runtime_id: str, track: str, track_index: int) -> None:
+    core._on_identify(
+        "/aianalyzer/identify",
+        runtime_id,
+        track,
+        1.0 + track_index * 0.01,
+        "0.4",
+    )
+    result = core.audio_bind_last_identified(track_index, track, 1)
+    assert result["selector"] == f"mixer:{track_index}/slot:1"
+
+
 def _seed_pass(
     runtime_id: str,
     epoch: int,
@@ -79,6 +91,9 @@ def main() -> None:
     with core._lock:
         saved_tracks = copy.deepcopy(core._tracks)
         saved_bindings = copy.deepcopy(core._bindings)
+        saved_identify_events = copy.deepcopy(core._identify_events)
+        saved_identify_sequence = core._identify_sequence
+        saved_last_identify_at = core._last_identify_at
     with song._song_lock:
         saved_timeline = copy.deepcopy(song._timeline)
     with verification._range_verification_lock:
@@ -89,26 +104,17 @@ def main() -> None:
         with core._lock:
             core._tracks.clear()
             core._bindings.clear()
+            core._identify_events.clear()
+            core._identify_sequence = 0
+            core._last_identify_at = None
             core._tracks.update(
                 {
                     "runtime-a": _frame("runtime-a", "Track A"),
                     "runtime-b": _frame("runtime-b", "Track B"),
                 }
             )
-            core._bindings.update(
-                {
-                    "runtime-a": {
-                        "fl_track_index": 1,
-                        "fl_track_name": "Track A",
-                        "slot": 1,
-                    },
-                    "runtime-b": {
-                        "fl_track_index": 2,
-                        "fl_track_name": "Track B",
-                        "slot": 1,
-                    },
-                }
-            )
+        _bind("runtime-a", "Track A", 1)
+        _bind("runtime-b", "Track B", 2)
         with song._song_lock:
             song._timeline.clear()
         with verification._range_verification_lock:
@@ -186,6 +192,10 @@ def main() -> None:
             core._tracks.update(saved_tracks)
             core._bindings.clear()
             core._bindings.update(saved_bindings)
+            core._identify_events.clear()
+            core._identify_events.extend(saved_identify_events)
+            core._identify_sequence = saved_identify_sequence
+            core._last_identify_at = saved_last_identify_at
         with song._song_lock:
             song._timeline.clear()
             song._timeline.update(saved_timeline)
