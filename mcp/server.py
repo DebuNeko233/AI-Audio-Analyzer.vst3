@@ -14,6 +14,7 @@ Current layers:
 - semantic_tools: chroma, tonal-center, and harmonic-alignment evidence
 - performance_tools: Analysis Profile, feature-mask and worker telemetry parsing
 - song_tools: DAW transport, continuous-pass song memory and latency-aware summaries
+- section_tools: explainable boundaries, neutral recurring families and section profiles
 - verification_tools: controlled Before/After verification sessions
 
 Set AI_ANALYZER_SELF_TEST=1 to validate source or packaged runtime without
@@ -65,6 +66,7 @@ import song_tools as song  # noqa: E402
 
 core._on_frame = song.on_frame_v12
 
+import section_tools as structure  # noqa: E402
 import verification_tools as verification  # noqa: E402,F401
 
 MCP_VERSION = "1.2"
@@ -100,6 +102,8 @@ EXPECTED_TOOLS = {
     "audio_song_status",
     "audio_song_timeline",
     "audio_song_overview",
+    "audio_section_map",
+    "audio_section_profile",
     "audio_begin_verification",
     "audio_complete_verification",
     "audio_verification_status",
@@ -145,6 +149,7 @@ def self_test() -> None:
         )
 
     _self_test_song_coverage()
+    structure_result = structure._self_test()
 
     print(
         json.dumps(
@@ -157,6 +162,7 @@ def self_test() -> None:
                 "tool_count": len(names),
                 "expected_tools": len(EXPECTED_TOOLS),
                 "song_memory_sparse_coverage": "ok",
+                "song_structure_synthetic": structure_result,
             },
             ensure_ascii=False,
         )
