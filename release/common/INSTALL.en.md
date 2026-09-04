@@ -1,4 +1,4 @@
-# AI Audio Analyzer 1.1 — Installation Guide
+# AI Audio Analyzer 1.2 — Installation Guide
 
 [中文教程](INSTALL.zh-CN.md) | [Agent / MCP setup](MCP-SETUP.md)
 
@@ -20,12 +20,13 @@ Intel/x86_64 macOS is not included.
 ```text
 AI Audio Analyzer.vst3
 mcp/                         standalone Analyzer MCP executable
-skill/                       Cherry Studio Skill
+skill/                       Cherry Studio / LLM Skill
 START-HERE.md
 MCP-SETUP.md                 Agent/MCP setup + JSON examples
 INSTALL.en.md
 INSTALL.zh-CN.md
 VERSION.txt
+LICENSE
 platform installer files
 ```
 
@@ -42,8 +43,9 @@ The user Release deliberately does **not** include MCP Python source, repository
 7. Fully restart FL Studio.
 8. Open FL Studio Plugin Manager and rescan VST3 plugins if AI Audio Analyzer is not already visible.
 9. Follow `MCP-SETUP.md` to add the generated MCP configuration to the Agent/Assistant that will use Analyzer.
+10. Import the installed `skill` folder for the same Agent/Assistant.
 
-The installer places the user-side Analyzer files under:
+The installer places user-side Analyzer files under:
 
 ```text
 %LOCALAPPDATA%\AI Audio Analyzer\
@@ -61,6 +63,7 @@ At the end, it prints the exact locations of `cherry-studio-mcp.json`, `MCP-SETU
 6. Wait for **Installation completed successfully**.
 7. Fully restart FL Studio and rescan plugins if needed.
 8. Follow `MCP-SETUP.md` to add the generated MCP configuration to the Agent/Assistant that will use Analyzer.
+9. Import the installed `skill` folder for the same Agent/Assistant.
 
 The VST3 is installed to:
 
@@ -82,60 +85,94 @@ The installer generates a ready-to-use `cherry-studio-mcp.json` containing the r
 
 Open `MCP-SETUP.md` for the full beginner flow and copyable Windows/macOS JSON examples. In short:
 
-1. open the MCP server settings in Cherry Studio or another MCP-compatible client;
-2. import the generated `cherry-studio-mcp.json`, or manually add the same `mcpServers.ai-audio-analyzer` entry;
+1. open MCP server settings in Cherry Studio or another MCP-compatible client;
+2. import generated `cherry-studio-mcp.json`, or manually add the same `mcpServers.ai-audio-analyzer` entry;
 3. enable/select that MCP server for the Agent/Assistant that will use Analyzer;
 4. import the installed `skill` folder for the same Agent;
-5. refresh/restart the Agent session and verify it can see Analyzer tools such as `audio_project_status()`.
+5. refresh/restart the Agent session and verify it can see tools such as `audio_project_status()`.
 
-The generated file is preferable to typing the path manually because it already contains the correct installation path for the current computer.
+The generated file is preferable to typing the path manually because it already contains the correct installation path.
 
-## Cherry Studio Skill
+## What AI Audio Analyzer 1.2 adds
 
-The Skill is written in English for LLM compatibility. It teaches the model how to discover Analyzer instances, select the minimum analysis profile needed for a request, interpret measurements, and run controlled Before/After verification. It does not impose a mixing, mastering, harmony, or stereo-processing style.
+The 1.2 measurement path is designed for Agent latency rather than requiring the model to watch realtime frames continuously.
+
+High-level whole-song tools include:
+
+```text
+audio_song_status()
+audio_song_overview()
+audio_song_timeline(...)
+```
+
+The MCP retains bounded one-second DAW-time Song Memory. Playback starts, seeks and loop jumps create separate continuous playback epochs so unrelated positions are not silently blended.
+
+The current MCP also provides explainable structure tools:
+
+```text
+audio_section_map(...)
+audio_section_profile(...)
+```
+
+They can identify section-scale change points and group recurring sections into neutral A/B/C/... families. These are structural recurrence labels, **not automatic Verse/Chorus/Drop names**. Exact DAW markers/project metadata remain authoritative when available.
+
+MCP 1.2 currently exposes **34 tools**.
 
 ## Analysis Profiles
 
-AI Audio Analyzer can expose these host-visible measurement profiles:
+AI Audio Analyzer exposes:
 
 ```text
-Eco
-Balanced
-Mix
-Full
+0 Eco
+1 Balanced
+2 Mix
+3 Full
 ```
 
-They change **Analyzer measurement workload only**. They do not process or alter the audio.
+Profiles affect Analyzer measurement computation only. They do not process the audio or define a sonic mode.
 
-`Full` is the compatibility default. An AI workflow may temporarily request a lighter or deeper profile through the real DAW-control MCP, read the host setting back, and verify the Analyzer status. You do not need to configure this during installation.
+```text
+Eco       Core
+Balanced  Core + Loudness + Spectrum + Stereo
+Mix       Balanced + Temporal
+Full      Mix + Semantic
+```
 
-## Closed-loop verification
+`Full` remains the compatibility default.
 
-Analyzer MCP can capture a Before measurement, store actual host readback supplied by the external DAW-control MCP, capture an After window, and report whether the measurement conditions are technically comparable.
+The Analyzer MCP reads/verifies profile state; actual host-parameter writes belong to the real DAW-control MCP.
 
-This does not mean Analyzer itself controls FL Studio, and technical comparability does not mean an artistic change is better.
+## First use
 
-Normal users do not need to configure this manually; the Skill explains the agent workflow.
+A sensible first Agent flow is:
 
-## FL Studio cannot find the plugin
+```text
+audio_project_status()
+→ bind unbound Analyzer instances through Identify when needed
+→ audio_song_status() for whole-song work
+→ play/capture enough of the intended pass
+→ audio_section_map() for structural context
+→ audio_section_profile() only for relevant sections
+→ use detailed Temporal / Masking / Stereo / Tonal tools only when required
+```
 
-1. Fully close and reopen FL Studio.
-2. Open Plugin Manager.
-3. Run a plugin rescan.
-4. Confirm `AI Audio Analyzer` appears in the plugin list.
+The Analyzer returns measurement evidence. It does not automatically decide EQ, compression, sidechain, stereo processing, mastering targets, song key, or semantic section names.
 
-## The Agent cannot see Analyzer MCP tools
+## Troubleshooting
 
-1. Run the installer again so it checks the standalone MCP executable and regenerates `cherry-studio-mcp.json`.
-2. Confirm the generated MCP server is enabled for the current Agent/Assistant.
-3. Refresh or restart the MCP client after changing configuration.
-4. Follow `MCP-SETUP.md` and compare your configuration with the JSON example.
-5. Make sure another copy of AI Audio Analyzer MCP is not already running on the same computer.
+If the plugin is not visible after installation:
 
-## macOS says the installer cannot be opened
+- fully restart FL Studio;
+- rescan VST3 plugins;
+- verify the VST3 exists in the normal platform VST3 directory.
 
-Right-click `Install.command` and choose **Open** instead of double-clicking it. If macOS shows another confirmation dialog, choose **Open** again.
+If the Agent cannot see Analyzer MCP tools:
 
-## Important
+- confirm the installer completed successfully;
+- use the generated `cherry-studio-mcp.json` rather than guessing the executable path;
+- make sure the MCP server is enabled for the same Agent that receives the Skill;
+- restart/refresh the Agent session.
 
-The Release archive is a finished user package. Do not look for or install Python dependencies from it: they are not included and are not required.
+If macOS blocks the installer, right-click `Install.command` and choose **Open**. Current builds are not notarized.
+
+For MCP configuration details, use `MCP-SETUP.md`.

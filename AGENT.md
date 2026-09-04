@@ -4,60 +4,86 @@ This file is the working contract for AI agents and maintainers modifying **AI A
 
 Read it before changing the repository. Keep implementation, tests, CI, Release packaging, installers, MCP behavior, Skill behavior, history, and public documentation consistent.
 
-## 1. Project purpose
+## 1. Project purpose and boundary
 
-AI Audio Analyzer is a machine-readable audio measurement layer for AI/LLM-assisted music-production workflows.
+AI Audio Analyzer is a machine-readable audio measurement/perception/memory/verification layer for AI/LLM-assisted music-production workflows.
 
 ```text
 AI Audio Analyzer
 ├─ VST3    measures audio + DAW transport context inside the DAW
-├─ MCP     exposes measurement / timeline memory / comparison / verification evidence
-└─ Skill   teaches correct MCP use, latency handling and parameter semantics
+├─ MCP     exposes measurement / song memory / structure / comparison / verification evidence
+└─ Skill   teaches correct MCP use, latency handling and evidence semantics
 ```
 
-Analyzer MCP is the measurement/perception/memory/verification channel. DAW control is separate and currently paired with:
+Analyzer MCP is read/measure/remember/compare/verify oriented. DAW control is separate and currently paired with:
 
+```text
 https://github.com/rosasynthesiz/flstudio-mcp
+```
 
-The Analyzer must remain measurement-oriented. Do not encode one artistic mixing, mastering, harmony, arrangement, tuning, or stereo style into MCP or Skill.
+Analyzer must **not** write artistic/technical DAW parameters. Real project inspection, plugin writes, project markers and actual host readback belong to the DAW-control MCP.
 
-The LLM is deliberately **not** part of the realtime measurement loop. The Analyzer should continue observing while an Agent is thinking or using another tool, and expose enough retained DAW-time context for the Agent to reason later without pretending it observed the audio live.
+Do not encode one artistic mixing, mastering, harmony, arrangement, tuning, stereo, loudness or genre style into MCP or Skill.
 
-## 2. Current architecture
+The LLM is deliberately **not** part of the realtime measurement loop. Analyzer should continue observing while an Agent is thinking or using another tool, and expose enough retained DAW-time context for the Agent to reason later.
+
+## 2. Repository-wide change rule
+
+For **every code, workflow, protocol, MCP, packaging or behavior change**, inspect and update as appropriate:
+
+```text
+README.md
+README.zh-CN.md
+AGENT.md
+skills/ai-analyzer-flstudio/SKILL.md
+skills/ai-analyzer-flstudio/README-CHERRY-STUDIO.md
+skills/ai-analyzer-flstudio/references/*.md
+release/README.md
+release/common/START-HERE.md
+release/common/MCP-SETUP.md
+release/common/INSTALL.en.md
+release/common/INSTALL.zh-CN.md
+.github/workflows/*.yml
+mcp/cherry-studio.example.json
+release/windows/*
+release/macos/*
+```
+
+Not every file must change every time, but every relevant file must be **considered**. Never leave known stale tool counts, version strings, semantics or packaging lists.
+
+All LLM-facing Skill content stays **English-only**.
+
+## 3. Current architecture
 
 ### VST3
 
 - JUCE 8.0.8, C++20, CMake.
-- Current development/product version: **1.2.0**.
+- Current product version: **1.2.0**.
 - Visible product name: `AI Audio Analyzer`.
 - Internal target: `AIAnalyzer`.
 - Bundle ID: `com.debuneko.aianalyzer`.
 - Manufacturer/plugin IDs remain stable for DAW-project compatibility.
 - Default OSC endpoint: `127.0.0.1:9855`.
-- Audio callback writes to a preallocated SPSC FIFO and does not run FFT, loudness, semantic analysis, OSC, MCP, file/network I/O, or verification orchestration.
-- Audio callback may read host transport and hand a compact snapshot to the worker through atomics only.
-- Background worker owns analysis, state reset, latency estimation and OSC.
-- `libebur128` provides LUFS / True Peak measurement.
-- Historical host-visible `Identify` remains the first parameter.
-- Host-visible `Analysis Profile` remains the second parameter.
+- Audio callback writes to a preallocated SPSC FIFO.
+- Audio callback does **not** run FFT, loudness, semantic analysis, OSC, MCP, file/network I/O, structure analysis, or verification orchestration.
+- Audio callback may read the host Analysis Profile and DAW transport, then hand fixed-size scalar state to the worker through atomics only.
+- Background worker owns FFT/analysis/state resets/latency estimation/OSC.
+- `libebur128` provides LUFS / True Peak.
+- Historical host-visible `Identify` remains parameter 1.
+- Host-visible `Analysis Profile` remains parameter 2.
 
 Do not casually change host/plugin identity fields or reorder historical host parameters.
 
-### Adaptive analysis profiles
-
-Host parameter:
+### Adaptive Analysis Profiles
 
 ```text
 Parameter ID: analysis_profile
 Display name: Analysis Profile
-
 0 Eco
 1 Balanced
 2 Mix
 3 Full
 ```
-
-Feature groups:
 
 ```text
 Eco       Core
@@ -66,7 +92,7 @@ Mix       Balanced + Temporal
 Full      Mix + Semantic
 ```
 
-`Full` is the default for backward compatibility. Saved states without an `analysisProfile` attribute restore as Full.
+`Full` is default for backward compatibility. Profiles change measurement computation only; they must never alter the audio signal.
 
 Scheduling intent:
 
@@ -77,13 +103,13 @@ Mix       hop-level FFT for temporal evidence
 Full      Mix + lower-rate semantic analysis
 ```
 
-These are performance profiles, not sonic modes. They must never alter the audio signal.
+### Transport-aware Song Memory
 
-### Transport-aware song memory
+Protocol 1.2 appends DAW transport/data-quality context and MCP-side bounded Song Memory.
 
-Protocol 1.2 adds a DAW-time context tail and MCP-side bounded song memory.
+The VST3 reads `AudioPlayHead::PositionInfo` in `processBlock()` and hands transport state to the worker through atomics only.
 
-The VST3 reads host transport from `AudioPlayHead::PositionInfo` during `processBlock()` and hands only atomics to the worker. The worker estimates the DAW-time position of the analyzed FFT window by compensating for:
+The worker estimates the DAW-time coordinate of analyzed evidence using approximately:
 
 ```text
 current FIFO backlog
@@ -91,26 +117,110 @@ current FIFO backlog
 half of the 4096-sample FFT window
 ```
 
-This is intended for whole-song/section reasoning, not sample-accurate editing.
+This is for whole-song/section reasoning, not sample-accurate editing.
 
-A `transport_epoch` is one **instance-local continuous playback pass**. Playback start, seek, loop jump, or another detected discontinuity increments the epoch. When the worker observes an epoch change it:
+A `transport_epoch` is one **instance-local continuous playback pass**. Playback start, seek, loop jump, or another detected discontinuity creates a new epoch.
+
+Epoch change invariant:
 
 ```text
-discards queued pre-jump FIFO audio
-clears analysis windows / temporal continuity
-resets Semantic cache
-resets Loudness state when Loudness is enabled
+producer detects discontinuity
+→ publishes requested epoch atomically
+→ worker acknowledges epoch
+→ old queued FIFO content is discarded by consumer/worker
+→ pass-dependent analysis state resets
+→ transport publication for new epoch becomes valid
 ```
 
-This prevents old-position audio from being mislabeled as new-position audio.
+Transport must not be published under a new epoch until the worker has acknowledged it. Prefer a short coverage gap over `old audio + new DAW position` mislabeling.
 
-Epoch counters are generated independently in every live VST3 instance. Do not treat an equal numeric epoch across instances as a permanent project-wide pass ID. MCP project/song tools must expose consistency and DAW-time ranges instead of silently assuming equality.
+On epoch change the worker resets/clears as appropriate:
 
-MCP canonical song memory uses **1-second bins**, bounded to **1200 bins / 20 minutes per instance**, and can aggregate to 1/2/5/10/15/30-second query bins. It is MCP-session memory, not yet a persistent project database.
+```text
+FFT/window continuity
+Temporal continuity/accumulators
+Semantic cache
+LUFS-I / pass-max True Peak state when Loudness is enabled
+```
+
+Epoch counters are generated independently in every live VST3 instance. Never treat equal numeric epochs across instances as a permanent project-wide pass identity.
+
+Song Memory:
+
+```text
+canonical bin size       1 second
+coverage slot            100 ms
+max retained bins        1200 / instance
+max retained span        about 20 minutes / instance
+query resolutions        1 / 2 / 5 / 10 / 15 / 30 seconds
+scope                    running MCP session
+```
+
+Coverage aggregation must use observed coverage slots. Sparse canonical bins must **not** become false 100% coverage after coarse aggregation.
+
+### Explainable song structure
+
+The song-structure layer lives entirely in MCP and consumes retained Song Memory. It adds **no realtime DSP** and **no OSC fields**.
+
+Current tools:
+
+```text
+audio_section_map()
+audio_section_profile()
+```
+
+Current boundary detector:
+
+```text
+one-second reference Song Memory
+→ robust feature normalization
+→ multi-scale 2/4/8-second left/right comparison
+→ explainable novelty components
+→ adaptive threshold
+→ local novelty peaks
+→ minimum-section spacing
+→ sections S01/S02/...
+```
+
+Evidence families include:
+
+```text
+cross-track activity
+energy/loudness
+spectral balance
+chroma
+stereo
+dynamics
+temporal change
+```
+
+Current recurrence layer:
+
+```text
+section summaries
+→ transparent weighted similarity
+→ neutral A/B/C/... recurring families
+```
+
+A/B/C family IDs are **not** semantic arrangement labels. Never automatically map:
+
+```text
+A = Intro
+B = Verse
+C = Chorus
+```
+
+Exact DAW markers, Playlist labels, pattern/arrangement metadata, MIDI/project annotations, or explicit user-provided structure win for exact naming.
+
+Supporting tracks are aligned to the reference DAW-time range by the retained epoch/pass with the strongest overlapping coverage. Do **not** require equal instance-local epoch numbers.
+
+Missing Song Memory is missing evidence. A coverage gap is **not silence** and must **not** become a structural boundary merely because data disappeared.
+
+`map_id` is bounded MCP-session state, not a persistent project identifier.
 
 ### MCP
 
-There is exactly **one supported source/PyInstaller entrypoint**:
+There is exactly one supported source/PyInstaller entrypoint:
 
 ```text
 mcp/server.py
@@ -130,18 +240,20 @@ mcp/stereo_tools.py       Mid/Side and stereo evidence
 mcp/semantic_tools.py     chroma / tonal-center / harmonic evidence
 mcp/performance_tools.py  adaptive-profile / worker-performance telemetry
 mcp/song_tools.py         transport parser / song-pass memory / latency-aware summaries
+mcp/section_tools.py      explainable boundaries / recurring families / section profiles
 mcp/verification_tools.py controlled closed-loop verification sessions
 mcp/ci_regression.py      repository-only synthetic MCP regression suite
 ```
 
-The repository source directory is named `mcp/`. Do not reintroduce a parallel `bridge/` source directory; “Bridge” may still appear as a conceptual/runtime term and in historical/public tool names such as `audio_bridge_status`.
+The source directory is `mcp/`. Do not reintroduce a parallel `bridge/` source tree. “Bridge” may remain as a conceptual/runtime term and in historical tool names such as `audio_bridge_status`.
 
 Current metadata:
 
 ```text
-MCP_VERSION = "1.2"
-OSC_PROTOCOL_VERSION = "1.2"
-MCP tool count = 32
+Product version       1.2.0
+MCP_VERSION           1.2
+OSC_PROTOCOL_VERSION  1.2
+MCP tool count        34
 ```
 
 ### Skill
@@ -150,7 +262,7 @@ MCP tool count = 32
 skills/ai-analyzer-flstudio/
 ```
 
-All LLM-facing Skill content is **English-only**:
+All LLM-facing files are English-only:
 
 ```text
 SKILL.md
@@ -158,11 +270,11 @@ README-CHERRY-STUDIO.md
 references/*.md
 ```
 
-Skill scope is MCP calling strategy, selector/mapping rules, profile selection, measurement validity, parameter semantics, transport/song-memory semantics, latency/data-quality handling, performance telemetry, temporal/masking/stereo/tonal evidence, closed-loop verification, and limitations.
+Skill scope includes MCP calling strategy, selector/mapping rules, profile selection, measurement validity, transport/Song Memory semantics, structure boundary/recurrence semantics, latency/data quality, performance telemetry, temporal/masking/stereo/tonal evidence, verification, and limitations.
 
-Do not add fixed genre EQ recipes, LUFS targets, mandatory sidechain rules, stereo recipes, mastering chains, key-change rules, harmony-edit rules, tuning recipes, or “metric X always means processor/action Y”.
+Do not add fixed genre EQ recipes, LUFS targets, mandatory sidechain rules, stereo recipes, mastering chains, forced Verse/Chorus/Drop labels, key-change rules, harmony-edit rules, tuning recipes, or “metric X always means processor/action Y”.
 
-## 3. Implemented evolution
+## 4. Implemented evolution / history
 
 The current product incorporates these milestones:
 
@@ -178,10 +290,13 @@ The current product incorporates these milestones:
 - 12-bin chroma, tonal-center profile ranking and single-F0 harmonic evidence;
 - controlled Before/After verification around external DAW writes/readback;
 - adaptive analysis profiles and worker/FIFO performance telemetry;
-- repository MCP source normalized under `mcp/`, with beginner-facing `MCP-SETUP.md` and copyable Agent/client JSON examples;
-- transport-aware continuous playback epochs, Analyzer backlog/drop telemetry and bounded DAW-time song memory so LLM/tool latency does not erase past musical evidence.
+- MCP source normalized under `mcp/`, with beginner-facing `MCP-SETUP.md`;
+- transport-aware continuous playback epochs, Analyzer lag/drop telemetry and bounded DAW-time Song Memory;
+- explainable section-scale novelty detection, neutral recurrence families and section-level project profiles built on Song Memory.
 
-Protocol evolution remains append-only. Current tail is:
+The section layer did **not** require a protocol or product version bump because it consumes existing 1.2 retained data.
+
+Protocol evolution remains append-only. Current tail:
 
 ```text
 128  analysis_profile
@@ -208,135 +323,102 @@ Protocol evolution remains append-only. Current tail is:
 149  schema marker = "1.2"
 ```
 
-Indexes `0..134` must not be silently repurposed.
+Indexes `0..149` must not be silently repurposed. New protocol fields, if ever needed, append after 149.
 
-## 4. Why the current milestones exist
+## 5. Why these milestones exist
 
-Adaptive analysis was driven by a real multi-instance performance need: a project may contain many Analyzer instances, and every instance does not need every evidence family continuously.
+Adaptive analysis addresses multi-instance compute cost.
 
-Transport-aware song memory is driven by a different reliability need: LLM reasoning, MCP calls, external DAW writes and human/host interaction all take time. A measurement layer that only exposes “the latest few seconds” cannot reliably support whole-song mixing/mastering because the relevant passage may have ended before the Agent reads it.
+Transport-aware Song Memory addresses LLM/tool/human latency: a model that only sees “latest few seconds” cannot reliably understand a whole song.
 
-The 1.2 milestone is therefore a scoped protocol/product evolution tied to an observed workflow gap, not version-number momentum.
+The structure layer addresses context selection: raw one-second timelines are too large and too low-level to be the default LLM representation of an entire song. Explainable boundaries and recurrence let the Agent reason in section-sized units first, then drill down selectively.
 
-There is **no predefined next numbered roadmap**. Do not invent another stage merely to advance numbering. Future milestones require an observed reliability gap, real workflow need, compatibility issue, validated measurement improvement, or Release/install problem.
+There is **no predefined next numbered stage/version**. Do not invent a new version merely to create momentum. Future milestones require an observed reliability gap, workflow need, compatibility issue, validated measurement improvement, or Release/install problem.
 
-## 5. Measurement and compatibility rules
+## 6. Measurement and compatibility rules
 
 ### Preserve semantics
 
-Do not silently change metric meaning. If semantics must change, update implementation, regression tests, Skill, README, Release docs, and AGENT together.
+Do not silently change metric meaning. If semantics change, update implementation, regressions, Skill, README, Release docs and AGENT together.
 
 ### `null` is not zero
 
-Unavailable measurements remain unavailable.
+Unavailable evidence remains unavailable.
 
 ### Feature mask is authoritative
 
-The append-only OSC frame retains older field positions even when a profile disables their computation. Bridge-side adaptive parsing must invalidate disabled families so old tools cannot consume compatibility placeholders as real evidence.
-
-Expected behavior includes:
+Append-only compatibility fields can physically remain in a packet when a profile disables their computation. MCP parsing must invalidate disabled families.
 
 ```text
 Loudness off  → LUFS / True Peak unavailable
-Spectrum off  → spectrum validity false / spectral arrays unavailable
-Stereo off    → stereo validity false / deep stereo fields unavailable
+Spectrum off  → spectrum validity false / arrays unavailable
+Stereo off    → stereo validity false / deep stereo unavailable
 Temporal off  → temporal validity false / temporal descriptors unavailable
-Semantic off  → semantic validity false / chroma/harmonic fields unavailable
+Semantic off  → semantic validity false / chroma/harmonic unavailable
 ```
 
-Transport/Core context may remain available under Eco because it is lightweight host/context metadata, not FFT/Semantic analysis.
+Transport/Core context may remain available under Eco.
 
 ### Keep independent concepts independent
 
-Do not collapse correlation, Side/Mid energy, decorrelation proxy and negative-cross evidence into one opaque stereo score.
+Do not collapse:
 
-Do not collapse chroma coverage, entropy, tonal profile correlation, top-2 margin, harmonic ratio and F0 candidate into one opaque music-confidence score.
-
-Do not collapse topology consistency, active coverage, target validity and host readback into a “change quality” score.
-
-Do not collapse worker load, FIFO fill, FFT rate, estimated lag, dropped blocks and data age into one opaque “performance quality” score.
+```text
+correlation + Side/Mid + negative-cross → one stereo score
+chroma + entropy + tonal ranking + F0 → one music confidence score
+verification topology + coverage + readback → one change-quality score
+worker load + FIFO + lag + drops + age → one performance score
+structure boundary + recurrence + semantic naming → one form-confidence score
+```
 
 ### Heuristics and estimates must be labeled
 
-Spectral overlap, onset/change candidates, temporal overlap, ERB-rebinned evidence, negative-cross evidence, decorrelation proxies, tonal-center rankings, single-F0 harmonic alignment, verification guardrails, transport-window alignment and FIFO-derived analysis lag are evidence/heuristics/estimates unless replaced by a validated stronger model.
+Spectral overlap, temporal overlap, ERB evidence, negative-cross evidence, tonal-center ranking, harmonic alignment, transport-window alignment, FIFO-derived lag, section boundary strength and recurrence similarity are evidence/heuristics/estimates unless replaced by validated stronger models.
 
 ### Prefer exact project data for exact symbolic facts
 
-If DAW/MIDI/project tooling exposes exact notes, chords, key metadata, tuning, markers, section labels, routing or other symbolic state, use it for exact claims. Audio inference may complement it but must not silently override exact project data.
+If DAW/MIDI/project tooling exposes exact notes, chords, key metadata, tuning, markers, arrangement labels, routing or other symbolic state, use it for exact claims. Audio inference may complement it but must not silently override exact project data.
 
-Do not claim `audio_song_overview()` has identified Verse/Chorus/Bridge; automatic musical-form labeling is not implemented yet.
+`audio_section_map()` may discover neutral structural recurrence. It does **not** make an exact Verse/Chorus/Bridge claim by itself.
 
-## 6. Performance, transport and realtime rules
+## 7. Realtime, performance and transport rules
 
-Any change to profiles, scheduling, FIFO behavior, transport handling, timeline memory, or telemetry must review all of the following before merge:
+Any change to profiles, scheduling, FIFO behavior, transport handling, timeline memory or telemetry must review:
 
 ```text
 1. realtime callback work
 2. host parameter compatibility / state restoration
 3. actual feature computation skipped, not merely hidden
-4. Bridge validity/null behavior for disabled families
+4. MCP validity/null behavior for disabled families
 5. profile-transition state reset semantics
 6. transport-discontinuity / epoch reset semantics
-7. FIFO backlog / measurement staleness / data-age behavior
+7. FIFO backlog / staleness / data-age behavior
 8. Windows x64 + macOS arm64 compilation
 9. MCP synthetic regressions
-10. Skill / README / Release documentation impact
+10. Skill / README / Release impact
 ```
 
-### Realtime handoff is atomic-only
-
-The audio callback may cheaply read the host parameter and DAW transport and update atomic worker state. It must not call `Thread::notify()`, take a lock, allocate, perform network I/O, run FFT, or execute heavyweight control work for profile/transport changes.
-
-The worker observes requested profile and transport epoch asynchronously on its own loop. Non-realtime config/profile paths may use the normal worker setter when an immediate wake-up is useful.
-
-### Transport discontinuities must not relabel queued audio
-
-On a requested transport epoch change, the **consumer/worker** owns FIFO discard. The audio callback must not reset or mutate FIFO read state.
-
-Current invariant:
+Realtime callback rules:
 
 ```text
-producer detects host discontinuity
-→ atomically publishes new transport epoch
-→ worker observes epoch
-→ worker discards queued pre-jump samples
-→ worker resets pass-dependent state
-→ new epoch analysis begins
+allowed: cheap host parameter/transport reads + atomic scalar handoff + FIFO push
+forbidden: locks, allocation, Thread::notify(), FFT, loudness, semantic analysis, structure analysis, OSC/network, file I/O, MCP work
 ```
 
-This may intentionally discard a small amount of newly pushed audio around the discontinuity. That is preferable to falsely labeling old pre-seek audio under a new DAW position.
+The audio callback still does not wake the worker.
 
-### Transport coordinate semantics
-
-`transport_time_seconds` / `transport_ppq_position` are estimated analyzed-window coordinates, not latest host-read coordinates and not sample-accurate edit points.
-
-Current lag model:
+Current worker scheduling/measurement invariants:
 
 ```text
-analysisDelaySamples = fifo.available() + kFftSize / 2
-estimated_analysis_lag_ms = analysisDelaySamples / sampleRate * 1000
+hop size                    1024 samples
+FFT                          4096 samples
+OSC update                   about 10 Hz
+worker short-FIFO wait       bounded 1–20 ms
+true peak read               every loudness-enabled hop
+LUFS-S / LUFS-I polling      about every 100 ms
 ```
 
-PPQ correction uses current BPM and the time correction. Do not describe this as exact tempo-map reconstruction across abrupt tempo changes.
-
-`estimated_analysis_lag_ms` excludes network/MCP/LLM/external-control latency.
-
-### Worker wake and loudness polling invariants
-
-The audio callback still does **not** wake the worker. When the FIFO contains less than one analysis hop, the worker estimates the arrival time of missing samples from sample rate and sleeps for a bounded interval of **1–20 ms**.
-
-When Loudness is enabled:
-
-- every 1024-sample hop is passed to `ebur128_add_frames_float()`;
-- `ebur128_prev_true_peak()` is read every hop;
-- pass max True Peak is the running maximum of those per-hop values;
-- LUFS-S and LUFS-I aggregate queries are polled every **100 ms**;
-- a protocol-1.2 transport epoch change resets Loudness state so LUFS-I/pass-max TP represent the new continuous playback pass;
-- disabling then re-enabling Loudness also starts a fresh Loudness state.
-
-Legacy pre-1.2 frame parsing does not retroactively change old plugin loudness behavior.
-
-`tests/WorkerSchedulingTests.cpp` must continue verifying idle-wait boundaries and True Peak accumulation semantics. Do not change the hop or true-peak strategy without re-reviewing those regressions.
+`tests/WorkerSchedulingTests.cpp` must continue protecting scheduling and True Peak accumulation semantics.
 
 ### Profile transitions must not bridge unmeasured gaps
 
@@ -346,43 +428,19 @@ When a disabled family is re-enabled:
 - Temporal previous-spectrum/RMS and aggregate state are cleared;
 - Semantic cache is cleared.
 
-If new stateful analysis families are added later, define equivalent transition semantics explicitly.
-
 ### Telemetry semantics
 
-`worker_load_ratio` is Analyzer background-worker busy ratio. It is **not** DAW realtime CPU, system CPU, whole-plugin CPU, or dropout probability.
+- `worker_load_ratio` = background Analyzer worker busy ratio, not DAW audio-thread CPU.
+- `fifo_fill_ratio` = queued Analyzer input capacity; sustained growth can indicate lag.
+- `estimated_analysis_lag_ms` = FIFO + half-window estimate, not total Agent latency.
+- `dropped_blocks` = cumulative FIFO push failures; nonzero means some audio was not analyzed.
+- `data_age_seconds` = wall-clock age of retained evidence; old historical evidence may still be the requested evidence.
+- `coverage_ratio` = observed retained time coverage, not confidence probability.
+- `fft_runs_per_second` / `semantic_runs_per_second` are observed scheduler rates, not guarantees.
 
-`fifo_fill_ratio` is queued Analyzer input capacity. Sustained growth is a measurement-lag warning.
+## 8. Song Memory and structure invariants
 
-`estimated_analysis_lag_ms` is FIFO + half-window delay estimate. It is not total end-to-end Agent latency.
-
-`dropped_blocks` is cumulative FIFO push failure count for the live VST3 instance. Non-zero means some input audio was not analyzed.
-
-`data_age_seconds` is MCP wall-clock age of retained evidence. Historical evidence can be old and still valid for an explicitly requested past DAW-time range.
-
-`coverage_ratio` must reflect actually retained canonical timeline coverage. Aggregating sparse 1-second bins into a 5/10/30-second result must **not** falsely turn partial coverage into 100% coverage.
-
-`fft_runs_per_second` and `semantic_runs_per_second` are observed scheduler rates, not guaranteed constants.
-
-### Control boundary
-
-Analyzer MCP reads/verifies `Analysis Profile`; it does not write the DAW parameter.
-
-Canonical profile-change flow:
-
-```text
-audio_analysis_status()
-→ inspect actual DAW parameter through FL Studio control MCP
-→ write Analysis Profile through the real control MCP
-→ read actual host state back
-→ audio_analysis_status() again
-→ collect required evidence
-→ restore previous profile when appropriate
-```
-
-Never invent FL Studio MCP tool names.
-
-## 7. Song-memory rules
+### Song Memory
 
 High-level tools:
 
@@ -392,173 +450,170 @@ audio_song_overview()
 audio_song_timeline()
 ```
 
-The canonical storage resolution is one second. Query-time coarser aggregation may reduce LLM token load but must preserve:
+Do not persist/read every 10 Hz OSC frame merely to give the LLM more tokens. The purpose is compact, latency-resilient musical context.
+
+### Section structure
+
+High-level tools:
 
 ```text
-transport epoch
-DAW-time range
-active coverage
-data age
-estimated Analyzer lag
-dropped blocks
-feature validity
+audio_section_map()
+audio_section_profile()
 ```
 
-Do not persist every 10 Hz OSC frame merely to make the LLM read more data. The purpose of the layer is compact, latency-resilient musical context.
+Required invariants:
 
-The current store is in-memory and bounded. Persistence/change ledgers/section detection may be future milestones, but do not claim they already exist.
+```text
+missing coverage != silence
+missing coverage != structural boundary
+family A/B/C != semantic Verse/Chorus/Drop
+boundary strength != calibrated probability
+map_id != persistent project ID
+same numeric epoch across instances != same project pass
+```
 
-## 8. Closed-loop verification rules
+Default cross-instance section alignment must prefer overlapping DAW-time coverage rather than epoch-number equality.
 
-Analyzer MCP owns measurement, identity/binding evidence, Before/After capture, comparability checks, deltas and audit context.
+Regression coverage must include at least one synthetic arrangement with repeated structure, currently `A → B → A`, and at least one end-to-end case where supporting tracks use different epoch numbers from the reference.
 
-External FL Studio control MCP owns project/host inspection, actual writes and actual host-state readback.
+## 9. Closed-loop verification rules
 
-`audio_begin_verification()` must occur before an externally controlled change when a measured Before/After experiment is requested.
+Analyzer MCP owns measurement, binding evidence, Before/After capture, comparability checks, deltas and audit context.
 
-`host_readback` must represent actual returned host state, not the intended value.
+External DAW-control MCP owns real writes and actual host-state readback.
 
-`controlled_comparison=true` is a technical comparability gate only. It does not mean After is better, correct, preferred, professional, or should be kept.
+Canonical flow:
 
-`closed_loop_complete=true` additionally requires caller-supplied host readback. It still does not imply artistic success.
+```text
+audio_begin_verification()
+→ confirm ready_for_external_change
+→ external DAW write
+→ actual host readback
+→ replay comparable passage
+→ audio_complete_verification()
+```
 
-Current verification is still recent-window based. Do not claim same-DAW-time transport-anchored verification until it is explicitly implemented and regression-tested.
+`controlled_comparison=true` means technical comparability only.
 
-Verification sessions are in-memory and not permanent project identifiers.
+`closed_loop_complete=true` means comparability plus caller-supplied actual host readback.
 
-## 9. Release and platform rules
+Neither means the change is artistically better.
+
+Current verification remains recent-window based; do not claim transport-anchored same-range verification exists until it actually does.
+
+## 10. Release contract
+
+Release is for users who may have never programmed.
 
 Supported user platforms:
 
 ```text
 Windows x64
-macOS Apple Silicon arm64 only
+macOS Apple Silicon arm64
 ```
 
-Do not re-add Intel/x86_64 macOS unless explicitly requested.
+Final package rules:
 
-The GitHub Release is for ordinary users, including people who have never programmed.
+- one ZIP per platform;
+- no nested ZIP;
+- PyInstaller **one-file** (`-F`) MCP runtime;
+- no MCP `.py` source;
+- no `requirements.txt`;
+- no venv;
+- no PyInstaller `_internal`;
+- no developer-only `cherry-studio.example.json`;
+- include VST3, standalone MCP executable, Skill, beginner docs, installer and LICENSE;
+- generated client config uses the actual absolute installed MCP executable path.
 
-Normal flow:
+Windows installed MCP path:
 
 ```text
-download one ZIP
-→ extract once
-→ double-click installer
-→ restart FL Studio
-→ add generated MCP configuration to the intended Agent/Assistant
-→ import/use the Skill with the same Agent
+%LOCALAPPDATA%\AI Audio Analyzer\mcp\ai-audio-analyzer-mcp.exe
 ```
 
-User packages must contain only the product/plugin runtime, standalone MCP runtime, Skill and beginner-facing install material.
-
-Mandatory invariants:
+macOS installed MCP path:
 
 ```text
-one final ZIP per platform
-no ZIP-inside-ZIP
-PyInstaller -F / --onefile MCP executable
-no MCP Python source
-no requirements.txt
-no developer source examples/config
-MCP-SETUP.md included with copyable user JSON examples
-installer-generated cherry-studio-mcp.json uses the real absolute installed executable path
-no venv
-no _internal
+~/Library/Application Support/AI Audio Analyzer/mcp/ai-audio-analyzer-mcp
 ```
 
-`MCP-SETUP.md` is beginner-facing installation material and is allowed/required even though developer configuration examples such as repository `mcp/cherry-studio.example.json` remain excluded from user Releases.
+Release workflows must include every imported MCP source module in validation/packaging. Adding a module such as `section_tools.py` requires CI and Release source lists to be reviewed immediately.
 
-Windows package includes `Install.cmd` / `Install.ps1`. macOS package includes `Install.command` / `install.sh`.
+## 11. CI and merge rules
 
-Do not require end users to understand Python, pip, venv, PyPI, CMake, compilers, package managers, source code, or shell commands.
+Never merge while the **latest PR head** has pending or failing required CI.
 
-Current macOS package is arm64 and ad-hoc signed, not Apple-notarized.
-
-## 10. CI and regression rules
-
-Do not claim a plugin change is complete until the relevant **latest PR head** has passed:
+Before merge:
 
 ```text
-MCP source/self-test
-exact expected tool registry
-mcp/ci_regression.py
-release installer validation
-worker scheduling / True Peak C++ regressions
+1. fetch current PR head SHA
+2. fetch workflow run(s) for exactly that SHA
+3. confirm latest-head required jobs are completed successfully
+4. only then merge
+```
+
+Relevant checks include as applicable:
+
+```text
+MCP source compile
+exact tool registry self-test
+synthetic MCP regressions
+section boundary/recurrence regressions
+Release installer validation
 Windows x64 VST3 build
 macOS arm64 VST3 build
+WorkerScheduling / True Peak tests
+PyInstaller/runtime smoke test in Release workflow
 ```
 
-Do not substitute an older green run after the head has moved.
+Do not claim CI is green based on an older commit.
 
-### Development workflow scope
+## 12. Roadmap rule
 
-`.github/workflows/build.yml` is intentionally path-scoped. Changes unrelated to plugin source/build files, MCP source, Analyzer Skill, Release installer material, or build/release workflows should not start the development workflow.
+Roadmap is capability-driven, not version-number-driven.
 
-`tests/**` is part of plugin validation scope. Internal C++ regressions are enabled in development CI with `AI_ANALYZER_BUILD_TESTS=ON`; ordinary Release builds leave that option off and do not ship the test executable.
-
-For `pull_request` `synchronize` events, component detection compares the previous PR head (`github.event.before`) with the new head instead of repeatedly comparing the PR base with the full current head. This is deliberate.
-
-A build-workflow change itself requires all validation families, including both plugin builds.
-
-### CMake / JUCE build cache
-
-The VST3 jobs use `actions/cache` with separate OS/architecture keys to restore CMake/JUCE/libebur128 state and reusable objects.
-
-Cache keys are tied to `CMakeLists.txt` and `.github/workflows/build.yml`. Every VST3 job still configures and builds; a cache hit is never evidence that the latest source compiled successfully.
-
-The development workflow uses concurrency cancellation so a newer commit on the same PR/ref cancels an obsolete in-progress build run.
-
-`mcp/ci_regression.py` must remain development-only and must not ship in beginner Releases.
-
-Regression coverage must include at least:
-
-- Full-profile legacy evidence remains valid;
-- Eco/disabled families become unavailable, not misleading zeroes;
-- parser indices and feature mask are correct;
-- exact expected 32-tool registry;
-- protocol-1.2 transport tail parsing;
-- song memory survives LLM delay conceptually by retaining DAW-time bins independent of recent-window history;
-- transport epochs remain separately addressable and do not merge after seek/loop/start;
-- partial timeline aggregation does not falsely report complete coverage;
-- lag/drop telemetry remains transparent;
-- earlier mapping/project/temporal/masking/stereo/tonal/verification regressions remain intact.
-
-## 11. Documentation impact review — mandatory
-
-For every code or workflow change, inspect whether these need updates:
+Implemented foundation:
 
 ```text
-README.md
-README.zh-CN.md
-AGENT.md
-skills/ai-analyzer-flstudio/SKILL.md
-skills/ai-analyzer-flstudio/README-CHERRY-STUDIO.md
-skills/ai-analyzer-flstudio/references/*.md
-release/README.md
-release/common/START-HERE.md
-release/common/MCP-SETUP.md
-release/common/INSTALL.en.md
-release/common/INSTALL.zh-CN.md
-.github/workflows/build.yml
-.github/workflows/release.yml
-mcp/cherry-studio.example.json
-release installers
+measurement → deterministic identity → project overview
+→ temporal/masking/stereo/tonal evidence
+→ controlled verification
+→ adaptive analysis
+→ DAW Transport + Song Memory + latency/data-quality model
+→ explainable section boundaries + recurring families + section profiles
 ```
 
-“No behavior change required” after inspection is acceptable; skipping the review is not.
+Potential future capability gaps may include, only when justified by real need:
 
-README feature headings should describe the capability, not lead with historical version labels. Protocol/schema version numbers remain where semantically necessary.
+```text
+track story across sections
+section-aware mix relationships / routing graph
+transport-anchored same-range verification
+change ledger / Agent cursor-digest
+whole-pass mastering distributions (LRA/PLR/percentiles)
+energy-aware stereo/mono-fold evidence
+reference-track comparison
+persistent project cache with stable external project ID
+stronger tonal representation (HPCP/CQT/tuning)
+offline fast scan
+optional learned music embeddings if explainable structure evidence proves insufficient
+```
 
-## 12. Repository discipline
+Do not predeclare the next product version or stage from this list.
 
-- Keep `mcp/server.py` as the only startup/PyInstaller entrypoint.
-- Keep repository MCP source under `mcp/`; do not create a second `bridge/` source tree.
-- Preserve host/plugin identity fields.
-- Keep user-facing platform policy Windows x64 + macOS arm64 only.
-- Keep LLM-facing Skill content English-only.
-- Keep Release beginner-first and source-free while including `MCP-SETUP.md`.
-- Keep evidence transparent and measurement-oriented.
-- Prefer compact high-level LLM context over indiscriminate raw-frame/tool dumping.
-- Do not claim CI, packaged-runtime, Release, or installer success without actual evidence.
-- Do not merge a PR while required latest-head CI is failing or still pending.
+## 13. Documentation language and evidence discipline
+
+Public docs may be English and Chinese as appropriate. LLM-facing Skill files remain English-only.
+
+Never present these as Analyzer-measured facts without an exact external source:
+
+- “this is definitely the Chorus/Verse/Drop” from A/B/C recurrence alone;
+- “this needs EQ/sidechain/compression” from masking evidence alone;
+- “this must hit X LUFS” as a universal rule;
+- “this is certainly the song key” from tonal-center ranking;
+- “this F0 is certainly the played note”;
+- “Full is higher audio quality than Eco”;
+- “worker_load_ratio is DAW CPU”;
+- “controlled_comparison means After is better”.
+
+Prefer transparent evidence plus limitations over opaque quality scores or universal processing rules.

@@ -18,6 +18,7 @@ import analyzer_core as core  # noqa: E402
 import masking_tools as masking  # noqa: E402
 import performance_tools as performance  # noqa: E402
 import project_tools as project  # noqa: E402
+import section_tools as structure  # noqa: E402
 import semantic_tools as semantic  # noqa: E402
 import server as entry  # noqa: E402
 import song_tools as song  # noqa: E402
@@ -52,6 +53,7 @@ def synthetic_frame(
     fifo_fill_ratio: float = 0.01,
     fft_runs_per_second: float = 46.8,
     semantic_runs_per_second: float = 5.0,
+    signal_present: bool = True,
     transport_supported: bool = True,
     transport_time_seconds: float | None = None,
     transport_ppq_position: float | None = None,
@@ -79,7 +81,7 @@ def synthetic_frame(
         0.25,
     ] + list(bands)
     v02: list[object] = [-18.0, -14.0, -1.0, -0.5] + [0.85] * 8
-    v03: list[object] = [1, peak, 0.0, runtime_id]
+    v03: list[object] = [1 if signal_present else 0, peak, 0.0, runtime_id]
     v06: list[object] = [0.1, flux * 0.5, flux, rise, -28.0, "0.6"]
     side_bands = [float(value) + side_offset_db for value in bands]
     band_side_mid = [-18.0, -16.0, -14.0, -12.0, -10.0, -8.0, -6.0, -4.0]
@@ -141,6 +143,8 @@ def reset_state() -> None:
         verification._verifications.clear()
     with song._song_lock:
         song._timeline.clear()
+    with structure._section_lock:
+        structure._section_maps.clear()
 
 
 def bind(runtime_id: str, name: str, track_index: int, slot: int = 9) -> None:
@@ -166,7 +170,7 @@ def main() -> None:
 
     names = {tool.name for tool in asyncio.run(entry.mcp.list_tools())}
     assert names == entry.EXPECTED_TOOLS, sorted(names ^ entry.EXPECTED_TOOLS)
-    assert len(names) == 32
+    assert len(names) == 34
 
     reset_state()
 
@@ -494,10 +498,97 @@ def main() -> None:
     assert second_pass["transport_epoch"] == 2
     assert second_pass["bins"][0]["start_seconds"] == 3.0
 
+    # End-to-end structure regression through the real OSC parser and Song
+    # Memory. Reference and supporting tracks intentionally use different epoch
+    # numbers so structure analysis must align them by DAW-time overlap.
+    reset_state()
+    for second in range(72):
+        family_a = second < 24 or second >= 48
+        master_bands = [value + (0.0 if family_a else 9.0) for value in shape_a]
+        section_chroma = chroma_c_major if family_a else chroma_g_major
+        for offset in (0.05, 0.15, 0.25, 0.35):
+            t = second + offset
+            core._on_frame(
+                "/aianalyzer/frame",
+                *synthetic_frame(
+                    "Master",
+                    "uuid-master",
+                    100.0 + t,
+                    master_bands,
+                    peak=-12.0 if family_a else -7.0,
+                    rms=-24.0 if family_a else -15.0,
+                    flux=0.04 if family_a else 0.20,
+                    chroma=section_chroma,
+                    transport_epoch=7,
+                    transport_time_seconds=t,
+                    estimated_analysis_lag_ms=35.0,
+                ),
+            )
+            core._on_frame(
+                "/aianalyzer/frame",
+                *synthetic_frame(
+                    "Kick",
+                    "uuid-kick",
+                    200.0 + t,
+                    master_bands,
+                    rms=-28.0 if family_a else -16.0,
+                    chroma=section_chroma,
+                    signal_present=not family_a,
+                    transport_epoch=3,
+                    transport_time_seconds=t,
+                ),
+            )
+            core._on_frame(
+                "/aianalyzer/frame",
+                *synthetic_frame(
+                    "Vocal",
+                    "uuid-vocal",
+                    300.0 + t,
+                    master_bands,
+                    rms=-19.0 if family_a else -27.0,
+                    chroma=section_chroma,
+                    signal_present=family_a,
+                    transport_epoch=11,
+                    transport_time_seconds=t,
+                ),
+            )
+
+    bind("uuid-master", "Master", 0)
+    bind("uuid-kick", "Kick", 1)
+    bind("uuid-vocal", "Vocal", 2)
+    section_map = structure.audio_section_map(
+        "mixer:0/slot:9",
+        transport_epoch=7,
+        min_section_seconds=8,
+        sensitivity=0.45,
+        family_similarity=0.78,
+        max_sections=12,
+        max_tracks=8,
+    )
+    assert section_map["available"] is True
+    assert section_map["section_count"] == 3, section_map
+    boundary_times = [float(item["time_seconds"]) for item in section_map["boundaries"]]
+    assert any(abs(value - 24.0) <= 2.0 for value in boundary_times), boundary_times
+    assert any(abs(value - 48.0) <= 2.0 for value in boundary_times), boundary_times
+    assert section_map["sections"][0]["family_id"] == section_map["sections"][2]["family_id"]
+    assert section_map["sections"][0]["family_id"] != section_map["sections"][1]["family_id"]
+    assert section_map["track_activity_source_count"] == 3
+
+    section_profile = structure.audio_section_profile("S02", section_map["map_id"], 8, 8)
+    assert section_profile["available"] is True
+    assert section_profile["family_id"] == section_map["sections"][1]["family_id"]
+    assert len(section_profile["track_profiles"]) == 3
+    kick_profile = next(item for item in section_profile["track_profiles"] if item["runtime_id"] == "uuid-kick")
+    vocal_profile = next(item for item in section_profile["track_profiles"] if item["runtime_id"] == "uuid-vocal")
+    assert kick_profile["selected_transport_epoch"] == 3
+    assert vocal_profile["selected_transport_epoch"] == 11
+    assert float(kick_profile["active_ratio"]) > float(vocal_profile["active_ratio"])
+
     print(
-        f"AI Audio Analyzer MCP SDK {mcp_sdk_version}: 32 tools; "
+        f"AI Audio Analyzer MCP SDK {mcp_sdk_version}: 34 tools; "
         "V0.4 mapping + project A/B + temporal + masking + stereo + tonal + "
-        "V1.0 verification + V1.1 adaptive performance + V1.2 transport/song-memory regressions OK"
+        "V1.0 verification + V1.1 adaptive performance + V1.2 transport/song-memory + "
+        "explainable section-structure regressions OK"
     )
 
 

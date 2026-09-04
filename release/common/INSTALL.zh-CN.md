@@ -1,4 +1,4 @@
-# AI Audio Analyzer 1.1 — 中文安装教程
+# AI Audio Analyzer 1.2 — 中文安装教程
 
 [English guide](INSTALL.en.md) | [Agent / MCP 配置](MCP-SETUP.md)
 
@@ -19,17 +19,18 @@ macOS Apple Silicon arm64
 
 ```text
 AI Audio Analyzer.vst3
-mcp/                         已打包好的 Analyzer MCP 程序
-skill/                       Cherry Studio Skill
+mcp/                         已打包好的 Analyzer MCP 单文件程序
+skill/                       Cherry Studio / LLM Skill
 START-HERE.md
 MCP-SETUP.md                 Agent/MCP 配置说明 + JSON 示例
 INSTALL.en.md
 INSTALL.zh-CN.md
 VERSION.txt
+LICENSE
 对应平台的一键安装文件
 ```
 
-用户 Release **不会夹带 MCP Python 源码**、仓库回归测试代码、`requirements.txt`、开发源码配置示例、PyInstaller `_internal`，也不会出现“ZIP 里面再套一个 ZIP”。
+用户 Release **不会夹带 MCP Python 源码**、仓库回归测试代码、`requirements.txt`、开发源码配置示例、PyInstaller `_internal`，也不会出现“ZIP 里面再套 ZIP”。
 
 ## Windows 安装
 
@@ -41,7 +42,8 @@ VERSION.txt
 6. 等到窗口显示 **Installation completed successfully**；
 7. 完全退出并重新打开 FL Studio；
 8. 如果没有看到 AI Audio Analyzer，在 FL Studio Plugin Manager 里重新扫描插件；
-9. 按照 `MCP-SETUP.md`，把生成的 MCP 配置加入实际要使用 Analyzer 的 Agent/Assistant。
+9. 按照 `MCP-SETUP.md`，把生成的 MCP 配置加入实际要使用 Analyzer 的 Agent/Assistant；
+10. 把安装后的 `skill` 文件夹导入给同一个 Agent/Assistant。
 
 安装器会把当前用户的 Analyzer 文件放到：
 
@@ -49,7 +51,7 @@ VERSION.txt
 %LOCALAPPDATA%\AI Audio Analyzer\
 ```
 
-安装完成时会直接显示 `cherry-studio-mcp.json`、`MCP-SETUP.md` 和 `skill` 文件夹的位置。
+安装完成时会显示 `cherry-studio-mcp.json`、`MCP-SETUP.md` 和 `skill` 文件夹的位置。
 
 ## macOS Apple Silicon 安装
 
@@ -60,7 +62,8 @@ VERSION.txt
 5. 如果 macOS 阻止运行，右键 `Install.command` → **打开**；
 6. 等到显示安装成功；
 7. 完全退出并重新打开 FL Studio，需要时重新扫描插件；
-8. 按照 `MCP-SETUP.md`，把生成的 MCP 配置加入实际要使用 Analyzer 的 Agent/Assistant。
+8. 按照 `MCP-SETUP.md`，把生成的 MCP 配置加入实际要使用 Analyzer 的 Agent/Assistant；
+9. 把安装后的 `skill` 文件夹导入给同一个 Agent/Assistant。
 
 VST3 会安装到：
 
@@ -80,63 +83,94 @@ Analyzer MCP 与 Skill 会安装到：
 
 安装器会自动生成 `cherry-studio-mcp.json`，其中已经写好了本机安装后 MCP 可执行文件的真实绝对路径。
 
-完整的新手配置流程和 Windows/macOS JSON 示例都在 `MCP-SETUP.md`。最短流程是：
+完整流程和 Windows/macOS JSON 示例在 `MCP-SETUP.md`。最短流程：
 
-1. 打开 Cherry Studio 或其他支持 MCP 的客户端里的 MCP Server 设置；
+1. 打开 Cherry Studio 或其他支持 MCP 客户端里的 MCP Server 设置；
 2. 导入安装器生成的 `cherry-studio-mcp.json`，或手动建立相同的 `mcpServers.ai-audio-analyzer` 配置；
-3. 把这个 MCP Server 启用/分配给实际要使用 Analyzer 的 Agent/Assistant；
+3. 把该 MCP Server 启用/分配给实际要使用 Analyzer 的 Agent/Assistant；
 4. 把安装好的 `skill` 文件夹导入给同一个 Agent；
-5. 刷新或重启 Agent 会话，确认它能看到 `audio_project_status()` 等 Analyzer 工具。
+5. 刷新或重启 Agent 会话，确认能看到 `audio_project_status()` 等 Analyzer 工具。
 
-优先使用安装器生成的 JSON，而不是自己手输路径，因为生成文件已经包含当前电脑上的正确安装路径。
+优先使用安装器生成的 JSON，而不是自己手输路径。
 
-## Cherry Studio Skill
+## AI Audio Analyzer 1.2 的整曲能力
 
-Skill 使用英文，以提高不同 LLM 对工具说明和参数含义的稳定理解。它会教模型发现 Analyzer、按任务选择最低需要的 Analysis Profile、理解测量数据，以及正确运行 Before/After Verification；不会预设具体混音、母带、和声或 Stereo 处理风格。
+1.2 的重点不是让 LLM 强行进入实时音频链路，而是让 Analyzer 持续测量、LLM 稍后读取。
+
+整曲高层工具：
+
+```text
+audio_song_status()
+audio_song_overview()
+audio_song_timeline(...)
+```
+
+MCP 会保存有界的 1 秒 DAW 时间轴 Song Memory。重新播放、Seek、Loop 跳回会建立新的 Continuous Playback Epoch，避免把无关时间位置混在一起。
+
+现在还提供可解释歌曲结构工具：
+
+```text
+audio_section_map(...)
+audio_section_profile(...)
+```
+
+它们可以发现 Section 级变化点，并把重复结构归为中性的 A/B/C/... 家族。
+
+这些 A/B/C **不是自动识别的 Verse / Chorus / Drop 名称**。如果 DAW 中有 Marker、Playlist Label、Arrangement Metadata 或用户明确提供了结构，应优先使用这些精确信息。
+
+MCP 1.2 当前共有 **34 个工具**。
 
 ## Analysis Profile
 
-AI Audio Analyzer 向宿主公开以下测量 Profile：
-
 ```text
-Eco
-Balanced
-Mix
-Full
+0 Eco
+1 Balanced
+2 Mix
+3 Full
 ```
 
-它们只改变 **Analyzer 自己的测量计算量**，不会处理或改变声音。
+Profile 只影响 Analyzer 的测量计算量，不处理声音，也不是音质模式。
 
-`Full` 是兼容默认值。AI 工作流可以在需要时通过真实 DAW-control MCP 临时切换到更轻或更深的 Profile，回读宿主设置，再由 Analyzer 状态确认是否生效。普通用户安装时不需要配置这些内容。
+```text
+Eco       Core
+Balanced  Core + Loudness + Spectrum + Stereo
+Mix       Balanced + Temporal
+Full      Mix + Semantic
+```
 
-## 闭环验证
+`Full` 是兼容旧工程的默认值。
 
-Analyzer MCP 可以保存修改前的 Before 测量，在外部 Control MCP 修改并回读真实宿主状态后，再测量 After，并检查两次测量是否满足透明的技术可比条件。
+Analyzer MCP 负责读取/验证 Profile；真实宿主参数写入由 DAW Control MCP 负责。
 
-这不代表 Analyzer 自己控制 FL Studio；而且“技术上可比”也不代表修改后的声音在艺术上更好。
+## 推荐第一次使用流程
 
-普通用户不需要手动配置这套流程，LLM-facing Skill 会告诉 Agent 如何正确调用。
+```text
+audio_project_status()
+→ 需要时通过 Identify 绑定未映射的 Analyzer
+→ 整曲任务调用 audio_song_status()
+→ 播放/采集足够的目标 Pass
+→ audio_section_map() 获取结构上下文
+→ 只对相关 Section 调用 audio_section_profile()
+→ 再按问题选择 Temporal / Masking / Stereo / Tonal 工具
+```
 
-## FL Studio 找不到插件
+Analyzer 返回的是测量证据，不会自动决定 EQ、Compression、Sidechain、Stereo Processing、母带响度目标、歌曲 Key 或 Verse/Chorus/Drop 名称。
 
-1. 完全退出 FL Studio；
-2. 重新打开；
-3. 打开 Plugin Manager；
-4. 重新扫描插件；
-5. 查找 `AI Audio Analyzer`。
+## 常见问题
 
-## Agent 看不到 Analyzer MCP 工具
+如果安装后看不到插件：
 
-1. 重新运行安装器，让它检查独立 MCP 程序并重新生成 `cherry-studio-mcp.json`；
-2. 确认生成的 MCP Server 已经启用给当前 Agent/Assistant；
-3. 修改 MCP 配置后刷新或重启客户端；
-4. 按 `MCP-SETUP.md` 对照 JSON 示例检查配置；
-5. 确认电脑上没有同时运行第二个 AI Audio Analyzer MCP。
+- 完全重启 FL Studio；
+- 在 Plugin Manager 重新扫描 VST3；
+- 确认插件已复制到平台标准 VST3 目录。
 
-## macOS 提示无法打开安装器
+如果 Agent 看不到 Analyzer MCP 工具：
 
-右键 `Install.command` → **打开**。如果 macOS 再次确认，继续选择 **打开**。
+- 确认安装器执行成功；
+- 优先使用生成的 `cherry-studio-mcp.json`，不要自己猜 MCP 路径；
+- 确认 MCP Server 已启用给同一个导入 Skill 的 Agent；
+- 刷新/重启 Agent 会话。
 
-## 重要说明
+如果 macOS 阻止安装器，右键 `Install.command` → **打开**。当前包未做 Apple Notarization。
 
-Release ZIP 是已经做好的最终用户包。里面没有 MCP 源码，也不需要你自己安装任何编程依赖。
+MCP 配置细节请看 `MCP-SETUP.md`。
