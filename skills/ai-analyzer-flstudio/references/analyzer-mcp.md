@@ -1,6 +1,6 @@
 # AI Audio Analyzer MCP Reference
 
-This reference describes MCP tools, selector rules, adaptive Analysis Profile readback, transport-aware song memory, call order, validity checks, controlled verification, and OSC compatibility.
+This reference describes MCP tools, selector rules, adaptive Analysis Profile readback, transport-aware song memory, explainable section structure, call order, validity checks, controlled verification, and OSC compatibility.
 
 Related semantics:
 
@@ -8,13 +8,14 @@ Related semantics:
 parameters.md
 performance-evidence.md
 song-memory.md
+section-structure.md
 masking-evidence.md
 stereo-evidence.md
 tonal-evidence.md
 verification-evidence.md
 ```
 
-Current MCP 1.2 exposes **32 tools**:
+Current MCP 1.2 exposes **34 tools**:
 
 ```text
 audio_bridge_status()
@@ -46,6 +47,8 @@ audio_project_performance()
 audio_song_status()
 audio_song_timeline(track, resolution_seconds=5, transport_epoch=None, start_seconds=None, end_seconds=None, max_bins=240)
 audio_song_overview(transport_epoch=None, max_tracks=32)
+audio_section_map(reference_track=None, transport_epoch=None, min_section_seconds=8, sensitivity=0.55, family_similarity=0.78, max_sections=48, max_tracks=32)
+audio_section_profile(section_id, map_id=None, max_tracks=32, max_related=8)
 audio_begin_verification(label, seconds=5, target_selectors=None)
 audio_complete_verification(verification_id, seconds=0, change_summary="", host_readback="")
 audio_verification_status(verification_id="")
@@ -53,7 +56,7 @@ audio_verification_status(verification_id="")
 
 ## Recommended hierarchy
 
-Do not call all 32 tools by default.
+Do not call all 34 tools by default.
 
 ```text
 project readiness
@@ -62,7 +65,11 @@ project readiness
 whole-song / delayed Agent context
 → audio_song_status()
 → audio_song_overview()
-→ audio_song_timeline() only when track/range detail is needed
+
+song structure / recurring arrangement context
+→ audio_section_map()
+→ audio_section_profile() only for relevant sections
+→ audio_song_timeline() only when raw track/time evolution is still needed
 
 many instances / performance concern
 → audio_project_performance()
@@ -88,7 +95,7 @@ external DAW change + measured verification
 → audio_complete_verification()
 ```
 
-The LLM is not expected to poll the Analyzer continuously. Song memory exists so the Analyzer can keep observing while the model is thinking or waiting for another tool.
+The LLM is not expected to poll the Analyzer continuously. Song memory exists so the Analyzer can keep observing while the model is thinking or waiting for another tool. The section layer then compresses that remembered evidence into structural boundaries and recurring neutral families before the LLM chooses deeper tools.
 
 ## Deterministic Identify mapping
 
@@ -223,6 +230,8 @@ Temporal                             Mix
 Tonal / chroma / harmonic            Full
 ```
 
+A section map can use whichever evidence was actually captured. Missing feature families remain missing rather than being converted into zero-valued structure evidence.
+
 ## Transport-aware song tools
 
 Protocol 1.2 adds transport and data-quality context so LLM reasoning latency is not confused with audio time.
@@ -273,7 +282,7 @@ coverage_ratio
 
 ### `audio_song_overview()`
 
-Returns a compact whole-pass summary across Analyzer instances. It does **not** currently label Verse/Chorus/Bridge or infer arrangement names.
+Returns a compact whole-pass summary across Analyzer instances. It does not assign semantic musical-form names.
 
 ### Latency semantics
 
@@ -282,6 +291,77 @@ Returns a compact whole-pass summary across Analyzer instances. It does **not** 
 Transport coordinates are estimates corrected for queued FIFO audio and FFT-window center. They are intended for song/section reasoning, not sample-accurate edits or phase alignment.
 
 Detailed semantics: `song-memory.md`.
+
+## Explainable section structure
+
+The section layer consumes retained Song Memory; it does not add OSC fields or realtime DSP work.
+
+### `audio_section_map()`
+
+Use after enough of the target pass has been captured. It detects section-scale novelty using multi-scale left/right comparisons and groups recurring sections into neutral `A/B/C/...` families.
+
+Default boundary evidence includes:
+
+```text
+cross-track activity change
+RMS / LUFS-S change
+spectral centroid + broad spectral balance change
+chroma change
+stereo correlation / width change
+crest change
+spectral-flux change
+```
+
+Important fields include:
+
+```text
+map_id
+reference
+boundaries[].time_seconds
+boundaries[].strength
+boundaries[].dominant_evidence
+sections[].section_id
+sections[].family_id
+sections[].start_seconds
+sections[].end_seconds
+sections[].reference_summary
+sections[].active_tracks
+recurring_similarity_pairs
+coverage_gaps
+warnings
+```
+
+`boundary strength` is structural novelty evidence, not a calibrated boundary probability.
+
+`family_id` is a neutral recurrence class. Never silently map `A/B/C` to `Intro/Verse/Chorus/Drop`.
+
+Exact DAW markers, Playlist labels, project metadata, MIDI annotations, or explicit user structure are authoritative for exact names. An LLM may propose a semantic name only when it has additional supporting context and should state uncertainty when the label is inferred.
+
+Supporting Analyzer instances are aligned by overlapping DAW-time coverage. Equal numeric `transport_epoch` values across instances are not required and must not be assumed.
+
+Missing Song Memory is exposed as coverage gaps and must not be interpreted as silence or a structural boundary.
+
+### `audio_section_profile()`
+
+Call after `audio_section_map()` when one section needs deeper context. Keep the returned `map_id` for deterministic follow-up.
+
+The profile returns:
+
+```text
+section / family identity
+same-family sections
+related sections + similarity components
+reference summary
+per-track section summaries
+per-track selected transport epoch
+data quality
+```
+
+Use it to decide which tracks/relationships deserve deeper Temporal, Masking, Stereo or Tonal queries. It does not prescribe processing.
+
+Section maps are bounded MCP-session memory and are not persistent project identifiers.
+
+Detailed semantics: `section-structure.md`.
 
 ## Core / project tools
 
@@ -533,7 +613,7 @@ The frame remains append-only:
 149        "1.2" marker
 ```
 
-Existing indexes `0..134` are unchanged.
+Existing indexes `0..134` are unchanged. This structure milestone adds no OSC fields.
 
 Feature-mask bits:
 
