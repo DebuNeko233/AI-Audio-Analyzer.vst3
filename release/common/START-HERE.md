@@ -52,11 +52,11 @@ There is **no MCP Python source code** in the user Release. There is also no Pyt
 
 After installation, the installer tells you where to find the generated `cherry-studio-mcp.json`, `MCP-SETUP.md`, and installed Skill folder. The generated JSON contains the correct absolute MCP executable path for your computer.
 
-AI Audio Analyzer 1.2 adds DAW-time Song Memory so the Agent can query audio evidence after the passage has already played. The MCP can build an explainable section map and group recurring sections into neutral A/B/C families. It can then use `audio_track_story()` to summarize how one Analyzer track changes across those sections while keeping missing coverage explicit. A/B/C families are **not automatic Verse/Chorus/Drop labels**, and Track Story does not infer Bass/Vocal/Drums roles or prescribe processing; exact DAW/project metadata remains authoritative when available.
+AI Audio Analyzer 1.2 adds DAW-time Song Memory so the Agent can query audio evidence after the passage has already played. The MCP can build an explainable section map and group recurring sections into neutral A/B/C families. It can use `audio_track_story()` to summarize how one Analyzer track changes across those sections, and `audio_section_relationships()` to return a bounded shortlist of track pairs whose measured relationship changes across sections/families while keeping missing coverage explicit. A/B/C families are **not automatic Verse/Chorus/Drop labels**. Track Story does not infer Bass/Vocal/Drums roles, and relationship `shortlist_priority` is only an inspection-ranking heuristic—not a masking/mix-problem probability or processing instruction. Exact DAW/project metadata remains authoritative when available.
 
 Analysis Profiles (`Eco`, `Balanced`, `Mix`, `Full`) reduce unnecessary Analyzer work in projects with many plugin instances. They affect measurement computation only and do not change the audio. Current Analyzer MCP can change a live Analyzer's own Analysis Profile through its local control channel and receive an explicit acknowledgement. This control is intentionally limited to Analyzer measurement workload; all sound-changing DAW/plugin parameters still belong to the actual DAW-control MCP.
 
-Current MCP 1.2 exposes **37 tools**.
+Current MCP 1.2 exposes **38 tools**.
 
 ---
 
@@ -94,8 +94,8 @@ Current MCP 1.2 exposes **37 tools**.
 
 安装完成后，安装器会显示 `cherry-studio-mcp.json`、`MCP-SETUP.md` 和 Skill 文件夹的位置。生成的 JSON 已写好本机 MCP 可执行文件的真实绝对路径。
 
-AI Audio Analyzer 1.2 支持 DAW 时间轴 Song Memory，LLM 即使晚几秒读取也能查询已经播放过的证据；同时 MCP 可以生成可解释的歌曲 Section Map，并把重复结构归为中性的 A/B/C 家族。之后 `audio_track_story()` 可以把某一个 Analyzer 实例在各个 Section 中的活动度、能量、频谱、立体声、时间变化和覆盖质量整理出来，并比较相邻 Section / 同 Family 的变化。**A/B/C 不等于自动识别的 Verse/Chorus/Drop，Track Story 也不会自动把轨道判成 Bass/Vocal/Drums 或给出固定处理指令**。如果 DAW/工程里有精确 Marker、Track Name 等信息，应优先使用真实工程信息。
+AI Audio Analyzer 1.2 支持 DAW 时间轴 Song Memory，LLM 即使晚几秒读取也能查询已经播放过的证据；同时 MCP 可以生成可解释的歌曲 Section Map，并把重复结构归为中性的 A/B/C 家族。之后 `audio_track_story()` 可以把某一个 Analyzer 实例在各个 Section 中的活动度、能量、频谱、立体声、时间变化和覆盖质量整理出来；`audio_section_relationships()` 则会有界筛出“哪些轨道组合在某个 Section/Family 值得继续检查”。**A/B/C 不等于自动识别的 Verse/Chorus/Drop，Track Story 不会自动把轨道判成 Bass/Vocal/Drums，relationship 的 `shortlist_priority` 也只是检查优先级，不是 Masking/Mix Problem 概率或处理指令**。如果 DAW/工程里有精确 Marker、Track Name 等信息，应优先使用真实工程信息。
 
 `Eco / Balanced / Mix / Full` Analysis Profile 只控制 Analyzer 的测量计算量，不会改变声音。当前 Analyzer MCP 可以通过本机控制通道修改 live Analyzer 自己的 Analysis Profile，并收到明确 ACK；这个写入范围只限 Analyzer 的测量负载，任何会改变声音或工程状态的 DAW/插件参数仍由真正的 DAW Control MCP 负责。
 
-当前 MCP 1.2 共提供 **37 个工具**。
+当前 MCP 1.2 共提供 **38 个工具**。
