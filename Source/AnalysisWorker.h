@@ -83,6 +83,7 @@ public:
     }
 
     AnalysisProfile getAnalysisProfile() const noexcept;
+    const juce::String& getRuntimeUuid() const noexcept { return runtimeUuid; }
 
     void requestIdentify() noexcept
     {

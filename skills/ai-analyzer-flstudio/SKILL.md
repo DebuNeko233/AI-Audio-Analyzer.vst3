@@ -1,6 +1,6 @@
 ---
 name: ai-analyzer-flstudio
-description: Technical usage skill for Cherry Studio + AI Audio Analyzer MCP. Teaches deterministic Analyzer discovery/binding, adaptive Analysis Profile selection, transport-aware Song Memory, explainable song-section structure, latency/data-quality handling, measurement validity, evidence semantics, performance telemetry, and controlled Before/After verification around externally controlled DAW changes. It does not prescribe a mixing style, LUFS target, EQ/compression/sidechain/stereo recipe, semantic section label, key change, harmony edit, or aesthetic decision.
+description: Technical usage skill for Cherry Studio + AI Audio Analyzer MCP. Teaches deterministic Analyzer discovery/binding, adaptive Analysis Profile control, transport-aware Song Memory, explainable song-section structure, latency/data-quality handling, measurement validity, evidence semantics, performance telemetry, and controlled Before/After verification around externally controlled DAW changes. It does not prescribe a mixing style, LUFS target, EQ/compression/sidechain/stereo recipe, semantic section label, key change, harmony edit, or aesthetic decision.
 ---
 
 # AI Audio Analyzer MCP Usage Skill
@@ -98,7 +98,7 @@ If multiple Analyzer instances exist on one Mixer Track, include `slot`.
 
 Never guess mapping from track names, spectrum, chroma, or musical content when Identify is available.
 
-## 3. Analysis Profile is a performance control
+## 3. Analysis Profile is an Analyzer-owned performance control
 
 The VST3 exposes:
 
@@ -139,21 +139,39 @@ Chroma / tonal / single-F0 evidence               Full
 
 A section map can use whichever evidence was actually captured. Missing feature families remain unavailable rather than becoming zero-valued structural features.
 
-Analyzer MCP does **not** write DAW parameters. When a different profile is needed:
+Current control-capable Analyzer builds expose:
+
+```text
+audio_set_analysis_profile(track, profile)
+audio_set_project_analysis_profile(profile, tracks=None)
+```
+
+These are the only Analyzer-owned write tools. They may change only the Analyzer's own `analysis_profile` measurement-performance parameter. They must never be used as precedent for writing EQ, compression, gain, pan, routing, synth, automation, or other artistic/project state.
+
+Preferred temporary-escalation flow:
 
 ```text
 audio_analysis_status(target)
 → remember current profile
-→ use the actual FL Studio control MCP to inspect the real plugin parameters
-→ change Analysis Profile through that control MCP
-→ read the actual host parameter state back
-→ audio_analysis_status(target)
-→ verify the expected feature group is enabled
+→ determine the minimum required profile
+→ audio_set_analysis_profile(target, required_profile)
+→ require a successful control ACK when a change was needed
+→ when fresh frames are available, audio_analysis_status(target)
+→ verify the expected feature group
 → collect the required measurement window/pass
-→ call the needed Analyzer tool
+→ call the needed Analyzer evidence tool
 → restore the previous profile when appropriate
-→ verify the restored Analyzer state
+→ verify restored telemetry when fresh frames are available
 ```
+
+The local control ACK does not require playback. Fresh Analyzer telemetry normally does, so keep these distinct:
+
+```text
+control_acknowledged = target VST3 accepted/applied the profile request
+telemetry_confirmed  = a measurement frame also reports the requested profile
+```
+
+If the Analyzer-owned control tool returns no ACK, do not assume success. The VST3 may be an older build without local control. If the connected DAW-control MCP can write the historical host-visible `analysis_profile` parameter, it may be used as a compatibility fallback, followed by Analyzer telemetry verification.
 
 Do not invent FL Studio MCP tool names. Do not set every Analyzer to `Full` merely because one track needs tonal analysis.
 
@@ -470,11 +488,13 @@ Raw historical timeline only when needed:
 audio_song_timeline(...)
 ```
 
-Project performance:
+Project performance/control:
 
 ```text
 audio_project_performance()
 audio_analysis_status(track)
+audio_set_analysis_profile(track, profile)
+audio_set_project_analysis_profile(profile, tracks=None)
 ```
 
 Recent project overview:
@@ -620,6 +640,8 @@ Always keep these distinctions:
 - `controlled_comparison` is technical comparability, not artistic quality.
 - `worker_load_ratio` is background Analyzer-worker load, not realtime DAW CPU.
 - Analysis Profile is computation scope, not audio quality.
+- Analyzer Profile control ACK ≠ fresh measurement telemetry.
+- Analyzer-owned Profile control ≠ permission to modify unrelated DAW/plugin parameters.
 - `null` is unavailable, not zero.
 
 Detailed references:
@@ -648,6 +670,7 @@ infer explainable structural boundaries / neutral recurrence families
 compare
 identity/binding evidence
 performance/profile readback
+Analyzer-owned Analysis Profile control only
 verification measurement conditions
 ```
 
@@ -657,10 +680,12 @@ FL Studio control MCP owns:
 DAW topology / project data
 exact markers / Playlist / arrangement metadata when exposed
 plugin access
-Analysis Profile writes
-artistic/technical parameter writes
-actual host state readback
+all non-Analyzer artistic/technical parameter writes
+EQ / compression / gain / pan / routing / synth / automation writes
+actual host state readback for those external changes
 ```
+
+The Analyzer's own Profile control is a narrow performance exception because it changes measurement computation only and never changes the audio signal. Do not expand that exception into general DAW control.
 
 Never invent control tools, controls, notes, write success, profile state, semantic section labels, or readback values.
 

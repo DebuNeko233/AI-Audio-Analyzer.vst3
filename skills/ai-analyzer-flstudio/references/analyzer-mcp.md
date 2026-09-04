@@ -1,6 +1,6 @@
 # AI Audio Analyzer MCP Reference
 
-This reference describes MCP tools, selector rules, adaptive Analysis Profile readback, transport-aware song memory, explainable section structure, call order, validity checks, controlled verification, and OSC compatibility.
+This reference describes MCP tools, selector rules, Analyzer-owned Analysis Profile control/readback, transport-aware song memory, explainable section structure, call order, validity checks, controlled verification, and OSC compatibility.
 
 Related semantics:
 
@@ -15,7 +15,7 @@ tonal-evidence.md
 verification-evidence.md
 ```
 
-Current MCP 1.2 exposes **34 tools**:
+Current MCP 1.2 exposes **36 tools**:
 
 ```text
 audio_bridge_status()
@@ -44,6 +44,8 @@ audio_tonal_profile(track, seconds=8)
 audio_tonal_compare(track_a, track_b, seconds=8)
 audio_analysis_status(track)
 audio_project_performance()
+audio_set_analysis_profile(track, profile, timeout_seconds=1.0)
+audio_set_project_analysis_profile(profile, tracks=None, timeout_seconds=1.0)
 audio_song_status()
 audio_song_timeline(track, resolution_seconds=5, transport_epoch=None, start_seconds=None, end_seconds=None, max_bins=240)
 audio_song_overview(transport_epoch=None, max_tracks=32)
@@ -56,7 +58,7 @@ audio_verification_status(verification_id="")
 
 ## Recommended hierarchy
 
-Do not call all 34 tools by default.
+Do not call all 36 tools by default.
 
 ```text
 project readiness
@@ -77,6 +79,10 @@ many instances / performance concern
 one instance feature/profile check
 → audio_analysis_status()
 
+minimum evidence unavailable
+→ audio_set_analysis_profile() only when needed
+→ audio_set_project_analysis_profile() only for intentionally selected/all live instances
+
 recent project state
 → audio_mix_overview()
 
@@ -95,7 +101,7 @@ external DAW change + measured verification
 → audio_complete_verification()
 ```
 
-The LLM is not expected to poll the Analyzer continuously. Song memory exists so the Analyzer can keep observing while the model is thinking or waiting for another tool. The section layer then compresses that remembered evidence into structural boundaries and recurring neutral families before the LLM chooses deeper tools.
+The LLM is not expected to poll the Analyzer continuously. Song Memory exists so the Analyzer can keep observing while the model is thinking or waiting for another tool. The section layer then compresses that remembered evidence into structural boundaries and recurring neutral families before the LLM chooses deeper tools.
 
 ## Deterministic Identify mapping
 
@@ -170,7 +176,56 @@ Full      Mix + Semantic
 
 `Full` is the default for backward compatibility.
 
-Analyzer MCP does not write this parameter. Use the actual DAW-control MCP to change the host parameter, read the host value back, then verify what the Analyzer is really computing with:
+Current control-capable Analyzer builds expose:
+
+```text
+audio_set_analysis_profile(track, profile, timeout_seconds=1.0)
+audio_set_project_analysis_profile(profile, tracks=None, timeout_seconds=1.0)
+```
+
+These are deliberately narrow Analyzer-owned write tools. They may change only the Analyzer's own measurement-performance `Analysis Profile`; they do not grant permission to change EQ, gain, pan, compression, routing, synth, automation, project state, or other plugins.
+
+Control flow:
+
+```text
+MCP
+→ loopback-only UDP command
+→ deterministic candidate ports derived from target runtime UUID
+→ matching VST3 network receiver
+→ queue request
+→ JUCE message thread changes host-visible analysis_profile
+→ request-scoped loopback ACK
+```
+
+Important result fields:
+
+```text
+ok
+changed
+control_acknowledged
+telemetry_confirmed
+profile
+profile_display
+profile_index
+runtime_id
+binding
+```
+
+Keep these separate:
+
+```text
+control_acknowledged
+  target VST3 accepted/applied the host-visible profile request.
+
+telemetry_confirmed
+  retained/new Analyzer telemetry reports the requested profile.
+```
+
+The control ACK can succeed while playback is stopped. Fresh telemetry normally requires a new measurement frame.
+
+If no ACK is received, do not assume success. The VST3 may be an older build without Analyzer-owned local control. If the connected DAW-control MCP can write the historical `analysis_profile` host parameter, it may be used as a compatibility fallback, then verified through Analyzer telemetry.
+
+Status/readback:
 
 ```text
 audio_analysis_status(track)
@@ -560,6 +615,8 @@ external DAW-control MCP performs the real write
 
 Neither means the artistic change is better/correct/preferred.
 
+Analyzer-owned Profile control ACK is not a substitute for actual host readback of unrelated DAW/plugin writes.
+
 Current verification remains recent-window based. Transport-anchored same-DAW-range verification is not yet implemented.
 
 Verification sessions are Bridge-session memory only.
@@ -613,7 +670,7 @@ The frame remains append-only:
 149        "1.2" marker
 ```
 
-Existing indexes `0..134` are unchanged. This structure milestone adds no OSC fields.
+Existing indexes `0..149` are unchanged by Analyzer-owned Profile control.
 
 Feature-mask bits:
 
@@ -628,12 +685,28 @@ Feature-mask bits:
 
 Historical `bands_db` remains the 32-band Mid spectrum.
 
+### Separate local Analyzer control revision 1
+
+Analyzer-owned Profile control intentionally does not append a measurement field.
+
+```text
+transport        UDP loopback only
+profile address  /aianalyzer/control/profile
+ACK address      /aianalyzer/control/ack
+scope            Analysis Profile only
+revision         1
+```
+
+The VST3 chooses the first available port from 16 deterministic candidates derived from runtime UUID. MCP sends to all candidates; only the matching runtime accepts the command. The candidate range is local ports `20000..59999`.
+
 ## Multiple instances and OSC
 
-All VST3 instances normally send to:
+All VST3 instances normally send measurement frames to:
 
 ```text
 127.0.0.1:9855
 ```
 
-Only the Bridge binds UDP 9855. VST3 instances are senders, so multiple Analyzer instances do not require separate UDP ports.
+Only the Bridge binds UDP 9855. VST3 instances are measurement senders, so multiple Analyzer instances do not require separate measurement ports.
+
+Profile control is different: each live instance binds one loopback-only deterministic candidate control port. No manual user port configuration is required.

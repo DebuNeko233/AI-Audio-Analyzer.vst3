@@ -56,10 +56,22 @@ AIAnalyzerAudioProcessor::AIAnalyzerAudioProcessor()
         std::memory_order_relaxed);
     analysisWorker.setAnalysisProfile(aianalyzer::AnalysisProfile::Full);
     analysisWorker.setOscConfig(instanceId, oscHost, oscPort);
+
+    // Analyzer-owned control is intentionally narrow: only the measurement
+    // profile can be changed. The receiver listens on loopback only and routes
+    // requests to this processor's message thread through AsyncUpdater.
+    controlChannel = std::make_unique<aianalyzer::AnalyzerControlChannel>(
+        analysisWorker.getRuntimeUuid(),
+        [this](int profileIndex, juce::String requestId, int replyPort)
+        {
+            enqueueControlProfileRequest(profileIndex, std::move(requestId), replyPort);
+        });
 }
 
 AIAnalyzerAudioProcessor::~AIAnalyzerAudioProcessor()
 {
+    cancelPendingUpdate();
+    controlChannel.reset();
     analysisWorker.shutdown();
 }
 
@@ -282,6 +294,7 @@ void AIAnalyzerAudioProcessor::getStateInformation(juce::MemoryBlock& destData)
     xml.setAttribute("oscHost", currentHost);
     xml.setAttribute("oscPort", currentPort);
     xml.setAttribute("analysisProfile", getAnalysisProfileIndex());
+    xml.setAttribute("uiLanguage", getUiLanguageIndex());
     copyXmlToBinary(xml, destData);
 }
 
@@ -300,6 +313,10 @@ void AIAnalyzerAudioProcessor::setStateInformation(const void* data, int sizeInB
     setAnalysisProfileIndex(
         xml->getIntAttribute("analysisProfile", static_cast<int>(aianalyzer::AnalysisProfile::Full)),
         false);
+
+    // GUI language is a local preference, not a host automation parameter.
+    // Older projects default to English for backwards-compatible presentation.
+    setUiLanguageIndex(xml->getIntAttribute("uiLanguage", 0));
 }
 
 void AIAnalyzerAudioProcessor::setAnalyzerConfig(const juce::String& newInstanceId,
@@ -367,6 +384,83 @@ void AIAnalyzerAudioProcessor::setAnalysisProfileIndex(int profileIndex, bool no
     lastWorkerProfileIndex.store(profileIndex, std::memory_order_relaxed);
     analysisWorker.setAnalysisProfile(
         static_cast<aianalyzer::AnalysisProfile>(profileIndex));
+}
+
+void AIAnalyzerAudioProcessor::enqueueControlProfileRequest(int profileIndex,
+                                                            juce::String requestId,
+                                                            int replyPort)
+{
+    if (profileIndex < 0
+        || profileIndex > 3
+        || requestId.isEmpty()
+        || replyPort < 1
+        || replyPort > 65535)
+    {
+        return;
+    }
+
+    {
+        const std::scoped_lock lock(controlRequestMutex);
+
+        // MCP deliberately retransmits one request while waiting for its ACK.
+        // Coalesce exact retries so a temporarily busy message thread cannot
+        // turn one logical request into an unbounded queue of host mutations.
+        for (const auto& pending : pendingControlRequests)
+        {
+            if (pending.profileIndex == profileIndex
+                && pending.requestId == requestId
+                && pending.replyPort == replyPort)
+            {
+                return;
+            }
+        }
+
+        // Local loopback is still an external input boundary. Keep memory use
+        // bounded even if another local process floods valid-looking requests.
+        // Dropping the oldest request is safe because MCP retries until timeout.
+        if (pendingControlRequests.size() >= kMaxPendingControlRequests)
+            pendingControlRequests.pop_front();
+
+        pendingControlRequests.push_back({ profileIndex, std::move(requestId), replyPort });
+    }
+    triggerAsyncUpdate();
+}
+
+void AIAnalyzerAudioProcessor::handleAsyncUpdate()
+{
+    std::deque<ControlProfileRequest> requests;
+    {
+        const std::scoped_lock lock(controlRequestMutex);
+        requests.swap(pendingControlRequests);
+    }
+
+    for (const auto& request : requests)
+    {
+        const auto previousProfileIndex = getAnalysisProfileIndex();
+        const bool changed = previousProfileIndex != request.profileIndex;
+
+        if (changed)
+            setAnalysisProfileIndex(request.profileIndex, true);
+
+        if (controlChannel != nullptr)
+        {
+            controlChannel->sendProfileAck(
+                request.requestId,
+                request.profileIndex,
+                request.replyPort,
+                changed);
+        }
+    }
+}
+
+int AIAnalyzerAudioProcessor::getUiLanguageIndex() const noexcept
+{
+    return juce::jlimit(0, 1, uiLanguageIndex.load(std::memory_order_relaxed));
+}
+
+void AIAnalyzerAudioProcessor::setUiLanguageIndex(int languageIndex) noexcept
+{
+    uiLanguageIndex.store(juce::jlimit(0, 1, languageIndex), std::memory_order_relaxed);
 }
 
 bool AIAnalyzerAudioProcessor::getLatestAnalysis(aianalyzer::AnalysisFrame& frame) const

@@ -62,9 +62,13 @@ target_sources(AIAnalyzer PRIVATE
     Source/PluginProcessor.h
     Source/PluginEditor.cpp
     Source/PluginEditor.h
+    Source/UiLocalization.h
     Source/AnalysisFrame.h
     Source/SpscStereoFifo.h
     Source/WorkerScheduling.h
+    Source/ControlProtocol.h
+    Source/AnalyzerControlChannel.cpp
+    Source/AnalyzerControlChannel.h
     Source/AnalysisWorker.cpp
     Source/AnalysisWorker.h
 )

@@ -4,7 +4,7 @@
 
 **AI Audio Analyzer** 是一个面向 AI / LLM 音乐制作工作流的 JUCE VST3 机器可读音频测量层。
 
-插件直接在 DAW 内测量音频，通过 OSC 将紧凑数据发送给 Analyzer MCP Bridge，再由 Cherry Studio 或其他 MCP 客户端结构化读取电平、响度、频谱、立体声、时间关系、遮蔽、调性、工程概览、**DAW 时间轴整曲记忆、可解释歌曲结构、A/B、性能状态和闭环验证证据**。
+插件直接在 DAW 内测量音频，通过 OSC 将紧凑数据发送给 Analyzer MCP Bridge，再由 Cherry Studio 或其他 MCP 客户端结构化读取电平、响度、频谱、立体声、时间关系、遮蔽、调性、工程概览、DAW 时间轴整曲记忆、可解释歌曲结构、A/B、性能状态和闭环验证证据。
 
 当前产品版本：**1.2.0**。
 
@@ -12,25 +12,28 @@
 
 ```text
 AI Audio Analyzer
-├─ VST3    DAW 内的实时安全测量探针 + Transport Context
-├─ MCP     测量 / Song Memory / 结构 / 比较 / 验证工具
-└─ Skill   面向 LLM 的英文 MCP 调用和证据语义说明
+├─ VST3    DAW 内实时安全测量探针 + Transport Context
+├─ MCP     测量 / Analyzer 档位控制 / Song Memory / 结构 / 比较 / 验证
+└─ Skill   面向 LLM 的英文 MCP 调用与证据语义说明
 ```
 
 Analyzer 坚持“提供证据，不硬编码审美规则”。不会内置固定 LUFS、Genre EQ、强制 Sidechain/Compression、Stereo 配方、Verse/Chorus/Drop 强制命名、转调、和声修改或母带链。
 
-## 配套 FL Studio MCP
+## 与 FL Studio MCP 的边界
 
-当前工作流配套：
+当前工作流可配套：
 
 **[rosasynthesiz/flstudio-mcp](https://github.com/rosasynthesiz/flstudio-mcp)**
 
 ```text
-AI Audio Analyzer MCP   → 观察 / 测量 / 记忆 / 结构理解 / 比较 / 验证
-FL Studio MCP           → 读取 / 控制 / 修改 / 回读 FL Studio
+AI Audio Analyzer MCP   → 观察 / 测量 / 记忆 / 结构 / 比较 / 验证
+                          + 只控制 Analyzer 自己的 Analysis Profile
+FL Studio MCP           → 读取 / 控制 / 修改 / 回读 FL Studio 工程和插件状态
 ```
 
-Analyzer MCP 本身**不写入 DAW 参数**。真实宿主/工程状态、插件参数写入和回读由实际 DAW Control MCP 负责。
+Analyzer MCP **不提供通用 DAW 写入能力**。唯一的写入例外是 Analyzer 自己的 `Analysis Profile`，它只改变测量计算量，不改变音频信号。
+
+真实工程数据以及所有会改变声音/工程的参数，例如 EQ、Compression、Gain、Pan、Routing、Synth 和 Automation，仍由真实 DAW-control MCP 负责，并应进行实际宿主回读。
 
 ## 架构
 
@@ -41,11 +44,12 @@ FL Studio / DAW
 ├─ Mixer Track B ─ AI Audio Analyzer.vst3
 └─ Master        ─ AI Audio Analyzer.vst3
                          │
-                         │ OSC UDP，默认 127.0.0.1:9855
+                         │ OSC UDP 测量数据，默认 127.0.0.1:9855
                          ▼
                  Analyzer MCP Bridge
                  ├─ Live Instance Registry + 确定性 Track/Slot 映射
                  ├─ Adaptive Analysis / Worker Telemetry
+                 ├─ Analyzer 自有 Loopback Profile Control + ACK
                  ├─ DAW Transport / Continuous Playback Epoch
                  ├─ 1 秒 Song Memory / 多分辨率聚合
                  ├─ 可解释 Section Boundary / A-B-C 重复结构家族
@@ -56,10 +60,10 @@ FL Studio / DAW
                          ▼
                   Cherry Studio / LLM
                          │
-                         └─ 外部 FL Studio MCP 负责实际修改和宿主回读
+                         └─ 外部 FL Studio MCP 负责工程/声音修改和宿主回读
 ```
 
-多个 Analyzer 可以共用 UDP `9855`；只有一个 MCP Bridge 进程应绑定该端口。
+多个 Analyzer 实例可以共用 UDP `9855`；只有一个 MCP Bridge 进程应绑定该测量端口。
 
 LLM **不属于实时测量链路**。模型在思考、调用工具或等待 DAW 操作时，Analyzer 仍持续测量并把证据保存到 DAW 时间轴中，之后再由 LLM 查询。
 
@@ -76,7 +80,7 @@ LLM **不属于实时测量链路**。模型在思考、调用工具或等待 DA
 - Mid RMS、Side RMS、Side/Mid dB、Side Spectrum、分频段 Stereo 关系和 Negative Cross-Spectrum Evidence；
 - 12-bin Chroma、Tonal-center Profile Ranking、Single-F0 Harmonic-alignment Evidence；
 - DAW Time / PPQ / BPM / Time Signature、Continuous Playback Epoch、Analyzer Backlog 和 Dropped-block Telemetry；
-- 每实例最多 1200 个 1 秒 Song Memory Bin，使用 100 ms Coverage Slot，查询可聚合为 1/2/5/10/15/30 秒；
+- 每实例最多 1200 个 1 秒 Song Memory Bin，使用 100 ms Coverage Slot，可按 1/2/5/10/15/30 秒聚合查询；
 - 多尺度可解释歌曲段落边界检测和中性的 A/B/C 重复结构家族；
 - 即使不同 Analyzer 的实例局部 Epoch 数字不同，也能按 DAW 时间重叠选择对应 Pass，生成 Section 级每轨 Profile；
 - Project Overview、Snapshot A/B、Masking Evidence、Controlled Verification 和性能遥测。
@@ -105,7 +109,7 @@ Display name: Identify
 mixer:7/slot:9
 ```
 
-## Adaptive Analysis
+## Adaptive Analysis 与 Analyzer 自有控制
 
 ```text
 Parameter ID: analysis_profile
@@ -127,12 +131,46 @@ Full      Mix + Semantic
 
 `Full` 是兼容旧工程的默认值。
 
-Analyzer MCP 提供：
+状态与性能工具：
 
 ```text
 audio_analysis_status(track)
 audio_project_performance()
 ```
+
+Analyzer 自己的档位控制工具：
+
+```text
+audio_set_analysis_profile(track, profile)
+audio_set_project_analysis_profile(profile, tracks=None)
+```
+
+控制链路只使用本机 Loopback，并按目标 VST3 的 Runtime UUID 寻址：
+
+```text
+Analyzer MCP
+→ 本机 UDP Control Request
+→ 目标 VST3 Runtime UUID
+→ JUCE Message Thread
+→ Host-visible Analysis Profile
+→ 本机 ACK
+```
+
+控制请求不会在音频线程执行，也不会改变音频信号。
+
+必须区分：
+
+```text
+control_acknowledged
+  目标 VST3 已接受并应用 Analysis Profile 请求
+
+telemetry_confirmed
+  后续测量帧也已经报告目标 Profile
+```
+
+控制 ACK 不要求 DAW 正在播放；Telemetry Confirmation 通常需要新的音频处理/测量帧。
+
+旧版 VST3 没有本机控制接收器时，工具会明确超时失败，而不会假装已经修改成功。如果外部 DAW MCP 能修改历史上已经存在的 `analysis_profile` 宿主参数，可以作为旧插件兼容 fallback，之后再用 Analyzer Telemetry 验证。
 
 遥测包括：
 
@@ -143,7 +181,28 @@ fft_runs_per_second
 semantic_runs_per_second
 ```
 
-`worker_load_ratio` 是 **Analyzer 后台 Worker** 的忙碌比例，不是 FL Studio Realtime Audio CPU。实际 Analysis Profile 写入仍由 DAW Control MCP 完成，Analyzer MCP 负责回读/验证。
+`worker_load_ratio` 是 **Analyzer 后台 Worker** 的忙碌比例，不是 FL Studio Realtime Audio CPU。Feature Mask 仍然是可用测量族的权威来源；关闭的测量族在 MCP 中保持 unavailable，而不是 0。
+
+## 插件 GUI
+
+VST3 编辑器内置 **English / 中文** 切换。所选语言作为不可自动化的 `uiLanguage` GUI 偏好保存到 `AIAnalyzerState`；旧工程没有该字段时默认 English。语言只影响界面显示，不会修改宿主参数 ID、OSC 字段、MCP 工具名或面向 LLM 的 Skill 内容。
+
+GUI 展示：
+
+```text
+DAW 播放 / 停止 / 录音状态
+DAW 时间、BPM、拍号、Loop 和 Transport Pass/Epoch
+Eco / Balanced / Mix / Full
+Signal Validity
+Worker Load、FIFO Fill、Estimated Analysis Lag、Dropped Blocks
+配置的 OSC TX 测量目标
+```
+
+四档按钮与宿主唯一的 `analysis_profile` 参数双向同步，因此 GUI 点击、DAW Automation、工程恢复以及 Analyzer MCP 自有 Profile Control 最终都反映同一个真实宿主参数状态。
+
+`OSC TX → host:port` 只表示**测量帧**发送目标，不等于“MCP 已连接”。Analyzer Profile Control 使用独立的本机命令/ACK 链路。
+
+GUI 仍以观察和运行状态为主。Song Memory、Section Detection、高层证据推理以及通用 DAW 写入不会搬进实时插件编辑器。
 
 ## 面向 LLM 延迟的 Song Memory
 
@@ -186,9 +245,7 @@ Song Memory 使用 100 ms Coverage Slot，因此把 1 秒 Bin 聚合成 5/10/30 
 
 ## 可解释歌曲结构理解层
 
-第一版歌曲结构层完全建立在已有 Song Memory 上，**不增加实时 DSP，不修改 OSC 1.2 Wire Format，也不引入神经网络**。
-
-流程：
+第一版歌曲结构层完全建立在已有 Song Memory 上，**不增加实时 DSP，也不修改 OSC 1.2 Analysis Frame**。
 
 ```text
 Song Memory
@@ -217,16 +274,7 @@ audio_section_map(
 audio_section_profile(section_id, map_id=None, max_tracks=32, max_related=8)
 ```
 
-Boundary Detection 会综合可用的：
-
-```text
-跨轨 Active / Inactive 变化
-RMS / LUFS-S
-Spectral Centroid / Broad Spectral Balance
-Chroma
-Stereo Correlation / Width
-Crest / Spectral Flux
-```
+Boundary Detection 会综合可用的跨轨活动、Energy/Loudness、Spectral Balance、Chroma、Stereo、Dynamics 和 Temporal Change。
 
 `boundary strength` 只是**结构变化证据**，不是“这里一定是正式段落边界”的概率。
 
@@ -240,7 +288,7 @@ S04  B
 S05  C
 ```
 
-这里的 A/B/C 只表示“结构上存在重复/相似”，**绝不自动等于**：
+这里的 A/B/C 只表示结构上的重复/相似，**绝不自动等于**：
 
 ```text
 A = Intro
@@ -248,19 +296,11 @@ B = Verse
 C = Chorus
 ```
 
-如果 FL Studio / DAW MCP 能提供 Marker、Playlist Label、Pattern Name、Arrangement Metadata、MIDI/Project Annotation，或者用户明确给出了结构，那么这些精确工程信息优先用于命名。
+如果 DAW MCP 能提供 Marker、Playlist Label、Pattern Name、Arrangement Metadata、MIDI/Project Annotation，或者用户明确给出了结构，那么这些精确工程信息优先用于命名。
 
-跨轨 Section 分析不会要求各实例 Epoch 数字相同。它会在同一 DAW 时间范围内为每个支持轨选择**覆盖最好**的保留 Pass。例如：
+跨轨 Section 分析不会要求各实例 Epoch 数字相同。它会在同一 DAW 时间范围内为每个支持轨选择覆盖最好的保留 Pass。
 
-```text
-Master epoch 7
-Kick epoch 3
-Vocal epoch 11
-```
-
-仍然可以属于同一实际歌曲范围。
-
-缺失 Song Memory 也不会被当成静音或段落边界；`coverage_gaps` 会显式告诉 LLM 哪里缺数据。
+缺失 Song Memory 不会被当成静音或段落边界；`coverage_gaps` 会显式报告缺失数据。
 
 推荐整曲调用顺序：
 
@@ -273,8 +313,6 @@ audio_project_status()
 → 仍需原始时间变化时才调用 audio_song_timeline()
 → 再针对具体关系调用 Temporal / Masking / Stereo / Tonal
 ```
-
-这样可以显著减少 LLM Token 消耗，也避免整曲混音只依赖“最近 5 秒”。
 
 ## 其他证据层
 
@@ -320,7 +358,7 @@ audio_complete_verification(...)
 audio_verification_status(...)
 ```
 
-流程：
+艺术/技术 DAW 修改的闭环仍然是：
 
 ```text
 Before Baseline
@@ -333,13 +371,17 @@ Before Baseline
 
 `controlled_comparison=true` 只表示技术可比性通过；`closed_loop_complete=true` 还要求实际 Host Readback。两者都不表示“After 更好”。
 
+Analyzer 自己的 Profile Control ACK 只确认 Analyzer 配置请求，不替代外部 DAW/插件参数的真实 Host Readback。
+
 当前 Verification 仍是 Recent-window 模式，尚未实现 Transport-anchored Same-range Verification。
 
 ## MCP 工具
 
-MCP **1.2 共 34 个工具**。整曲/结构高层入口包括：
+MCP **1.2 共 36 个工具**。高层整曲/结构/Profile 控制入口包括：
 
 ```text
+audio_set_analysis_profile(...)
+audio_set_project_analysis_profile(...)
 audio_song_status()
 audio_song_overview()
 audio_song_timeline(...)
@@ -347,7 +389,7 @@ audio_section_map(...)
 audio_section_profile(...)
 ```
 
-不要为了“完整”机械调用全部 34 个工具。应先高层理解整曲/Section，再按具体问题下钻。
+不要为了“完整”机械调用全部 36 个工具。应先高层理解整曲/Section，再按具体问题下钻。
 
 ## 用户安装
 
@@ -395,10 +437,11 @@ mcp/server.py
 当前版本关系：
 
 ```text
-Product version       1.2.0
-MCP version           1.2
-OSC protocol version  1.2
-MCP tools             34
+Product version             1.2.0
+MCP version                 1.2
+OSC analysis protocol       1.2
+Analyzer control protocol   本机 revision 1
+MCP tools                   36
 ```
 
 内部模块：
@@ -412,13 +455,14 @@ mcp/masking_tools.py      Masking Evidence
 mcp/stereo_tools.py       Mid/Side + Stereo
 mcp/semantic_tools.py     Chroma / Tonal-center / Harmonic Evidence
 mcp/performance_tools.py  Adaptive Profile / Worker Telemetry
+mcp/control_tools.py      本机 Analyzer Analysis Profile 控制
 mcp/song_tools.py         DAW Transport / Pass Memory / Song Summaries
 mcp/section_tools.py      Section Boundary / Recurrence / Section Profile
 mcp/verification_tools.py Controlled Verification
 mcp/ci_regression.py      仓库内 Synthetic Regression
 ```
 
-## OSC Protocol
+## OSC Analysis Protocol
 
 Analysis Address：`/aianalyzer/frame`。
 
@@ -449,7 +493,16 @@ OSC **1.2** 继续保持 Append-only。当前尾部：
 149  schema marker = "1.2"
 ```
 
-歌曲结构层只读取 MCP Song Memory，不修改上述协议。
+Analyzer 自有 Profile Control **不修改这条 Analysis Frame 协议**，而是独立使用：
+
+```text
+Transport        仅本机 UDP Loopback
+Control Revision 1
+Scope            仅 Analysis Profile
+ACK              Request-scoped 显式 ACK
+```
+
+因此既有 `0..149` 索引没有被重新解释或追加。
 
 ## License
 

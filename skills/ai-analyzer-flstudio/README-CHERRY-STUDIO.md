@@ -7,7 +7,7 @@ This Skill targets:
 - AI Audio Analyzer MCP 1.2;
 - optional FL Studio control MCP: https://github.com/rosasynthesiz/flstudio-mcp
 
-Its purpose is to help an LLM **call Analyzer MCP correctly, interpret measurements correctly, manage multi-instance mapping, choose only the analysis work required by the request, use transport-aware Song Memory and explainable section structure instead of chasing realtime frames, judge latency/data quality, and run auditable Before/After verification around externally controlled DAW changes**.
+Its purpose is to help an LLM **call Analyzer MCP correctly, interpret measurements correctly, manage multi-instance mapping, choose only the analysis work required by the request, use Analyzer-owned Analysis Profile control, use transport-aware Song Memory and explainable section structure instead of chasing realtime frames, judge latency/data quality, and run auditable Before/After verification around externally controlled DAW changes**.
 
 It does **not** provide fixed mixing style, LUFS targets, EQ/compression/sidechain/stereo recipes, forced Verse/Chorus/Drop labels, key-change rules, harmony-edit rules, or mastering chains.
 
@@ -18,6 +18,7 @@ Signal State / runtime UUID
 Identify → FL Mixer Track/Slot deterministic mapping
 Project Status / Mix Overview / Snapshot A-B
 Adaptive Analysis profiles + worker/FIFO performance telemetry
+Analyzer-owned loopback Analysis Profile control + ACK
 DAW Transport / continuous playback epochs / latency-aware Song Memory
 Explainable section boundaries / neutral recurring A-B-C families / section profiles
 Spectral Flux / RMS Rise / temporal profile / band-envelope comparison
@@ -27,7 +28,7 @@ Mid/Side RMS / Side spectrum / frequency-dependent Side-Mid / negative-cross evi
 controlled closed-loop Before/After verification around external DAW changes
 ```
 
-The current append-only OSC protocol is **1.2**. Existing indexes `0..134` are unchanged; transport/data-quality metadata is appended at `135..149`. The section layer adds no OSC fields and consumes retained Song Memory in MCP.
+The current append-only OSC **analysis-frame** protocol is **1.2**. Existing indexes `0..149` remain unchanged. Analyzer-owned Analysis Profile control uses a separate loopback-only local control revision 1; the section layer also adds no analysis-frame fields and consumes retained Song Memory in MCP.
 
 ## Recommended initialization
 
@@ -79,6 +80,18 @@ audio_project_performance()
 audio_analysis_status(track)
 ```
 
+When the required feature family is disabled, use the minimum necessary Analyzer-owned profile control:
+
+```text
+audio_set_analysis_profile(track, profile)
+```
+
+For an intentionally selected group/all live Analyzers:
+
+```text
+audio_set_project_analysis_profile(profile, tracks=[...])
+```
+
 ## Recommended tool path
 
 ```text
@@ -90,6 +103,8 @@ whole-pass compact summary      audio_song_overview()
 raw track / DAW-time history    audio_song_timeline()
 project performance             audio_project_performance()
 one-instance analysis state     audio_analysis_status()
+one-instance profile control    audio_set_analysis_profile()
+project/group profile control   audio_set_project_analysis_profile()
 project recent overview         audio_mix_overview()
 project masking candidates      audio_project_masking_scan()
 stable recent single track      audio_average()
@@ -107,7 +122,7 @@ controlled change verification  audio_begin_verification() / audio_complete_veri
 verification recovery/status    audio_verification_status()
 ```
 
-MCP 1.2 exposes **34 tools**. Full signatures are in `references/analyzer-mcp.md`.
+MCP 1.2 exposes **36 tools**. Full signatures are in `references/analyzer-mcp.md`.
 
 ## Whole-song memory and Agent latency
 
@@ -212,7 +227,25 @@ Full      Mix + Semantic
 
 `Full` remains the default for backward compatibility.
 
-Analyzer MCP does **not** change `Analysis Profile`. Use the actual FL Studio control MCP for host writes/readback, then verify with `audio_analysis_status()`.
+Current control-capable Analyzer builds can change this Analyzer-owned performance parameter directly through:
+
+```text
+audio_set_analysis_profile(track, profile)
+audio_set_project_analysis_profile(profile, tracks=None)
+```
+
+These tools **do not** grant general DAW write access. EQ, compression, gain, pan, routing, synth, automation, arrangement and other sound/project writes remain the responsibility of the actual DAW-control MCP.
+
+Keep two confirmations separate:
+
+```text
+control_acknowledged  VST3 accepted/applied the profile request
+telemetry_confirmed   a measurement frame also reports the target profile
+```
+
+The control ACK can work while playback is stopped. Fresh telemetry normally requires new audio processing.
+
+If a control request receives no ACK, do not assume success. An older VST3 may lack the local control receiver. A DAW-control MCP that can write the historical `analysis_profile` parameter may be used as a compatibility fallback, followed by `audio_analysis_status()` verification.
 
 Runtime telemetry:
 
@@ -238,13 +271,15 @@ audio_project_status()
 → play the intended comparison passage
 → audio_begin_verification(...)
 → inspect ready_for_external_change / baseline_blockers
-→ external FL Studio control MCP makes the intended change
+→ external FL Studio control MCP makes the intended sound/project change
 → external control MCP reads back actual host state
 → replay a comparable passage
 → audio_complete_verification(...)
 ```
 
 `controlled_comparison=true` means only that technical A/B guardrails passed. `closed_loop_complete=true` additionally requires caller-supplied actual host readback. Neither means the change is better or should be kept.
+
+Analyzer Profile control ACK is only an Analyzer configuration acknowledgement. It does not replace actual host readback for unrelated DAW/plugin changes.
 
 Current verification remains recent-window based, not yet transport-anchored to an exact DAW-time range.
 
@@ -320,7 +355,7 @@ For whole-song, past-passage, or latency-sensitive work, call audio_song_status.
 Treat A/B/C section families only as neutral structural recurrence evidence. Never invent Verse/Chorus/Drop labels when exact DAW/project structure is unavailable; prefer exact markers/project metadata when available.
 Treat transport_epoch as an instance-local continuous playback pass. For cross-track structure, align by DAW-time coverage rather than numeric epoch equality.
 Inspect data age, estimated Analyzer lag, dropped blocks, coverage gaps, and coverage ratios before song-wide claims. Missing evidence is not silence.
-Use the minimum Analysis Profile that exposes the required evidence. Analyzer MCP does not write DAW parameters; real writes and host readback belong to the actual FL Studio control MCP.
+Use the minimum Analysis Profile that exposes the required evidence. Prefer audio_set_analysis_profile or audio_set_project_analysis_profile for the Analyzer's own profile on control-capable builds, require a valid control ACK for a requested change, and verify fresh telemetry when available. Never generalize this narrow exception into DAW/plugin writes; real sound/project writes and host readback belong to the actual FL Studio control MCP.
 Treat null as unavailable, not zero. Prefer exact DAW/MIDI/project metadata for exact symbolic facts.
 When the task changes the DAW and asks for verification, call audio_begin_verification before the external write, read actual host state back, replay a comparable passage, and then call audio_complete_verification.
 Never turn Analyzer measurements, section families, transport memory, or performance profiles into automatic mixing, mastering, harmony, tuning, semantic section, or processing instructions.
@@ -331,7 +366,7 @@ Never turn Analyzer measurements, section families, transport memory, or perform
 ```text
 references/analyzer-mcp.md          MCP tools and selector rules
 references/parameters.md            measurement parameter semantics
-references/performance-evidence.md  adaptive profiles and performance telemetry
+references/performance-evidence.md  adaptive profiles and performance/control telemetry
 references/song-memory.md           transport timeline, pass and latency semantics
 references/section-structure.md      boundary / recurrence / section-profile semantics
 references/masking-evidence.md      masking evidence and limitations

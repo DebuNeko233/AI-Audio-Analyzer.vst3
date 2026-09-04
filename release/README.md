@@ -13,8 +13,9 @@ Current product target:
 ```text
 AI Audio Analyzer 1.2.0
 MCP 1.2
-OSC 1.2
-34 MCP tools
+OSC analysis protocol 1.2
+Analyzer control protocol local revision 1
+36 MCP tools
 ```
 
 ## Release audience
@@ -63,6 +64,7 @@ MCP 1.2 imports all required feature modules, including:
 
 ```text
 performance_tools.py
+control_tools.py
 song_tools.py
 section_tools.py
 verification_tools.py
@@ -139,7 +141,8 @@ Before publication, verify at least:
 
 ```text
 source MCP syntax/self-test
-MCP 1.2 exact 34-tool registry
+MCP 1.2 exact 36-tool registry
+Analyzer control revision 1 parser / deterministic candidate-port regression
 historical measurement/evidence regressions
 transport 1.2 parser + Song Memory regressions
 transport epoch separation / coverage regressions
@@ -153,6 +156,7 @@ packaged MCP native self-test
 no PyInstaller _internal tree
 Windows x64 VST3 build
 macOS arm64 VST3 build/signature
+Analyzer profile-control receiver builds on both supported VST3 targets
 Windows installer parse
 macOS installer syntax
 MCP-SETUP.md present in both staged/final packages
@@ -167,7 +171,7 @@ Release draft/prerelease/public state matches workflow inputs
 
 A successful source self-test does not prove PyInstaller, VST3, package assembly, asset upload, or publication state succeeded.
 
-## Adaptive-analysis user-facing note
+## Adaptive-analysis and Analyzer-owned control note
 
 Release notes may explain:
 
@@ -183,10 +187,19 @@ Keep the explanation user-oriented:
 - profiles affect Analyzer measurement workload only;
 - they do not change/process the audio;
 - Full remains the compatibility default;
-- an Agent/DAW-control workflow may temporarily enable deeper measurement only when needed;
+- `audio_set_analysis_profile()` can change one live Analyzer's own profile;
+- `audio_set_project_analysis_profile()` can change selected/all live Analyzer profiles;
+- control is loopback-only, runtime-UUID addressed, and returns an explicit ACK;
+- profile application occurs outside the realtime audio callback;
 - no extra installation step is required.
 
-Do not market `worker_load_ratio` as DAW audio-thread CPU. Do not imply a fixed CPU reduction percentage. Analyzer MCP does not write FL Studio parameters.
+Keep `control_acknowledged` distinct from `telemetry_confirmed`: ACK proves the live VST3 accepted/applied the request, while telemetry confirmation requires a measurement frame reporting the requested profile.
+
+Do not market `worker_load_ratio` as DAW audio-thread CPU. Do not imply a fixed CPU reduction percentage.
+
+The Analyzer-owned profile control is the **only Analyzer MCP write exception**. It must never be broadened into general DAW/plugin control. EQ, compression, gain, pan, routing, automation, synth parameters, project edits and other sound-changing/technical writes remain the responsibility of the actual DAW-control MCP.
+
+Older VST3 builds that do not implement control revision 1 must time out cleanly; never report a write as successful without ACK.
 
 ## Transport-aware Song Memory user-facing note
 
@@ -215,10 +228,10 @@ The current MCP 1.2 runtime additionally exposes:
 ```text
 audio_section_map
 audio_section_profile
-34 total MCP tools
+36 total MCP tools
 ```
 
-This layer consumes existing Song Memory and therefore does not change OSC 1.2.
+This layer consumes existing Song Memory and therefore does not change OSC analysis protocol 1.2.
 
 Release notes may explain:
 
@@ -230,6 +243,22 @@ Release notes may explain:
 - the feature is explainable and lightweight; no neural structure model is required for this first implementation.
 
 Do **not** market A/B/C as automatic Verse/Chorus/Drop detection. Exact DAW markers/project labels remain authoritative when available. Boundary strength and family similarity are heuristic structural evidence, not calibrated probabilities or artistic judgments.
+
+## Analyzer control protocol compatibility
+
+The Analyzer-owned profile-control path is separate from `/aianalyzer/frame` and must not repurpose or append analysis-frame indexes merely to support control.
+
+Current control contract:
+
+```text
+transport       UDP loopback only
+revision        1
+scope           Analysis Profile only
+identity        live runtime UUID
+ACK             explicit request-scoped acknowledgement
+```
+
+The analysis OSC frame remains protocol 1.2 with existing indexes `0..149` unchanged.
 
 ## Closed-loop verification note
 

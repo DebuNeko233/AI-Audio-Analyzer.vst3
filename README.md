@@ -13,7 +13,7 @@ Current product version: **1.2.0**.
 ```text
 AI Audio Analyzer
 ├─ VST3    realtime-safe measurement probe + DAW transport context
-├─ MCP     measurement / Song Memory / structure / comparison / verification tools
+├─ MCP     measurement / profile control / Song Memory / structure / comparison / verification tools
 └─ Skill   English LLM-facing instructions for correct MCP use and evidence semantics
 ```
 
@@ -27,10 +27,11 @@ For DAW topology and control, the current workflow pairs Analyzer MCP with:
 
 ```text
 AI Audio Analyzer MCP   → observe / measure / remember / structure / compare / verify
-FL Studio MCP           → inspect / control / modify / read back FL Studio
+                          + control Analyzer's own Analysis Profile only
+FL Studio MCP           → inspect / control / modify / read back FL Studio/project/plugin state
 ```
 
-Analyzer MCP does **not** perform DAW writes. Real host/project data and parameter writes remain the responsibility of the actual DAW-control MCP.
+Analyzer MCP does **not** perform general DAW writes. The only write exception is the Analyzer-owned `Analysis Profile`, which changes measurement computation but never changes the audio signal. Real project data and all sound-changing/project/plugin writes remain the responsibility of the actual DAW-control MCP.
 
 ## Architecture
 
@@ -41,11 +42,12 @@ FL Studio / DAW
 ├─ Mixer Track B ─ AI Audio Analyzer.vst3
 └─ Master        ─ AI Audio Analyzer.vst3
                          │
-                         │ OSC UDP, default 127.0.0.1:9855
+                         │ OSC UDP measurements, default 127.0.0.1:9855
                          ▼
                  Analyzer MCP Bridge
                  ├─ live instance registry + deterministic bindings
                  ├─ adaptive-analysis status / worker telemetry
+                 ├─ Analyzer-owned loopback Profile control + ACK
                  ├─ DAW transport + continuous playback epochs
                  ├─ one-second Song Memory + coarse aggregation
                  ├─ explainable section boundaries + A/B/C recurrence families
@@ -56,7 +58,7 @@ FL Studio / DAW
                          ▼
                   Cherry Studio / LLM
                          │
-                         └─ external FL Studio control MCP for host changes/readback
+                         └─ external FL Studio control MCP for project/sound changes + host readback
 ```
 
 Multiple Analyzer instances may send to the same UDP port. Only one MCP Bridge process should bind UDP `9855`.
@@ -129,12 +131,30 @@ Full      Mix + Semantic
 
 `Full` remains the default for backward compatibility.
 
-Analyzer MCP exposes:
+Analyzer MCP exposes status/performance tools:
 
 ```text
 audio_analysis_status(track)
 audio_project_performance()
 ```
+
+and Analyzer-owned profile-control tools:
+
+```text
+audio_set_analysis_profile(track, profile)
+audio_set_project_analysis_profile(profile, tracks=None)
+```
+
+The control path is loopback-only and session-scoped. It targets the live VST3 runtime UUID, applies the host-visible `analysis_profile` parameter on the JUCE message thread, and returns an explicit ACK. It does **not** run on the audio thread and does not alter the audio signal.
+
+Keep these two confirmations separate:
+
+```text
+control_acknowledged  target VST3 accepted/applied the profile request
+telemetry_confirmed   a measurement frame also reports the requested profile
+```
+
+The ACK can work while playback is stopped; fresh telemetry normally requires new audio processing. Older VST3 builds without the control receiver time out cleanly rather than being treated as successful.
 
 Runtime telemetry includes:
 
@@ -145,9 +165,29 @@ fft_runs_per_second
 semantic_runs_per_second
 ```
 
-`worker_load_ratio` describes the Analyzer **background worker**, not DAW realtime audio-thread CPU. Sustained FIFO growth can indicate measurement lag.
+`worker_load_ratio` describes the Analyzer **background worker**, not DAW realtime audio-thread CPU. Sustained FIFO growth can indicate measurement lag. Disabled feature families are explicitly marked unavailable in MCP.
 
-The actual Analysis Profile write remains the responsibility of the DAW-control MCP. Disabled feature families are explicitly marked unavailable in MCP.
+All non-Analyzer sound/project controls remain outside Analyzer MCP.
+
+## Plugin GUI
+
+The VST3 editor has built-in **English / 中文** switching. The selected language is stored as the non-automatable `uiLanguage` GUI preference inside `AIAnalyzerState`; older project states default to English. Language selection affects presentation only and never changes host parameter IDs, OSC fields, MCP tool names, or LLM-facing Skill content.
+
+The editor also exposes operational context that already exists in protocol 1.2:
+
+```text
+DAW play / stop / record state
+DAW time, BPM, time signature, loop state and transport pass/epoch
+Analysis Profile and signal validity
+Worker load, FIFO fill, estimated analysis lag and cumulative dropped blocks
+configured OSC TX target
+```
+
+The four `Eco / Balanced / Mix / Full` buttons use the same host-visible `analysis_profile` parameter as DAW automation and Analyzer-owned MCP profile control. There is no separate GUI-only profile state.
+
+`OSC TX → host:port` still means the configured **measurement** destination, not a generic MCP-connected indicator. Analyzer profile control uses a separate loopback-only command/ACK path.
+
+The GUI remains primarily an observation/status surface. Song Memory, section detection, higher-level evidence reasoning and general DAW writes stay outside the realtime plugin editor.
 
 ## Transport-aware Song Memory
 
@@ -330,9 +370,11 @@ Current verification remains recent-window based; transport-anchored same-range 
 
 ## MCP tools
 
-MCP **1.2 exposes 34 tools**. Whole-song/structure high-level tools are:
+MCP **1.2 exposes 36 tools**. High-level whole-song/structure/profile-control tools include:
 
 ```text
+audio_set_analysis_profile(...)
+audio_set_project_analysis_profile(...)
 audio_song_status()
 audio_song_overview()
 audio_song_timeline(...)
@@ -340,7 +382,7 @@ audio_section_map(...)
 audio_section_profile(...)
 ```
 
-Do not mechanically run all 34 tools. Start high-level, then drill down only where the song/section context requires it.
+Do not mechanically run all 36 tools. Start high-level, then drill down only where the song/section context requires it.
 
 ## User installation
 
@@ -390,10 +432,11 @@ mcp/server.py
 Current metadata:
 
 ```text
-Product version       1.2.0
-MCP version           1.2
-OSC protocol version  1.2
-MCP tools             34
+Product version             1.2.0
+MCP version                 1.2
+OSC analysis protocol       1.2
+Analyzer control protocol   local revision 1
+MCP tools                   36
 ```
 
 Internal modules:
@@ -407,6 +450,7 @@ mcp/masking_tools.py      masking-evidence layer
 mcp/stereo_tools.py       Mid/Side and stereo layer
 mcp/semantic_tools.py     chroma / tonal-center / harmonic evidence
 mcp/performance_tools.py  adaptive profile / worker telemetry layer
+mcp/control_tools.py      loopback-only Analyzer Analysis Profile control
 mcp/song_tools.py         DAW transport / pass memory / latency-aware song summaries
 mcp/section_tools.py      explainable boundaries / recurring families / section profiles
 mcp/verification_tools.py controlled verification sessions
@@ -462,7 +506,16 @@ OSC **1.2** remains append-only. The current tail is:
 149  schema marker = "1.2"
 ```
 
-The song-structure layer consumes MCP Song Memory and does not change this wire format.
+The Analyzer-owned Profile control is intentionally separate from this frame format:
+
+```text
+control transport   UDP loopback only
+control revision    1
+control scope       Analysis Profile only
+ACK                 explicit request-scoped loopback ACK
+```
+
+No existing OSC analysis-frame index is repurposed or appended for this feature.
 
 ## License
 
