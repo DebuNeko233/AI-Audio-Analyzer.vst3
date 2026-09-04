@@ -145,6 +145,24 @@ semantic_runs_per_second
 
 `worker_load_ratio` 是 **Analyzer 后台 Worker** 的忙碌比例，不是 FL Studio Realtime Audio CPU。实际 Analysis Profile 写入仍由 DAW Control MCP 完成，Analyzer MCP 负责回读/验证。
 
+## 插件 GUI
+
+VST3 编辑器内置 **English / 中文** 切换。所选语言作为不可自动化的 `uiLanguage` GUI 偏好保存到 `AIAnalyzerState`；旧工程状态没有该字段时默认 English。语言只影响界面显示，不会修改宿主参数 ID、OSC 字段、MCP 工具名或面向 LLM 的 Skill 内容。
+
+GUI 还会直接展示协议 1.2 已经存在的运行状态：
+
+```text
+DAW 播放 / 停止 / 录音状态
+DAW 时间、BPM、拍号、Loop 和 Transport Pass/Epoch
+Analysis Profile 与 Signal Validity
+Worker Load、FIFO Fill、Estimated Analysis Lag、Dropped Blocks
+配置的 OSC TX 目标
+```
+
+`OSC TX → host:port` 表示当前配置的发送目标，**不代表 MCP 已连接**；VST3 当前没有 MCP acknowledgement 回传通道。
+
+GUI 仍然只是观察/状态界面。Song Memory、Section Detection、高层证据推理和 DAW 参数写入都不会搬进实时插件编辑器。
+
 ## 面向 LLM 延迟的 Song Memory
 
 协议 1.2 的目标不是让 LLM 更实时，而是让 LLM **晚几秒也能准确查询刚才发生的音乐**：
