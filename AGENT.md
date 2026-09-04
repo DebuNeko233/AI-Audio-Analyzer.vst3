@@ -724,17 +724,17 @@ The current product incorporates these milestones:
 - bilingual English/Chinese plugin GUI with transport/health visibility;
 - direct four-button Eco/Balanced/Mix/Full GUI synchronized to the real host parameter;
 - Analyzer-owned loopback Analysis Profile control with explicit ACK and a strict no-general-DAW-write boundary;
-- section-aware Track Story that exposes per-section observations, adjacent deltas, recurring-family per-dimension variation and coverage guardrails without assigning artistic roles.
+- section-aware per-track Track Story with coverage-aware deltas and neutral family variation summaries.
 
-## 18. Long-term roadmap / ordered genuine gaps
+## 18. Long-term roadmap and genuine future gaps
 
-This roadmap is the persistent development order for the current architecture. Do not invent artificial stage numbers or version bumps to advance it. Reorder only when a concrete reliability/workflow dependency justifies the change, and record the reason here.
+`AGENT.md` is the source of truth for repository roadmap state. Do **not** rely only on conversation memory to decide the next architecture milestone.
 
-Status vocabulary:
+Roadmap status vocabulary:
 
 ```text
-ACTIVE       implementation is currently being developed/validated
-QUEUED       intended next work after earlier dependencies
+ACTIVE       implementation is in progress on a development branch
+QUEUED       next/near-term candidate after active dependencies are complete
 LATER        useful but not yet a near-term dependency
 BLOCKED      requires external DAW/project capability or unresolved design work
 DONE         implemented, documented and regression-covered on main
@@ -742,20 +742,11 @@ DONE         implemented, documented and regression-covered on main
 
 ### P1 - Track Story across sections
 
-Status: **ACTIVE** on the current development branch; mark **DONE** only after merge and exact-head MCP CI passes.
+Status: **ACTIVE / IMPLEMENTATION COMPLETE / MERGE-READY** on PR #19. Exact-head CI for `54354eb48edcb035acd592188b7d9f92e8bc54da` passed MCP regressions, Windows x64 build/tests, macOS arm64 build/tests, and Release installer validation. Keep status non-DONE until the implementation is merged to `main`.
 
-Goal:
+Goal: summarize what each Analyzer/track does across detected sections rather than returning only isolated section snapshots.
 
-```text
-one Analyzer instance
-+ cached section map
--> per-section behavior
--> adjacent-section deltas
--> recurring-family variation
--> coverage-aware whole-track narrative evidence
-```
-
-Required evidence:
+Required output includes:
 
 - active ratio;
 - RMS / LUFS-S;
@@ -928,24 +919,23 @@ Goal: level-aware, section-aware comparison against a user-selected reference wi
 
 Required guardrails:
 
-- explicit reference identity/source;
-- loudness/level matching where appropriate;
-- comparable section/range selection;
-- distributions rather than only one average;
-- observed difference != required correction.
+- explicit user-selected reference;
+- level/loudness normalization semantics stated;
+- section/time-range alignment stated;
+- no automatic "match reference" prescription;
+- missing metadata/coverage explicit.
 
 ### P9 - Stronger tonal representation
 
 Status: **LATER**.
 
-Candidates:
+Candidate upgrades:
 
 ```text
-HPCP/CQT-style tonal evidence
-better tuning-offset handling
-multi-pitch evidence
-tonal-centroid/Tonnetz-like relationships
-key/chord likelihood with explicit uncertainty
+HPCP
+CQT/log-frequency tonal representation
+tuning offset estimation
+multi-pitch / chord evidence only if justified
 ```
 
 Rules:
@@ -960,25 +950,26 @@ Status: **LATER / BLOCKED** on input/render workflow design.
 
 Goal: analyze rendered songs/stems faster than realtime while preserving a compatible evidence schema.
 
-Possible implementation surfaces:
+Potential implementation paths:
 
-```text
-standalone CLI/file analyzer
-DAW offline-render integration
-rendered stem ingestion
-```
+- external offline analyzer executable/library;
+- DAW render handoff from companion control MCP;
+- reuse the same summary/section/relationship schema where possible.
 
-Do not put file I/O or offline scanning onto the realtime audio callback.
+Do not put file decoding/render orchestration into the realtime audio callback.
 
-### Cross-cutting reliability gaps
+### Current unresolved architectural gaps
 
-These are not separate product milestones, but every relevant milestone should improve them when possible:
+Even as roadmap items progress, keep these limitations explicit:
 
-- transport time/PPQ are approximate, not sample-accurate;
+- transport time/PPQ remain approximate, not sample-accurate;
 - PPQ correction uses current BPM, not full historical tempo-map reconstruction;
-- Song Memory and section maps are currently MCP-session scoped;
-- section detection operates at one-second retained-summary scale, not beat/transient segmentation;
-- structure is explainable/heuristic, not learned;
+- Song Memory is MCP RAM/session-scoped;
+- section maps and Track Stories are session-scoped;
+- section detector operates at one-second retained-summary scale, not beat/transient segmentation;
+- structure and Track Story are explainable/heuristic, not learned;
+- no automatic semantic Verse/Chorus/Drop naming by design;
+- no direct exact FL Studio marker/Playlist metadata integration yet;
 - epoch IDs are instance-local, not project-global pass IDs;
 - estimated analysis lag excludes OSC/MCP/LLM/DAW-control latency;
 - no routing graph until exact DAW context supplies one;
@@ -990,19 +981,6 @@ Only pursue these when evidence shows they solve a real workflow gap:
 
 - change ledger / Agent cursor-digest for avoiding repeated edits;
 - more explicit spectral tilt/balance summaries derived from existing 32 bands;
-- beat-aware structure refinement;
-- learned music embeddings if explainable structure/tonal features prove insufficient;
-- richer offline/project interchange.
+- optional learned music embeddings if explainable structure/relationships prove insufficient.
 
-## 19. Roadmap maintenance rule
-
-Whenever a roadmap item changes state:
-
-1. update its status in this file;
-2. move durable completed behavior into Section 17 history/current architecture sections;
-3. update tool counts/source layout if applicable;
-4. update README/Skill/Release docs as required by Section 2;
-5. add or update a regression that proves the completion criterion;
-6. do not mark **DONE** until the implementation head has the required green CI and the change is on `main`.
-
-Do not use conversation memory alone as the project roadmap. `AGENT.md` is the repository source of truth for planned architectural work.
+Do not invent artificial milestone/version numbers simply to continue development.
