@@ -15,7 +15,7 @@ AI Audio Analyzer 1.2.0
 MCP 1.2
 OSC analysis protocol 1.2
 Analyzer control protocol local revision 1
-41 MCP tools
+42 MCP tools
 ```
 
 ## Release audience
@@ -63,6 +63,7 @@ Runtime modules include:
 ```text
 analyzer_core.py
 project_tools.py
+project_identity_tools.py
 temporal_tools.py
 masking_tools.py
 stereo_tools.py
@@ -149,7 +150,8 @@ Before publication verify at least:
 
 ```text
 source MCP py_compile/self-test
-MCP 1.2 exact 41-tool registry
+MCP 1.2 exact 42-tool registry
+project/runtime identity disclosure regression
 Analyzer control revision 1 regression
 historical evidence regressions
 transport parser + Song Memory coverage/epoch regressions
@@ -177,6 +179,35 @@ Release draft/prerelease/public state matches workflow inputs
 ```
 
 A successful source self-test alone does not prove PyInstaller, VST3, package assembly, or publication succeeded.
+
+## Project/runtime identity note
+
+Release and Skill docs must expose the current limitation instead of implying persistent project identity.
+
+`audio_project_identity_status()` reports the machine-readable contract:
+
+```text
+stable_project_id                       null
+project_identity_confidence             UNRESOLVED
+project_switch_detection                not_available
+runtime_id scope                        live_plugin_instance
+runtime_id persistent                   false
+same-project reopen UUID stable         false
+binding scope                           mcp_session
+cross-project retained-state isolation  not guaranteed
+```
+
+User-facing claims must preserve:
+
+- reopening the same project recreates Analyzer runtime UUIDs;
+- a new runtime UUID does not prove that the DAW project changed;
+- current Mixer/Slot bindings are deterministic session locations, not persistent track identity;
+- MCP session memory can remain after a DAW project switch/reopen while MCP keeps running;
+- retained Song Memory, Section Maps, snapshots, relationships and verification sessions are not yet partitioned by a stable project ID;
+- until exact external project identity is integrated, restart Analyzer MCP after changing/reopening projects when strict state isolation is required;
+- never manufacture a Project ID from runtime UUID, BPM, names, track count, topology fingerprint, Mixer index or transport epoch.
+
+This disclosure does not claim automatic project-switch detection or automatic cache clearing.
 
 ## Analysis Profile note
 
@@ -207,6 +238,7 @@ audio_section_relationships
 User-facing claims must preserve:
 
 - Song Memory is bounded and MCP-session scoped;
+- Song Memory is not yet partitioned by stable Project ID;
 - transport epochs are instance-local;
 - transport coordinates are not sample-accurate;
 - missing coverage is not silence;
@@ -217,7 +249,7 @@ User-facing claims must preserve:
 
 ## Closed-loop verification note
 
-MCP 1.2 now contains **two** verification paths.
+MCP 1.2 contains **two** verification paths.
 
 Recent-window compatibility path:
 
@@ -249,7 +281,8 @@ Same-range public semantics:
 - higher selected After dropped-block evidence blocks a controlled comparison;
 - `active_ratio` is descriptive and not used as passage identity in same-range mode;
 - arbitrary-range LUFS-I delta is intentionally unavailable because current retained `lufs_i_latest` is pass-cumulative, not isolated range-integrated loudness;
-- actual external host readback is still required for `closed_loop_complete=true`.
+- actual external host readback is still required for `closed_loop_complete=true`;
+- neither verification mode establishes persistent project identity.
 
 Never market `controlled_comparison=true` as “the change is better”. It means technical comparability only.
 
@@ -267,7 +300,7 @@ identity        live runtime UUID
 ACK             explicit request-scoped acknowledgement
 ```
 
-OSC analysis frame remains append-only 1.2 with existing indexes `0..149` unchanged by Track Story, relationships, or range verification.
+OSC analysis frame remains append-only 1.2 with existing indexes `0..149` unchanged by Track Story, relationships, range verification, or identity disclosure.
 
 ## Draft / prerelease semantics
 

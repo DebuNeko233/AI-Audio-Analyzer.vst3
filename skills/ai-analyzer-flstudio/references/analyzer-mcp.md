@@ -1,6 +1,6 @@
 # AI Audio Analyzer MCP Reference
 
-This reference describes the MCP tool surface, selector rules, Analysis Profile control/readback, Song Memory, structure, Track Story, section relationships, verification modes, validity and control boundaries.
+This reference describes the MCP tool surface, project/runtime identity scope, selector rules, Analysis Profile control/readback, Song Memory, structure, Track Story, section relationships, verification modes, validity and control boundaries.
 
 Related references:
 
@@ -19,7 +19,7 @@ verification-evidence.md
 
 ## Tool registry
 
-MCP 1.2 exposes **41 tools**:
+MCP 1.2 exposes **42 tools**:
 
 ```text
 audio_bridge_status()
@@ -34,6 +34,7 @@ audio_compare_tracks(track_a, track_b)
 audio_detect_masking(track_a, track_b)
 audio_master_status(track="Master")
 audio_project_status()
+audio_project_identity_status()
 audio_mix_overview(seconds=10, max_tracks=32)
 audio_capture_snapshot(name, seconds=5)
 audio_list_snapshots()
@@ -65,11 +66,14 @@ audio_complete_range_verification(verification_id, change_summary="", host_readb
 audio_range_verification_status(verification_id="")
 ```
 
-Do not call all 41 tools by default.
+Do not call all 42 tools by default.
 
 ## Recommended hierarchy
 
 ```text
+project/runtime identity scope
+-> audio_project_identity_status()
+
 project readiness
 -> audio_project_status()
 
@@ -107,6 +111,46 @@ external DAW change without practical explicit range
 -> audio_complete_verification()
 ```
 
+## Project/runtime identity scope
+
+Use:
+
+```text
+audio_project_identity_status()
+```
+
+at the beginning of a new MCP/Agent session and whenever the user may have switched or reopened a DAW project.
+
+Current machine-readable contract:
+
+```text
+stable_project_id                       null
+project_identity_confidence             UNRESOLVED
+project_switch_detection                not_available
+runtime_id.scope                        live_plugin_instance
+runtime_id.persistent                   false
+runtime_id.serialized_with_project      false
+runtime_id.stable_when_same_project_is_reopened  false
+binding.scope                           mcp_session
+binding.persistent                      false
+retained_state.scope                    mcp_session
+retained_state.automatically_partitioned_by_stable_project_id  false
+retained_state.cross_project_isolation_guaranteed              false
+```
+
+Interpretation:
+
+- `runtime_id` identifies one live Analyzer plugin instance only;
+- reopening the same project recreates Analyzer runtime UUIDs;
+- therefore a new runtime UUID does not prove that the DAW project changed;
+- Mixer/Slot bindings are deterministic for the current session but are not persistent track identity;
+- MCP retained state can outlive an FL Studio project switch while the MCP process stays running;
+- Song Memory, Section Maps, snapshots, relationship/verification state are not yet automatically partitioned by stable project ID;
+- until exact project identity is provided by the external DAW-control layer, callers must not silently carry retained project-level state across a switch/reopen;
+- if strict isolation is required before P3/P5 identity integration, restart Analyzer MCP when changing/reopening projects.
+
+Never manufacture a project ID from runtime UUID, tempo, track count, Mixer indexes, names, topology fingerprints, epoch numbers, or an audio fingerprint unless a future explicit project-identity contract defines it.
+
 ## Deterministic Identify mapping
 
 Host-visible parameter:
@@ -136,7 +180,7 @@ mixer:<track_index>/slot:<slot>
 -> unique Analyzer display name
 ```
 
-Runtime UUIDs and bindings are session-scoped.
+Runtime UUIDs and bindings are session-scoped. Reopening/recreating an Analyzer requires rediscovery. A current-session binding is not persistent track identity.
 
 ## Analysis Profile control/readback
 
@@ -177,7 +221,8 @@ Rules:
 - stale streams are not current state;
 - disabled/unmeasured feature families remain unavailable;
 - current live Profile must not be used as proof of historical feature availability;
-- retained range comparison uses fields actually present in selected retained evidence.
+- retained range comparison uses fields actually present in selected retained evidence;
+- current fresh telemetry does not prove retained project-level state belongs to the same DAW project after a switch/reopen.
 
 ## Song Memory
 
@@ -191,6 +236,8 @@ query resolutions    1 / 2 / 5 / 10 / 15 / 30 seconds
 ```
 
 `transport_epoch` is an **instance-local continuous playback pass**. Cross-track retained reasoning aligns by DAW-time overlap, not equal epoch numbers.
+
+Song Memory is MCP-session state and is not yet tagged/partitioned by a stable project ID. Treat it as potentially belonging to an earlier project after a switch/reopen unless a clean MCP session boundary or authoritative external identity establishes otherwise.
 
 Important data-quality fields:
 
@@ -243,6 +290,8 @@ This mode compares recent measurement windows. Its active-ratio tolerance is a p
 
 Do not call it exact same-range verification.
 
+Verification sessions are MCP-session state, not persistent project identity. Do not carry a verification across a suspected project switch/reopen without authoritative project identity.
+
 ## Transport-anchored same-range verification
 
 ```text
@@ -283,20 +332,20 @@ Important invariants:
 
 `closed_loop_complete=true` additionally requires caller-supplied actual host readback.
 
-Neither means the artistic result is better.
+Neither means the artistic result is better, and neither establishes persistent DAW project identity.
 
 Detailed semantics: `verification-evidence.md`.
 
 ## Control boundary
 
-Analyzer MCP owns measurement, retained memory, derived structure/relationships/range resolution, comparison, verification conditions, deterministic binding evidence, and Analyzer Analysis Profile control only.
+Analyzer MCP owns measurement, retained memory, project/runtime identity-scope disclosure, derived structure/relationships/range resolution, comparison, verification conditions, deterministic binding evidence, and Analyzer Analysis Profile control only.
 
-The external DAW-control layer owns exact project state and all non-Analyzer writes/readback.
+The external DAW-control layer owns exact project state, future authoritative stable project identity, and all non-Analyzer writes/readback.
 
-Never invent write success, readback values, semantic section labels, track roles, or processing certainty.
+Never invent project identity, write success, readback values, semantic section labels, track roles, or processing certainty.
 
 ## OSC compatibility
 
-OSC analysis protocol remains append-only **1.2** with existing indexes `0..149` unchanged by Track Story, relationships or range verification.
+OSC analysis protocol remains append-only **1.2** with existing indexes `0..149` unchanged by Track Story, relationships, range verification, or identity-scope disclosure.
 
 Analyzer-owned Profile control remains a separate loopback-only control protocol, revision 1.

@@ -4,7 +4,7 @@
 
 **AI Audio Analyzer** is a JUCE VST3 machine-readable audio measurement layer for AI/LLM-assisted music-production workflows.
 
-It measures audio inside the DAW, publishes structured OSC telemetry to the Analyzer MCP Bridge, and exposes level, loudness, spectrum, stereo, temporal, masking, tonal, project, transport-aligned Song Memory, explainable song structure, Track Story, section-aware mix relationships, performance telemetry, and closed-loop verification evidence to Cherry Studio or another MCP client.
+It measures audio inside the DAW, publishes structured OSC telemetry to the Analyzer MCP Bridge, and exposes level, loudness, spectrum, stereo, temporal, masking, tonal, project, transport-aligned Song Memory, explainable song structure, Track Story, section-aware mix relationships, performance telemetry, identity-scope disclosure, and closed-loop verification evidence to Cherry Studio or another MCP client.
 
 Current product version: **1.2.0**.
 
@@ -16,6 +16,7 @@ AI Audio Analyzer VST3
 
 AI Audio Analyzer MCP
   -> observe / remember / structure / compare / verify
+  -> disclose current project/runtime identity guarantees
   -> may control Analyzer's own Analysis Profile only
 
 External DAW-control MCP
@@ -43,6 +44,7 @@ FL Studio / DAW
                          v
                  Analyzer MCP Bridge
                  +-- live instance registry + deterministic bindings
+                 +-- explicit runtime/project identity-scope disclosure
                  +-- adaptive-analysis status / worker telemetry
                  +-- Analyzer-owned loopback Profile control + ACK
                  +-- DAW transport + instance-local playback epochs
@@ -89,6 +91,34 @@ The Analyzer is evidence-oriented. It does not hard-code genre recipes, fixed LU
 
 Missing retained coverage is not silence.
 
+## Project/runtime identity scope
+
+Current Analyzer `runtime_id` is a **live plugin-instance UUID**, not a persistent project or track ID. It is deliberately not serialized with the project, so reopening the same FL Studio project recreates Analyzer runtime UUIDs.
+
+Use:
+
+```text
+audio_project_identity_status()
+```
+
+before assuming continuity across a project switch/reopen.
+
+Current guarantees are explicit:
+
+```text
+stable_project_id                       null
+project_identity_confidence             UNRESOLVED
+runtime_id scope                        live_plugin_instance
+runtime_id persistent                   false
+same-project reopen UUID stable         false
+binding scope                           mcp_session
+cross-project retained-state isolation  not guaranteed
+```
+
+MCP session memory can outlive an FL Studio project switch while the MCP process keeps running. Until exact external project identity is integrated, callers must not assume retained Song Memory, Section Maps, snapshots, relationships, or verification sessions belong to the newly opened project. Restart the Analyzer MCP when changing/reopening projects if strict isolation is required.
+
+A new runtime UUID also does **not** prove the project changed, because reopening the same project recreates UUIDs too.
+
 ## Deterministic Analyzer ↔ FL Mixer mapping
 
 Each live Analyzer has a session runtime UUID and exposes:
@@ -105,6 +135,8 @@ mixer:7/slot:9
 ```
 
 Prefer deterministic binding over guessing identity from track name or audio content.
+
+Bindings are MCP-session scoped and must be rediscovered after plugin/runtime recreation.
 
 ## Adaptive Analysis Profile
 
@@ -280,12 +312,13 @@ See `skills/ai-analyzer-flstudio/references/verification-evidence.md`.
 
 ## MCP tools
 
-MCP **1.2 exposes 41 tools**.
+MCP **1.2 exposes 42 tools**.
 
 High-level tools include:
 
 ```text
 audio_project_status()
+audio_project_identity_status()
 audio_set_analysis_profile(...)
 audio_set_project_analysis_profile(...)
 audio_song_status()
@@ -300,7 +333,9 @@ audio_complete_range_verification(...)
 audio_range_verification_status(...)
 ```
 
-Do not mechanically run all 41 tools. Start high-level and drill down only where needed.
+At a new Agent/MCP session, and especially after a user may have switched or reopened a DAW project, inspect `audio_project_identity_status()` before assuming retained-state continuity.
+
+Do not mechanically run all 42 tools. Start high-level and drill down only where needed.
 
 ## User installation
 
@@ -350,7 +385,7 @@ Product version             1.2.0
 MCP version                 1.2
 OSC analysis protocol       1.2
 Analyzer control protocol   local revision 1
-MCP tools                   41
+MCP tools                   42
 ```
 
 Runtime modules:
@@ -359,6 +394,7 @@ Runtime modules:
 mcp/server.py
 mcp/analyzer_core.py
 mcp/project_tools.py
+mcp/project_identity_tools.py
 mcp/temporal_tools.py
 mcp/masking_tools.py
 mcp/stereo_tools.py
@@ -388,13 +424,13 @@ Regression files are not shipped in beginner user Releases.
 
 Analysis address: `/aianalyzer/frame`.
 
-OSC **1.2** remains append-only. Existing indexes `0..149` are unchanged by Track Story, section relationships, or transport-range verification.
+OSC **1.2** remains append-only. Existing indexes `0..149` are unchanged by Track Story, section relationships, transport-range verification, or project-identity disclosure.
 
 The Analyzer-owned Analysis Profile control is a separate loopback-only control protocol, revision 1.
 
 ## Skill
 
-LLM-facing Skill/reference content is English-only and documents evidence semantics, validity, tool order, and control boundaries.
+LLM-facing Skill/reference content is English-only and documents evidence semantics, validity, tool order, identity scope, and control boundaries.
 
 Key references include:
 

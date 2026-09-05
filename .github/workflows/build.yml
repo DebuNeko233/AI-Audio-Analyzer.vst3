@@ -173,6 +173,7 @@ jobs:
             mcp/server.py \
             mcp/analyzer_core.py \
             mcp/project_tools.py \
+            mcp/project_identity_tools.py \
             mcp/temporal_tools.py \
             mcp/masking_tools.py \
             mcp/stereo_tools.py \
@@ -203,6 +204,7 @@ jobs:
           cp mcp/server.py dist/mcp/
           cp mcp/analyzer_core.py dist/mcp/
           cp mcp/project_tools.py dist/mcp/
+          cp mcp/project_identity_tools.py dist/mcp/
           cp mcp/temporal_tools.py dist/mcp/
           cp mcp/masking_tools.py dist/mcp/
           cp mcp/stereo_tools.py dist/mcp/
