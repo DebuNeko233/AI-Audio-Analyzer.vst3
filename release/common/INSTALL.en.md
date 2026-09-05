@@ -79,13 +79,33 @@ The installer generates `cherry-studio-mcp.json` with the real absolute path to 
 
 Prefer that generated file over typing paths manually. Full JSON examples are in `MCP-SETUP.md`.
 
-A useful first Agent call is:
+AI Audio Analyzer MCP 1.2 currently exposes **42 tools**.
+
+At a new session, and whenever the user may have switched or reopened the DAW project, first inspect:
+
+```text
+audio_project_identity_status()
+```
+
+Current limitation:
+
+```text
+stable_project_id                       null
+project_identity_confidence             UNRESOLVED
+runtime_id scope                        live_plugin_instance
+same-project reopen UUID stable         false
+cross-project retained-state isolation  not guaranteed
+```
+
+Analyzer runtime UUIDs are not persistent project/track IDs. Reopening the same FL Studio project creates new Analyzer runtime UUIDs, so a new UUID does not prove that a different project was opened.
+
+If Analyzer MCP keeps running through a project switch/reopen, retained Song Memory, Section Maps, snapshots, relationships and verification sessions may still exist in RAM and are not yet partitioned by a stable Project ID. Until exact project identity is integrated, restart Analyzer MCP after changing/reopening projects when strict state isolation is required.
+
+Then inspect current-session readiness:
 
 ```text
 audio_project_status()
 ```
-
-AI Audio Analyzer MCP 1.2 currently exposes **41 tools**.
 
 ## Whole-song and section workflows
 
@@ -101,7 +121,7 @@ audio_track_story(...)
 audio_section_relationships(...)
 ```
 
-Song Memory retains bounded one-second DAW-time evidence. Playback starts, seeks and loop jumps create separate instance-local playback epochs.
+Song Memory retains bounded one-second DAW-time evidence. Playback starts, seeks and loop jumps create separate instance-local playback epochs. Song Memory is MCP-session state and is not yet partitioned by stable Project ID.
 
 A/B/C families are neutral recurrence labels, not automatic Verse/Chorus/Drop names. Track Story does not infer Bass/Vocal/Drums roles or prescribe processing. Relationship `shortlist_priority` is an inspection heuristic, not masking/mix-problem probability or quality score.
 
@@ -130,7 +150,7 @@ Same-range behavior:
 - higher selected After dropped-block evidence blocks a controlled comparison;
 - arbitrary-range LUFS-I is not fabricated from pass-cumulative retained state.
 
-`controlled_comparison=true` means technical comparability only. `closed_loop_complete=true` additionally requires actual caller-supplied host readback. Neither means the result is artistically better.
+`controlled_comparison=true` means technical comparability only. `closed_loop_complete=true` additionally requires actual caller-supplied host readback. Neither means the result is artistically better or establishes persistent project identity.
 
 Recent-window verification remains available when explicit retained DAW-time anchoring is not practical:
 
@@ -139,6 +159,8 @@ audio_begin_verification(...)
 audio_complete_verification(...)
 audio_verification_status(...)
 ```
+
+Do not carry either verification mode across a suspected project switch/reopen without authoritative external identity or a clean MCP restart.
 
 ## Analysis Profiles
 
@@ -177,7 +199,9 @@ This is the only Analyzer MCP write capability. All sound/project writes and act
 ## Suggested first workflow
 
 ```text
-audio_project_status()
+audio_project_identity_status()
+-> if project was switched/reopened and strict isolation is required, restart Analyzer MCP
+-> audio_project_status()
 -> bind unbound Analyzer instances through Identify when needed
 -> audio_song_status() for whole-song work
 -> capture enough of the intended pass
