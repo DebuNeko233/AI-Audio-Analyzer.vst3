@@ -79,7 +79,7 @@ MCP / Skill 安装到：
 
 优先直接使用这个文件，不要手动猜路径。完整 JSON 示例见 `MCP-SETUP.md`。
 
-当前 AI Audio Analyzer MCP 1.2 在 P6a 分支共 **43 个工具**。
+当前 AI Audio Analyzer MCP 1.2 在 Stacked P7a 分支共 **44 个工具**。
 
 ## MCP Self-Describing API
 
@@ -89,8 +89,8 @@ MCP / Skill 安装到：
 
 ```text
 Server instructions
-43 个 Tool description
-MCP Resources: aianalyzer://guide/*
+44 个 Tool description
+15 个 MCP Resources: aianalyzer://guide/*
 ```
 
 暴露基本调用顺序、工具用途和关键语义限制。
@@ -107,6 +107,12 @@ aianalyzer://guide/index
 
 ```text
 aianalyzer://guide/dynamics-evidence
+```
+
+P7a Mono-fold 的详细 Guide 是：
+
+```text
+aianalyzer://guide/mono-compatibility
 ```
 
 如果客户端不支持 MCP Resources，则建议把安装后的 `skill` 文件夹导入给同一个 Agent，以获得同一份完整长篇专业说明。
@@ -152,13 +158,14 @@ audio_section_profile(...)
 audio_track_story(...)
 audio_section_relationships(...)
 audio_dynamics_distribution(...)
+audio_mono_compatibility(...)
 ```
 
 Song Memory 保存有界的 1 秒 DAW 时间轴证据。重新播放、Seek、Loop 跳回会建立新的实例局部 Playback Epoch。Song Memory 当前属于 MCP Session State，还没有按 Stable Project ID 自动隔离。
 
 A/B/C 是中性的重复结构家族，不是自动 Verse/Chorus/Drop。Track Story 不会自动判断 Bass/Vocal/Drums，也不会自动要求处理。Relationship 的 `shortlist_priority` 只是检查优先级，不是 Masking/Mix Problem 概率或质量分数。
 
-详细 Masking/Stereo/Temporal Pair 工具仍是 Recent-window。
+详细 Masking/Stereo/Temporal Pair 工具仍是 Recent-window。P7a Mono Compatibility 同样是 Recent-window，不能把它描述成任意 Historical/Section 32-band Evidence。
 
 ## Coverage-aware Dynamics Distribution
 
@@ -179,6 +186,37 @@ audio_dynamics_distribution(...)
 - Retained `lufs_i_latest` 是 Pass-cumulative，因此不能当作 Arbitrary-range Integrated LUFS；
 - 没有 Scope-compatible Integrated Loudness 时不输出 Arbitrary-range PLR；
 - Section-to-section Delta 只是描述证据，不是 Quality Score 或处理建议。
+
+## Direct Mono-fold Compatibility
+
+使用：
+
+```text
+audio_mono_compatibility(track, seconds=5.0)
+```
+
+P7a 直接复用 Analyzer 已有的 Mid/Side Evidence。当前 Worker 已定义：
+
+```text
+M = 0.5 * (L + R)
+S = 0.5 * (L - R)
+(L_power + R_power)/2 = M_power + S_power
+```
+
+因此现有 Mid RMS 就是普通 `(L+R)/2` Mono Fold 的 RMS，现有 32 个 Mid/Side Band-center Power 也能提供直接的 Fold-down Energy Comparison，不需要增加新的 Realtime DSP 或 OSC 字段。
+
+重要边界：
+
+- 当前只分析 Recent Receive-time Window，不是任意 Historical/Section 32-band 分析；
+- `inspection_priority` 只是 Energy-aware Inspection Shortlist，不是 Quality Score、Audibility Probability、Pass/Fail 或处理建议；
+- Correlation、Side/Mid、Negative-cross 与 Direct Mono-fold Energy 必须继续作为独立证据；
+- `floor_censored=true` 表示 Mid 已触及 Analyzer `-120 dB` 测量地板，低于该地板的抵消深度不能精确断言；
+- Mid+Side 都不可测的 Band-center 继续返回 unavailable，而不是制造极端抵消；
+- P7a 不直接测量 Mono-fold Sample Peak；
+- P7a 不直接测量 Mono-fold True Peak；
+- 不能从 Stereo Peak、True Peak、RMS、Correlation 或 Side/Mid 推算这两个 Mono Peak 值；
+- Direct Peak / True-Peak Fold-down 属于可选 P7b；
+- MCP 不内置 `all lows must be mono`、`correlation < 0 = bad`、`mono_fold_delta < X = fail` 这类固定规则。
 
 ## Same-range Before/After 验证
 
@@ -264,6 +302,7 @@ telemetry_confirmed   新测量帧已经报告目标 Profile
 -> audio_section_map()
 -> 根据问题调用 Track Story / Section Profile / Section Relationships
 -> 需要 Retained Dynamics 时调用 audio_dynamics_distribution()
+-> 需要当前 Direct Mono Translation Evidence 时调用 audio_mono_compatibility()
 -> 已知 Before/After 歌曲范围时使用 Transport-range Verification
 -> 只有真正需要时再调用 Temporal / Masking / Stereo / Tonal 深度证据
 ```
