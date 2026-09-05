@@ -97,6 +97,17 @@ def main() -> None:
             if band["available"]
         )
 
+        # Public MCP output must never leak private power helpers used while
+        # deriving grouped / energy-aware shortlist evidence.
+        public_frequency_rows = [
+            *result["frequency"]["bands"],
+            *result["frequency"]["grouped_ranges"],
+        ]
+        for row in public_frequency_rows:
+            assert "_mid_power" not in row, row
+            assert "_side_power" not in row, row
+            assert "_stereo_power" not in row, row
+
         # Left-only: stereo-equivalent RMS is A/sqrt(2), mono fold is A/2,
         # therefore fold-down loses 3.0103 dB RMS energy.
         left_only = _frame(
@@ -182,7 +193,8 @@ def main() -> None:
         print(
             "P7a mono compatibility regression: ok "
             "(identical, left-only, anti-phase floor censoring, unequal stereo, M/S power identity, "
-            "silent unavailable, energy-aware shortlist, no quality score, peak/historical boundaries)"
+            "silent unavailable, energy-aware shortlist, private helpers hidden, no quality score, "
+            "peak/historical boundaries)"
         )
     finally:
         with core._lock:
