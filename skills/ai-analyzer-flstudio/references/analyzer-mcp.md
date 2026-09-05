@@ -1,6 +1,6 @@
 # AI Audio Analyzer MCP Reference
 
-This reference describes the MCP tool surface, project/runtime identity scope, selector rules, Analysis Profile control/readback, Song Memory, structure, Track Story, section relationships, verification modes, validity and control boundaries.
+This reference describes the MCP tool surface, self-description layers, project/runtime identity scope, selector rules, Analysis Profile control/readback, Song Memory, structure, Track Story, section relationships, verification modes, validity and control boundaries.
 
 Related references:
 
@@ -67,6 +67,67 @@ audio_range_verification_status(verification_id="")
 ```
 
 Do not call all 42 tools by default.
+
+## Self-describing API layers
+
+The MCP server is intended to remain minimally safe and understandable even when an external Skill has not been imported by the client.
+
+The contract is intentionally layered:
+
+```text
+Server instructions
+  -> short cross-cutting startup order and hard rules
+
+Tool descriptions
+  -> purpose/intended use surfaced through tools/list
+
+MCP Resources
+  -> long-form Skill/reference guidance read on demand
+
+External Skill
+  -> canonical long-form content for clients that support Skills
+```
+
+Long-form content must not be duplicated into the server handshake. `skills/ai-analyzer-flstudio/SKILL.md` and `references/*.md` remain the canonical Markdown source. The MCP Resources load those same files from the source repository, development component package, installed beginner package, or an explicit `AI_ANALYZER_SKILL_DIR` override.
+
+Self-description schema:
+
+```text
+schema_version = 1
+guide URI prefix = aianalyzer://guide/
+```
+
+Static guide resources:
+
+```text
+aianalyzer://guide/index
+aianalyzer://guide/core
+aianalyzer://guide/analyzer-mcp
+aianalyzer://guide/parameters
+aianalyzer://guide/performance-evidence
+aianalyzer://guide/song-memory
+aianalyzer://guide/section-structure
+aianalyzer://guide/track-story
+aianalyzer://guide/section-relationships
+aianalyzer://guide/masking-evidence
+aianalyzer://guide/stereo-evidence
+aianalyzer://guide/tonal-evidence
+aianalyzer://guide/verification-evidence
+```
+
+Read only the guide needed for the current task. If the external Skill is already in context, avoid redundantly reading `aianalyzer://guide/core`, because it is the same `SKILL.md` content.
+
+The runtime is allowed to keep operating when the long-form guide files are absent: Server instructions and Tool descriptions remain the fallback. Official beginner packages, however, include the canonical `skill/` folder and CI requires the assembled package to make those guide files available.
+
+CI/self-test invariants:
+
+- exact guide Resource URI registry;
+- every registered Tool has a non-empty description;
+- every registered Guide Resource has a non-empty description;
+- Server instructions contain the required identity, coverage, verification and control-boundary rules;
+- official assembled packages can locate the canonical Skill/reference files.
+
+No MCP Prompt is required for this initial self-description layer. Prompts should only be added later for a concrete user-invoked workflow that cannot be expressed cleanly by Server instructions, Tool descriptions and Resources.
 
 ## Recommended hierarchy
 
@@ -346,6 +407,6 @@ Never invent project identity, write success, readback values, semantic section 
 
 ## OSC compatibility
 
-OSC analysis protocol remains append-only **1.2** with existing indexes `0..149` unchanged by Track Story, relationships, range verification, or identity-scope disclosure.
+OSC analysis protocol remains append-only **1.2** with existing indexes `0..149` unchanged by Track Story, relationships, range verification, identity-scope disclosure, or MCP self-description.
 
 Analyzer-owned Profile control remains a separate loopback-only control protocol, revision 1.

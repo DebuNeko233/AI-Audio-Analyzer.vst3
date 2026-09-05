@@ -43,10 +43,13 @@ jobs:
           test -s release/common/MCP-SETUP.md
           test -s release/common/INSTALL.en.md
           test -s release/common/INSTALL.zh-CN.md
+          test -s skills/ai-analyzer-flstudio/SKILL.md
+          test -s skills/ai-analyzer-flstudio/references/analyzer-mcp.md
           test -s LICENSE
           python -m py_compile \
             mcp/server.py \
             mcp/analyzer_core.py \
+            mcp/self_description.py \
             mcp/project_tools.py \
             mcp/project_identity_tools.py \
             mcp/temporal_tools.py \
@@ -208,9 +211,13 @@ jobs:
 
           $null = [scriptblock]::Create((Get-Content 'package/Install.ps1' -Raw))
           $env:AI_ANALYZER_SELF_TEST = '1'
+          $env:AI_ANALYZER_REQUIRE_GUIDES = '1'
+          $env:AI_ANALYZER_SKILL_DIR = (Resolve-Path 'package/skill').Path
           & 'package/mcp/ai-audio-analyzer-mcp.exe'
-          if ($LASTEXITCODE -ne 0) { throw 'Packaged Windows MCP failed final self-test' }
+          if ($LASTEXITCODE -ne 0) { throw 'Packaged Windows MCP failed final self-description/guide self-test' }
           Remove-Item Env:AI_ANALYZER_SELF_TEST -ErrorAction SilentlyContinue
+          Remove-Item Env:AI_ANALYZER_REQUIRE_GUIDES -ErrorAction SilentlyContinue
+          Remove-Item Env:AI_ANALYZER_SKILL_DIR -ErrorAction SilentlyContinue
 
           $forbidden = Get-ChildItem package -Recurse -File | Where-Object {
             $_.Extension -eq '.py' -or $_.Extension -eq '.zip' -or $_.Name -eq 'requirements.txt' -or $_.Name -eq 'cherry-studio.example.json'
@@ -218,6 +225,7 @@ jobs:
           if ($forbidden) { throw "Forbidden developer/nested archive files in user package: $($forbidden.FullName -join ', ')" }
           if (-not (Test-Path 'package/LICENSE')) { throw 'LICENSE missing from Windows user Release.' }
           if (-not (Test-Path 'package/MCP-SETUP.md')) { throw 'MCP-SETUP.md missing from Windows user Release.' }
+          if (-not (Test-Path 'package/skill/SKILL.md')) { throw 'Canonical Skill missing from Windows user Release.' }
           if (Test-Path 'package/mcp/source') { throw 'mcp/source must never be present in a user Release.' }
           if (Test-Path 'package/mcp/_internal') { throw '_internal must never be present in a PyInstaller one-file user Release.' }
 
@@ -279,7 +287,7 @@ jobs:
           cp release/macos/Install.command package/Install.command
           cp LICENSE package/LICENSE
           chmod +x package/install.sh package/Install.command
-          AI_ANALYZER_SELF_TEST=1 package/mcp/ai-audio-analyzer-mcp
+          AI_ANALYZER_SKILL_DIR="$PWD/package/skill" AI_ANALYZER_REQUIRE_GUIDES=1 AI_ANALYZER_SELF_TEST=1 package/mcp/ai-audio-analyzer-mcp
 
           cat > package/VERSION.txt <<EOF
           AI Audio Analyzer ${VERSION}
@@ -296,6 +304,7 @@ jobs:
           fi
           test -s package/LICENSE
           test -s package/MCP-SETUP.md
+          test -s package/skill/SKILL.md
           test ! -d package/mcp/source
           test ! -d package/mcp/_internal
 
@@ -358,7 +367,7 @@ jobs:
           chmod +x "$MAC_ROOT/AI Audio Analyzer.vst3/Contents/MacOS/AI Audio Analyzer"
 
           codesign --verify --deep --strict --verbose=4 "$MAC_ROOT/AI Audio Analyzer.vst3"
-          AI_ANALYZER_SELF_TEST=1 "$MAC_ROOT/mcp/ai-audio-analyzer-mcp"
+          AI_ANALYZER_SKILL_DIR="$MAC_ROOT/skill" AI_ANALYZER_REQUIRE_GUIDES=1 AI_ANALYZER_SELF_TEST=1 "$MAC_ROOT/mcp/ai-audio-analyzer-mcp"
 
           if find "$WIN_ROOT" "$MAC_ROOT" -type f \( -name '*.py' -o -name '*.zip' -o -name 'requirements.txt' -o -name 'cherry-studio.example.json' \) | grep -q .; then
             echo 'Final user package contains source/developer files or a nested ZIP.' >&2
@@ -368,6 +377,8 @@ jobs:
           test -s "$MAC_ROOT/LICENSE"
           test -s "$WIN_ROOT/MCP-SETUP.md"
           test -s "$MAC_ROOT/MCP-SETUP.md"
+          test -s "$WIN_ROOT/skill/SKILL.md"
+          test -s "$MAC_ROOT/skill/SKILL.md"
           test ! -d "$WIN_ROOT/mcp/source"
           test ! -d "$MAC_ROOT/mcp/source"
           test ! -d "$WIN_ROOT/mcp/_internal"
@@ -407,6 +418,8 @@ jobs:
           - MCP-SETUP.md explains how to add the generated MCP server configuration to an MCP-capable Agent/client.
           - Project code is released under the MIT License and each package includes LICENSE.
           - MCP 1.2 exposes 42 tools. OSC analysis protocol remains append-only 1.2; Analyzer profile control remains separate local revision 1.
+          - MCP is self-describing: server instructions provide the minimum startup/safety contract, all tools expose descriptions, and `aianalyzer://guide/*` Resources expose the packaged Skill/reference Markdown on demand without duplicating the long-form content in the server handshake.
+          - The packaged `skill/` remains the canonical long-form guide source and can still be imported directly by clients that support Skills.
           - audio_project_identity_status explicitly reports that stable project identity is currently UNRESOLVED, runtime UUIDs are live-instance/session identity, reopening the same project recreates UUIDs, and cross-project retained-state isolation is not yet guaranteed while MCP keeps running.
           - Until exact DAW project identity is integrated, restart Analyzer MCP when changing/reopening projects if strict state isolation is required; a new runtime UUID alone does not prove the project changed.
           - Adaptive Analysis provides Eco, Balanced, Mix and Full measurement-performance profiles. Analyzer-owned profile tools affect measurement computation only and do not change audio.

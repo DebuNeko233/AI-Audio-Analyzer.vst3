@@ -16,6 +16,7 @@ MCP 1.2
 OSC analysis protocol 1.2
 Analyzer control protocol local revision 1
 42 MCP tools
+13 MCP guide resources
 ```
 
 ## Release audience
@@ -30,10 +31,10 @@ download one platform ZIP
 -> double-click installer
 -> restart/rescan FL Studio if needed
 -> add generated MCP config to the intended Agent
--> import the packaged Skill for the same Agent
+-> optionally import the packaged Skill when useful for that client
 ```
 
-Do not require Python, pip, venv, source code, build tools, package managers, or repository knowledge.
+Do not require Python, pip, venv, source code, build tools, package managers, repository knowledge, or client-side Skill import for basic MCP use.
 
 ## Supported targets
 
@@ -62,6 +63,7 @@ Runtime modules include:
 
 ```text
 analyzer_core.py
+self_description.py
 project_tools.py
 project_identity_tools.py
 temporal_tools.py
@@ -88,6 +90,28 @@ mcp/range_verification_regression.py
 ```
 
 Regression/test Python files must never be shipped to ordinary users.
+
+## MCP Self-Describing API
+
+The Release MCP must remain understandable without requiring a client-imported Skill.
+
+Required protocol-facing layers:
+
+```text
+Server instructions
+non-empty description for every MCP Tool
+13 discoverable aianalyzer://guide/* Resources
+```
+
+The packaged/repository `skills/ai-analyzer-flstudio/SKILL.md` and `references/*.md` remain the canonical long-form content source. MCP Resources read those same files on demand instead of maintaining a second long-form copy in Python.
+
+Release rules:
+
+- the physical `skill/` directory remains required in the complete user package because it supplies canonical Resource content and can also be imported by Skill-capable clients;
+- importing the Skill into the client is optional for basic MCP use;
+- clients with MCP Resources should read `aianalyzer://guide/index` and only the guides needed for the current task;
+- clients without Resource support may import `skill/` to receive the same long-form guidance;
+- if guide files are unavailable at runtime, Server instructions and Tool descriptions remain the minimum fallback, but the complete beginner Release must fail validation rather than ship without the guide files.
 
 ## User package layout
 
@@ -136,7 +160,7 @@ repository regression/test scripts
 inner Release ZIP files
 ```
 
-`MCP-SETUP.md` and `LICENSE` are required.
+`MCP-SETUP.md`, `skill/`, and `LICENSE` are required.
 
 ## Single-compression rule
 
@@ -151,6 +175,11 @@ Before publication verify at least:
 ```text
 source MCP py_compile/self-test
 MCP 1.2 exact 42-tool registry
+non-empty Tool descriptions for all 42 tools
+non-empty Server instructions
+exact 13-guide Resource registry + descriptions
+source/repository guide lookup
+packaged/final-Release guide lookup with AI_ANALYZER_REQUIRE_GUIDES=1
 project/runtime identity disclosure regression
 Analyzer control revision 1 regression
 historical evidence regressions
@@ -171,14 +200,14 @@ Windows x64 VST3 build
 macOS arm64 VST3 build/signature
 Windows installer parse
 macOS installer syntax
-MCP-SETUP.md + LICENSE present
+MCP-SETUP.md + Skill guides + LICENSE present
 no MCP source/developer/test files
 no nested ZIP
 final checksums
 Release draft/prerelease/public state matches workflow inputs
 ```
 
-A successful source self-test alone does not prove PyInstaller, VST3, package assembly, or publication succeeded.
+A successful source self-test alone does not prove PyInstaller, guide lookup, VST3, package assembly, or publication succeeded.
 
 ## Project/runtime identity note
 
@@ -300,7 +329,7 @@ identity        live runtime UUID
 ACK             explicit request-scoped acknowledgement
 ```
 
-OSC analysis frame remains append-only 1.2 with existing indexes `0..149` unchanged by Track Story, relationships, range verification, or identity disclosure.
+OSC analysis frame remains append-only 1.2 with existing indexes `0..149` unchanged by Track Story, relationships, range verification, identity disclosure, or MCP self-description.
 
 ## Draft / prerelease semantics
 
@@ -314,7 +343,7 @@ Current macOS builds are ad-hoc signed and are **not Apple Developer ID notarize
 
 ## Documentation rule
 
-When Release layout, metadata, installation behavior, tool count or public capability changes, review together:
+When Release layout, metadata, installation behavior, tool count, guide-resource contract or public capability changes, review together:
 
 ```text
 release/common/START-HERE.md

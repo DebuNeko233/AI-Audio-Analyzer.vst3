@@ -14,7 +14,7 @@ This Release is designed for users with no Python or programming experience. **U
 6. Wait for **Installation completed successfully**.
 7. Restart FL Studio and rescan plugins if needed.
 8. Follow `MCP-SETUP.md` to add the generated MCP configuration to the Agent/Assistant that will use Analyzer.
-9. Import the packaged `skill` folder for that same Agent/Assistant.
+9. Optional: import the packaged `skill` folder if the client supports Skills or does not expose MCP Resources.
 
 ## macOS Apple Silicon
 
@@ -25,7 +25,8 @@ This Release is designed for users with no Python or programming experience. **U
 5. If macOS blocks it, right-click `Install.command` and choose **Open**.
 6. Wait for the installer to report success.
 7. Restart FL Studio and rescan plugins if needed.
-8. Follow `MCP-SETUP.md` and import the packaged `skill` folder for the same Agent.
+8. Follow `MCP-SETUP.md` to add Analyzer MCP to the Agent.
+9. Optional: import the packaged `skill` folder if the client benefits from client-side Skill loading.
 
 Current macOS Release supports **Apple Silicon arm64 only**. It is ad-hoc signed, not Apple Developer ID notarized.
 
@@ -34,7 +35,7 @@ Current macOS Release supports **Apple Silicon arm64 only**. It is ad-hoc signed
 ```text
 AI Audio Analyzer.vst3
 mcp/                         standalone one-file MCP executable
-skill/                       Cherry Studio / LLM Skill
+skill/                       canonical long-form MCP guides + optional client Skill
 Install.cmd / Install.ps1    Windows installer
 Install.command / install.sh macOS installer
 START-HERE.md
@@ -48,6 +49,22 @@ LICENSE
 The user Release contains **no MCP Python source**, `requirements.txt`, venv, PyInstaller `_internal`, developer source config, or nested Release ZIP.
 
 The installer generates `cherry-studio-mcp.json` with the correct absolute path to the installed MCP executable.
+
+## The MCP can explain itself
+
+AI Audio Analyzer MCP does not require a client-imported Skill for basic correct use.
+
+It exposes:
+
+```text
+Server instructions
+42 Tool descriptions
+MCP Resources under aianalyzer://guide/*
+```
+
+If the client supports MCP Resources, it can read `aianalyzer://guide/index` and then only the guide needed for the current task.
+
+The packaged `skill/` directory remains the canonical Markdown source for those detailed Resources. Importing it directly into a Skill-capable client is optional and is especially useful when that client does not expose MCP Resources.
 
 ## What the Agent can do
 
@@ -106,7 +123,7 @@ Analysis Profiles (`Eco`, `Balanced`, `Mix`, `Full`) affect Analyzer computation
 5. 等待显示 **Installation completed successfully**；
 6. 重启 FL Studio，需要时重新扫描插件；
 7. 按 `MCP-SETUP.md` 把安装器生成的 MCP 配置加入实际使用 Analyzer 的 Agent；
-8. 把 `skill` 文件夹导入给同一个 Agent。
+8. 可选：如果客户端支持 Skill，或者不支持 MCP Resources，再把 `skill` 文件夹导入给同一个 Agent。
 
 ## macOS Apple Silicon
 
@@ -116,11 +133,26 @@ Analysis Profiles (`Eco`, `Balanced`, `Mix`, `Full`) affect Analyzer computation
 4. 若 macOS 阻止运行，右键 `Install.command` → **打开**；
 5. 等待安装成功；
 6. 重启 FL Studio，需要时重新扫描插件；
-7. 按 `MCP-SETUP.md` 配置 MCP，并导入同一个 `skill` 文件夹。
+7. 按 `MCP-SETUP.md` 配置 MCP；
+8. 可选：按客户端能力决定是否导入同一个 `skill` 文件夹。
 
 当前 macOS Release **只支持 Apple Silicon / arm64**。
 
 安装器会生成包含真实 MCP 可执行文件绝对路径的 `cherry-studio-mcp.json`。
+
+## MCP 本身可以告诉调用方怎么用
+
+即使客户端没有手动导入 Skill，Analyzer MCP 仍会通过：
+
+```text
+Server instructions
+42 个 Tool description
+MCP Resources: aianalyzer://guide/*
+```
+
+提供基本调用顺序和关键限制。
+
+如果客户端支持 MCP Resources，可以先读 `aianalyzer://guide/index`，再按任务读取需要的详细 Guide。Release 中的 `skill/` 仍然保留，因为它是这些 Guide Resources 的 canonical Markdown 内容源，同时也可以被支持 Skill 的客户端直接导入。
 
 当前 MCP 1.2 共 **42 个工具**，包括 Project/Runtime Identity Scope、Song Memory、Section Map、Track Story、Section-aware Relationships、Analysis Profile Control，以及 Recent-window / Transport-anchored Same-range 两种验证路径。
 

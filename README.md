@@ -17,6 +17,7 @@ AI Audio Analyzer VST3
 AI Audio Analyzer MCP
   -> observe / remember / structure / compare / verify
   -> disclose current project/runtime identity guarantees
+  -> self-describe startup rules, tool purpose and on-demand guides
   -> may control Analyzer's own Analysis Profile only
 
 External DAW-control MCP
@@ -43,6 +44,8 @@ FL Studio / DAW
                          | OSC measurements, default 127.0.0.1:9855
                          v
                  Analyzer MCP Bridge
+                 +-- server instructions + described tools
+                 +-- on-demand aianalyzer://guide/* resources
                  +-- live instance registry + deterministic bindings
                  +-- explicit runtime/project identity-scope disclosure
                  +-- adaptive-analysis status / worker telemetry
@@ -310,6 +313,49 @@ Neither means After is artistically better.
 
 See `skills/ai-analyzer-flstudio/references/verification-evidence.md`.
 
+## Self-describing MCP API
+
+The MCP server provides a minimum safe usage contract even when the client has not imported the external Skill.
+
+It uses three MCP-native layers:
+
+```text
+Server instructions
+  -> startup order + cross-cutting hard rules
+
+Tool descriptions
+  -> purpose / intended use visible through tools/list
+
+MCP Resources
+  -> detailed Skill/reference Markdown loaded only when needed
+```
+
+Long-form guidance is **not copied into server instructions**. The packaged/repository `skill/` remains the canonical content source, and MCP Resources read those same files on demand.
+
+Guide resource namespace:
+
+```text
+aianalyzer://guide/index
+aianalyzer://guide/core
+aianalyzer://guide/analyzer-mcp
+aianalyzer://guide/parameters
+aianalyzer://guide/performance-evidence
+aianalyzer://guide/song-memory
+aianalyzer://guide/section-structure
+aianalyzer://guide/track-story
+aianalyzer://guide/section-relationships
+aianalyzer://guide/masking-evidence
+aianalyzer://guide/stereo-evidence
+aianalyzer://guide/tonal-evidence
+aianalyzer://guide/verification-evidence
+```
+
+Clients should read only the guide relevant to the current task instead of loading all guides into context.
+
+The external Skill is still packaged and recommended for clients that support Skills. MCP Resources provide the same long-form content through the protocol; they are not a competing second copy.
+
+CI requires every registered MCP tool and guide resource to expose a non-empty description, and validates the exact guide-resource registry.
+
 ## MCP tools
 
 MCP **1.2 exposes 42 tools**.
@@ -356,7 +402,7 @@ Typical contents:
 AI Audio Analyzer.vst3
 mcp/
   ai-audio-analyzer-mcp[.exe]   standalone PyInstaller -F executable
-skill/
+skill/                          canonical Skill + MCP Resource content
 START-HERE.md
 MCP-SETUP.md
 INSTALL.en.md
@@ -386,6 +432,8 @@ MCP version                 1.2
 OSC analysis protocol       1.2
 Analyzer control protocol   local revision 1
 MCP tools                   42
+Self-description schema     1
+Guide resources             13
 ```
 
 Runtime modules:
@@ -393,6 +441,7 @@ Runtime modules:
 ```text
 mcp/server.py
 mcp/analyzer_core.py
+mcp/self_description.py
 mcp/project_tools.py
 mcp/project_identity_tools.py
 mcp/temporal_tools.py
@@ -424,13 +473,15 @@ Regression files are not shipped in beginner user Releases.
 
 Analysis address: `/aianalyzer/frame`.
 
-OSC **1.2** remains append-only. Existing indexes `0..149` are unchanged by Track Story, section relationships, transport-range verification, or project-identity disclosure.
+OSC **1.2** remains append-only. Existing indexes `0..149` are unchanged by Track Story, section relationships, transport-range verification, project-identity disclosure, or MCP self-description.
 
 The Analyzer-owned Analysis Profile control is a separate loopback-only control protocol, revision 1.
 
 ## Skill
 
 LLM-facing Skill/reference content is English-only and documents evidence semantics, validity, tool order, identity scope, and control boundaries.
+
+The same Markdown is also exposed on demand through `aianalyzer://guide/*` MCP Resources. Keep the external Skill as the canonical long-form source instead of maintaining a second copy inside Python server instructions.
 
 Key references include:
 

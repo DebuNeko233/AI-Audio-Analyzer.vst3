@@ -26,6 +26,8 @@ from mcp.server import MCPServer
 from pythonosc.dispatcher import Dispatcher
 from pythonosc.osc_server import ThreadingOSCUDPServer
 
+import self_description
+
 NUM_BANDS = 32
 NUM_STEREO_CORR_BANDS = 8
 MIN_HZ = 20.0
@@ -74,7 +76,13 @@ _osc_error: str | None = None
 _last_frame_at: float | None = None
 _last_identify_at: float | None = None
 
-mcp = MCPServer("AI Audio Analyzer MCP")
+mcp = MCPServer(
+    "AI Audio Analyzer MCP",
+    title="AI Audio Analyzer MCP",
+    description=self_description.SERVER_DESCRIPTION,
+    instructions=self_description.SERVER_INSTRUCTIONS,
+    version=self_description.MCP_PUBLIC_VERSION,
+)
 
 
 def _mcp_version() -> str:
@@ -330,6 +338,7 @@ def _compare_tracks(track_a: str, track_b: str) -> dict[str, Any]:
 
 @mcp.tool()
 def audio_bridge_status() -> dict[str, Any]:
+    """Check MCP/OSC bridge health, frame freshness, bindings and live Analyzer connectivity."""
     now = time.time()
     with _lock:
         frames = list(_tracks.values()); last_frame_at = _last_frame_at; last_identify_at = _last_identify_at
@@ -349,6 +358,7 @@ def audio_bridge_status() -> dict[str, Any]:
 
 @mcp.tool()
 def audio_list_tracks() -> dict[str, Any]:
+    """List known Analyzer instances with signal, freshness and deterministic binding context."""
     now = time.time()
     with _lock:
         frames = [dict(frame) for frame in _tracks.values()]; bindings = {runtime_id: dict(binding) for runtime_id, binding in _bindings.items()}
@@ -361,6 +371,7 @@ def audio_list_tracks() -> dict[str, Any]:
 
 @mcp.tool()
 def audio_last_identify(max_age_seconds: float = 10.0) -> dict[str, Any]:
+    """Read the latest host-triggered Identify event before binding one Analyzer to a DAW mixer slot."""
     max_age_seconds = max(0.1, min(float(max_age_seconds), 60.0)); now = time.time()
     with _lock: event = dict(_identify_events[-1]) if _identify_events else None
     if event is None: return {"available": False, "reason": "No Identify event has been received in this bridge session."}
@@ -370,6 +381,7 @@ def audio_last_identify(max_age_seconds: float = 10.0) -> dict[str, Any]:
 
 @mcp.tool()
 def audio_bind_last_identified(fl_track_index: int, fl_track_name: str, slot: int, max_age_seconds: float = DEFAULT_IDENTIFY_MAX_AGE_SECONDS) -> dict[str, Any]:
+    """Bind the fresh unconsumed Identify event to one DAW mixer track/slot for this MCP session."""
     fl_track_index = int(fl_track_index); slot = int(slot)
     if fl_track_index < 0: raise ValueError("fl_track_index must be >= 0")
     if slot < 0: raise ValueError("slot must be >= 0")
@@ -389,6 +401,7 @@ def audio_bind_last_identified(fl_track_index: int, fl_track_name: str, slot: in
 
 @mcp.tool()
 def audio_instance_map() -> dict[str, Any]:
+    """Inspect current Analyzer runtime instances and their session-scoped deterministic DAW bindings."""
     now = time.time()
     with _lock:
         frames = {runtime_id: dict(frame) for runtime_id, frame in _tracks.items()}; bindings = {runtime_id: dict(binding) for runtime_id, binding in _bindings.items()}
@@ -401,11 +414,14 @@ def audio_instance_map() -> dict[str, Any]:
 
 
 @mcp.tool()
-def audio_snapshot(track: str) -> dict[str, Any]: return _snapshot(track)
+def audio_snapshot(track: str) -> dict[str, Any]:
+    """Return the latest measurement frame for one Analyzer selector; use for current-state inspection."""
+    return _snapshot(track)
 
 
 @mcp.tool()
 def audio_average(track: str, seconds: float = 5.0) -> dict[str, Any]:
+    """Average recent measurements for one track over 0.1-60 seconds, using active frames for spectral/stereo evidence."""
     seconds = max(0.1, min(float(seconds), 60.0)); runtime_id = _resolve_track(track); cutoff = time.time() - seconds
     with _lock:
         frames = [frame for frame in _history.get(runtime_id, ()) if frame["_received_at"] >= cutoff]; binding = _binding_public(_bindings.get(runtime_id))
@@ -436,6 +452,7 @@ def audio_average(track: str, seconds: float = 5.0) -> dict[str, Any]:
 
 @mcp.tool()
 def audio_stereo_bands(track: str) -> dict[str, Any]:
+    """Return current frequency-dependent stereo correlation bands; low correlation is evidence, not an automatic quality judgment."""
     frame = _snapshot(track); values = frame.get("band_stereo_correlation")
     if not frame.get("stereo_valid") or values is None: return {"id": frame["id"], "track": frame["track"], "binding": frame.get("binding"), "available": False, "signal_present": frame.get("signal_present"), "reason": "No active input; stereo correlation is intentionally invalid while the signal gate is closed."}
     bands = []
@@ -445,11 +462,14 @@ def audio_stereo_bands(track: str) -> dict[str, Any]:
 
 
 @mcp.tool()
-def audio_compare_tracks(track_a: str, track_b: str) -> dict[str, Any]: return _compare_tracks(track_a, track_b)
+def audio_compare_tracks(track_a: str, track_b: str) -> dict[str, Any]:
+    """Compare two current track spectra with a relative overlap heuristic; this does not prove audible masking."""
+    return _compare_tracks(track_a, track_b)
 
 
 @mcp.tool()
 def audio_detect_masking(track_a: str, track_b: str) -> dict[str, Any]:
+    """Return legacy current spectral-overlap masking candidates; prefer deeper masking evidence when timing/alignment matters."""
     report = _compare_tracks(track_a, track_b)
     if not report.get("available"): return {**report, "severity": None, "candidate_regions": [], "guidance": "Start playback or choose analyzer instances with active input before masking analysis."}
     candidates = [band for band in report["strongest_overlap_bands"] if band["score"] >= 0.15]
@@ -458,6 +478,7 @@ def audio_detect_masking(track_a: str, track_b: str) -> dict[str, Any]:
 
 @mcp.tool()
 def audio_master_status(track: str = "Master") -> dict[str, Any]:
+    """Summarize current master technical measurements and transparent warnings; there is no universal loudness or crest target."""
     frame = _snapshot(track); warnings = []; signal_present = bool(frame.get("signal_present"))
     if not signal_present: warnings.append("No active input above -50 dBFS; current spectrum/stereo metrics are invalid.")
     true_peak = frame.get("max_true_peak_dbtp") if frame.get("max_true_peak_dbtp") is not None else frame.get("true_peak_dbtp")

@@ -17,6 +17,7 @@ AI Audio Analyzer VST3
 AI Audio Analyzer MCP
   -> 观察 / 记忆 / 结构 / 比较 / 验证
   -> 明确告知当前 Project / Runtime Identity 能保证什么、不能保证什么
+  -> 通过 Server Instructions / Tool Description / Guide Resources 自解释
   -> 只允许控制 Analyzer 自己的 Analysis Profile
 
 外部 DAW-control MCP
@@ -43,6 +44,8 @@ FL Studio / DAW
                          | OSC 测量，默认 127.0.0.1:9855
                          v
                  Analyzer MCP Bridge
+                 +-- Server Instructions + Tool Descriptions
+                 +-- 按需 aianalyzer://guide/* Resources
                  +-- Live Instance Registry + 确定性 Binding
                  +-- Project / Runtime Identity Scope Disclosure
                  +-- Adaptive Analysis / Worker Telemetry
@@ -317,6 +320,49 @@ closed_loop_complete=true
 
 两者都不表示 After 在艺术上更好。
 
+## MCP Self-Describing API
+
+即使客户端没有额外导入 Skill，MCP Server 自己也会提供最低限度的正确使用方法。
+
+当前分成三层：
+
+```text
+Server Instructions
+  -> 初始化顺序和跨工具必须遵守的硬规则
+
+Tool Descriptions
+  -> tools/list 阶段就能看到每个工具的用途
+
+MCP Resources
+  -> 需要时再读取完整 Skill / Reference Markdown
+```
+
+不会把整个 Skill 原样塞进 Server Instructions。长篇知识仍然只维护一份：仓库/Release 中的 `skill/` 是 canonical source，MCP Resource 运行时直接读取同一份文件。
+
+当前 Guide Resource：
+
+```text
+aianalyzer://guide/index
+aianalyzer://guide/core
+aianalyzer://guide/analyzer-mcp
+aianalyzer://guide/parameters
+aianalyzer://guide/performance-evidence
+aianalyzer://guide/song-memory
+aianalyzer://guide/section-structure
+aianalyzer://guide/track-story
+aianalyzer://guide/section-relationships
+aianalyzer://guide/masking-evidence
+aianalyzer://guide/stereo-evidence
+aianalyzer://guide/tonal-evidence
+aianalyzer://guide/verification-evidence
+```
+
+调用方应该只读取当前任务需要的 Guide，不要一次把所有 Resources 塞进上下文。
+
+支持 Skill 的客户端仍然可以直接导入外部 Skill；MCP Resources 只是让同一份长篇内容也能通过 MCP 协议按需读取，不是另一套重复文档。
+
+CI 会强制所有 MCP Tool 和 Guide Resource 都有非空 Description，并验证固定的 Guide Resource Registry。
+
 ## MCP 工具
 
 MCP **1.2 当前共 42 个工具**。
@@ -363,7 +409,7 @@ macOS Apple Silicon arm64
 AI Audio Analyzer.vst3
 mcp/
   ai-audio-analyzer-mcp[.exe]   PyInstaller -F 单文件
-skill/
+skill/                          canonical Skill + MCP Resource 内容源
 START-HERE.md
 MCP-SETUP.md
 INSTALL.en.md
@@ -393,6 +439,8 @@ MCP version                 1.2
 OSC analysis protocol       1.2
 Analyzer control protocol   本机 revision 1
 MCP tools                   42
+Self-description schema     1
+Guide resources             13
 ```
 
 Runtime Modules：
@@ -400,6 +448,7 @@ Runtime Modules：
 ```text
 mcp/server.py
 mcp/analyzer_core.py
+mcp/self_description.py
 mcp/project_tools.py
 mcp/project_identity_tools.py
 mcp/temporal_tools.py
@@ -431,9 +480,13 @@ mcp/range_verification_regression.py
 
 Analysis Address：`/aianalyzer/frame`。
 
-OSC **1.2** 继续 Append-only。Track Story、Section Relationships、Transport-range Verification 和 Project Identity Disclosure 都没有修改既有 `0..149` 索引。
+OSC **1.2** 继续 Append-only。Track Story、Section Relationships、Transport-range Verification、Project Identity Disclosure 和 MCP Self-Description 都没有修改既有 `0..149` 索引。
 
 Analyzer 自有 Analysis Profile Control 使用独立的本机 Loopback Control Protocol，Revision 1。
+
+## Skill
+
+LLM-facing Skill/reference 内容继续保持英文。完整 Skill/Reference Markdown 仍是长篇使用方法的 canonical source，同时通过 `aianalyzer://guide/*` MCP Resources 按需暴露；不要在 `server.py` 里再维护一份重复全文。
 
 ## License
 

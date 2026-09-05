@@ -41,7 +41,7 @@ xattr -dr com.apple.quarantine "$PLUGIN_DEST" 2>/dev/null || true
 
 echo "Installed: $PLUGIN_DEST"
 
-step 'Installing Analyzer MCP and Cherry Studio Skill'
+step 'Installing Analyzer MCP and guide resources'
 mkdir -p "$INSTALL_ROOT"
 rm -rf "$INSTALL_ROOT/mcp" "$INSTALL_ROOT/skill"
 ditto "$ROOT/mcp" "$INSTALL_ROOT/mcp"
@@ -55,14 +55,19 @@ done
 xattr -dr com.apple.quarantine "$INSTALL_ROOT/mcp" 2>/dev/null || true
 
 MCP_EXE="$INSTALL_ROOT/mcp/ai-audio-analyzer-mcp"
+SKILL_ROOT="$INSTALL_ROOT/skill"
 if [ ! -f "$MCP_EXE" ]; then
   echo "Analyzer MCP executable not found: $MCP_EXE" >&2
   exit 1
 fi
+if [ ! -f "$SKILL_ROOT/SKILL.md" ]; then
+  echo "Analyzer MCP canonical guide files not found: $SKILL_ROOT" >&2
+  exit 1
+fi
 chmod +x "$MCP_EXE"
 
-step 'Checking Analyzer MCP'
-AI_ANALYZER_SELF_TEST=1 "$MCP_EXE"
+step 'Checking Analyzer MCP and guide resources'
+AI_ANALYZER_SKILL_DIR="$SKILL_ROOT" AI_ANALYZER_REQUIRE_GUIDES=1 AI_ANALYZER_SELF_TEST=1 "$MCP_EXE"
 
 step 'Creating Cherry Studio MCP configuration'
 CONFIG_PATH="$INSTALL_ROOT/cherry-studio-mcp.json"
@@ -87,6 +92,6 @@ printf '\nInstallation completed successfully.\n'
 printf '\nNext steps:\n'
 printf '1. Restart FL Studio and rescan VST3 plugins.\n'
 printf '2. Add this generated MCP configuration to the Agent/Assistant that will use Analyzer:\n   %s\n' "$CONFIG_PATH"
-printf '3. Follow the Agent/MCP setup guide (includes JSON examples):\n   %s\n' "$MCP_SETUP_PATH"
-printf '4. Import this installed Skill folder for the same Agent:\n   %s\n' "$INSTALL_ROOT/skill"
+printf '3. Follow the Agent/MCP setup guide (includes self-description and optional Skill import):\n   %s\n' "$MCP_SETUP_PATH"
+printf '4. Optional: import this installed Skill folder if your client supports Skills or does not expose MCP Resources:\n   %s\n' "$SKILL_ROOT"
 printf '\nYou do not need Python, pip, Terminal, or any programming setup.\n'

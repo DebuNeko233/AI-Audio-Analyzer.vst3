@@ -12,6 +12,52 @@ Use this Skill to:
 
 It is not a mixing/mastering style guide. Analyzer measurements do not imply a mandatory processor, parameter value, section name, track role, chord/key edit, stereo action, or aesthetic choice.
 
+## MCP self-description and this Skill
+
+AI Audio Analyzer MCP is designed to remain minimally safe to use even when a client does not import this external Skill.
+
+The layers are intentionally different:
+
+```text
+Server instructions
+  -> short startup order and cross-cutting hard rules
+
+Tool descriptions
+  -> purpose and intended use visible during tools/list
+
+MCP Resources
+  -> detailed long-form guidance loaded only when needed
+
+External Skill
+  -> canonical long-form guidance for clients that support Skills
+```
+
+Do **not** treat these as four independent copies of the same documentation.
+
+This `SKILL.md` and its `references/*.md` files remain the canonical long-form content. The MCP Resources under `aianalyzer://guide/*` read the same packaged/repository Markdown on demand instead of embedding a second copy in Python.
+
+Useful Resource URIs include:
+
+```text
+aianalyzer://guide/index
+aianalyzer://guide/core
+aianalyzer://guide/analyzer-mcp
+aianalyzer://guide/parameters
+aianalyzer://guide/performance-evidence
+aianalyzer://guide/song-memory
+aianalyzer://guide/section-structure
+aianalyzer://guide/track-story
+aianalyzer://guide/section-relationships
+aianalyzer://guide/masking-evidence
+aianalyzer://guide/stereo-evidence
+aianalyzer://guide/tonal-evidence
+aianalyzer://guide/verification-evidence
+```
+
+Read only the guide relevant to the current task. Do not load every Resource mechanically.
+
+If this Skill is already present in context, there is normally no reason to read `aianalyzer://guide/core`, because it exposes this same file. Read a specialized Resource only when its detailed reference content is needed and not already available.
+
 ## 1. Start with project identity scope, then project status
 
 At the beginning of a new Agent/MCP session, and whenever the user may have switched or reopened a DAW project, first inspect:
