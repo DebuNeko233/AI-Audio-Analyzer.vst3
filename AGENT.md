@@ -144,7 +144,7 @@ The plugin GUI may be bilingual. Stable technical identifiers remain language-in
 
 ---
 
-## 5. Current metadata on P4a branch
+## 5. Current metadata
 
 ```text
 Product version             1.2.0
@@ -154,7 +154,7 @@ Analyzer control revision   1
 MCP tool count              41
 ```
 
-P4a adds derived MCP reasoning/verification only. It does not justify a Product/MCP/OSC version bump by itself.
+P4a added derived MCP reasoning/verification only. It did not justify a Product/MCP/OSC version bump by itself.
 
 ---
 
@@ -258,7 +258,9 @@ Never convert missing/sparse Song Memory into inactivity, mute state, a structur
 
 Disabled/unavailable feature families must not be interpreted merely because compatibility packet positions exist.
 
-For historical range comparisons, use the measurement families actually retained in the selected Before/After evidence. Do not substitute the current live Profile for historical availability.
+For historical range comparisons, use measurement families actually represented in the selected retained Before/After evidence. Do not substitute the current live Profile for historical availability.
+
+Content-dependent retained availability differences are audit context, not proof that the historical Analysis Profile changed. Interpret only dimensions/families represented in both passes; no common retained measurement family is a hard comparability blocker.
 
 ### Heuristics stay labelled as heuristics
 
@@ -434,7 +436,9 @@ P4a invariants:
 - equal numeric epochs across tracks are never required;
 - After cannot silently reuse pre-change Song Memory;
 - missing coverage is not silence;
-- historical feature comparability is based on actually retained fields, not the current live Profile;
+- historical feature interpretation is per dimension using retained evidence common to Before and After;
+- content-dependent retained feature mismatch is an audit warning, not automatic proof of Profile mismatch;
+- no common retained measurement family blocks controlled comparison;
 - higher selected After dropped-block evidence blocks a controlled comparison;
 - `active_ratio` is descriptive in same-range mode, not a proxy for passage identity;
 - range LUFS-I delta is intentionally unavailable because retained `lufs_i_latest` is pass-cumulative, not range-integrated;
@@ -634,9 +638,8 @@ Merged/current milestones include:
 - bilingual plugin GUI and transport/health visibility;
 - Analyzer-owned loopback Analysis Profile control with explicit ACK;
 - **P1 Track Story merged via PR #19**;
-- **P2 Section-aware Mix Relationships merged via PR #20**.
-
-P4a adds retained-range resolution and same-range verification on PR #29. It is not DONE until PR #29 is merged to `main` with required CI/documentation synchronized.
+- **P2 Section-aware Mix Relationships merged via PR #20**;
+- **P4a retained-range resolver + same-range verification merged via PR #29** (`c833487c6efbd98206d3f454e0875d4698b1f6af`).
 
 ---
 
@@ -676,11 +679,27 @@ Exact project metadata wins over audio inference for exact symbolic claims.
 
 ### P4 - Transport-anchored same-range verification
 
-Status: **ACTIVE**.
+Status: **ACTIVE** — P4a is DONE; P4b is QUEUED.
 
 #### P4a - common retained-range resolver + same-range Before/After verification
 
-Status: **IMPLEMENTED ON PR #29 / NOT DONE UNTIL MERGED**.
+Status: **DONE**.
+
+Merged PR: **#29**.
+
+Merge commit:
+
+```text
+c833487c6efbd98206d3f454e0875d4698b1f6af
+```
+
+Final exact PR head and CI gate:
+
+```text
+head      18c2dfbcaf750747d6a8e9863e211d7e20b39a43
+build     #329 / run 33944568983
+result    success
+```
 
 Implemented:
 
@@ -693,18 +712,18 @@ audio_range_verification_status()
 mcp/range_verification_regression.py
 ```
 
-Completion gate:
+Completion evidence:
 
 - 41-tool registry synchronized;
 - same-range regression green;
 - Release runtime validation includes new runtime modules;
 - public docs/Skill/Release docs synchronized;
-- latest relevant exact-head CI green;
-- merge with expected-head guard.
+- exact-head CI green;
+- merged with expected-head guard.
 
 #### P4b - deeper historical range reuse
 
-Status: **QUEUED after P4a**.
+Status: **QUEUED**.
 
 Potential next work:
 
