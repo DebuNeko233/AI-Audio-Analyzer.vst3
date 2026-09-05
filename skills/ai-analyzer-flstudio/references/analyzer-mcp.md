@@ -1,6 +1,6 @@
 # AI Audio Analyzer MCP Reference
 
-This reference describes the MCP tool surface, self-description layers, project/runtime identity scope, selector rules, Analysis Profile control/readback, Song Memory, structure, Track Story, section relationships, verification modes, validity and control boundaries.
+This reference describes the MCP tool surface, self-description layers, project/runtime identity scope, selector rules, Analysis Profile control/readback, Song Memory, structure, Track Story, section relationships, retained dynamics distributions, direct mono-fold compatibility evidence, verification modes, validity and control boundaries.
 
 Related references:
 
@@ -11,6 +11,8 @@ song-memory.md
 section-structure.md
 track-story.md
 section-relationships.md
+dynamics-evidence.md
+mono-compatibility.md
 masking-evidence.md
 stereo-evidence.md
 tonal-evidence.md
@@ -19,7 +21,7 @@ verification-evidence.md
 
 ## Tool registry
 
-MCP 1.2 exposes **42 tools**:
+MCP 1.2 exposes **44 tools** on the stacked P7a branch:
 
 ```text
 audio_bridge_status()
@@ -64,9 +66,11 @@ audio_verification_status(verification_id="")
 audio_begin_range_verification(label, start_seconds, end_seconds, target_selectors=None, minimum_coverage=0.8)
 audio_complete_range_verification(verification_id, change_summary="", host_readback="")
 audio_range_verification_status(verification_id="")
+audio_dynamics_distribution(track, transport_epoch=None, start_seconds=None, end_seconds=None, map_id=None, section_id=None, compare_section_id=None, minimum_range_coverage=0.8, minimum_bin_coverage=0.5)
+audio_mono_compatibility(track, seconds=5.0)
 ```
 
-Do not call all 42 tools by default.
+Do not call all 44 tools by default.
 
 ## Self-describing API layers
 
@@ -97,7 +101,7 @@ schema_version = 1
 guide URI prefix = aianalyzer://guide/
 ```
 
-Static guide resources:
+Static guide resources on the stacked P7a branch:
 
 ```text
 aianalyzer://guide/index
@@ -109,6 +113,8 @@ aianalyzer://guide/song-memory
 aianalyzer://guide/section-structure
 aianalyzer://guide/track-story
 aianalyzer://guide/section-relationships
+aianalyzer://guide/dynamics-evidence
+aianalyzer://guide/mono-compatibility
 aianalyzer://guide/masking-evidence
 aianalyzer://guide/stereo-evidence
 aianalyzer://guide/tonal-evidence
@@ -124,7 +130,7 @@ CI/self-test invariants:
 - exact guide Resource URI registry;
 - every registered Tool has a non-empty description;
 - every registered Guide Resource has a non-empty description;
-- Server instructions contain the required identity, coverage, verification and control-boundary rules;
+- Server instructions contain the required identity, coverage, dynamics, mono-compatibility, verification and control-boundary rules;
 - official assembled packages can locate the canonical Skill/reference files.
 
 No MCP Prompt is required for this initial self-description layer. Prompts should only be added later for a concrete user-invoked workflow that cannot be expressed cleanly by Server instructions, Tool descriptions and Resources.
@@ -147,6 +153,12 @@ structure / arrangement context
 -> audio_track_story() for one track across sections
 -> audio_section_profile() for many tracks inside one section
 -> audio_section_relationships() for a bounded pair shortlist
+
+retained dynamics when needed
+-> audio_dynamics_distribution() for selected pass span / explicit range / cached section
+
+recent direct mono translation when needed
+-> audio_mono_compatibility() for full-band + 32 band-center fold-down energy evidence
 
 raw historical timeline only when needed
 -> audio_song_timeline()
@@ -339,6 +351,122 @@ Returns a bounded pair shortlist across sections/families.
 
 Detailed masking/stereo/temporal pair tools remain recent-window based.
 
+## Coverage-aware retained dynamics distributions
+
+### `audio_dynamics_distribution()`
+
+This P6a tool is MCP-side and reuses one-second Song Memory plus the common transport-range resolver. It adds no realtime DSP and no OSC fields.
+
+Supported scopes:
+
+```text
+selected retained transport-pass span
+explicit DAW-time range
+cached Section Map section
+optional compare_section_id for section-to-section deltas
+```
+
+Coverage policy:
+
+```text
+minimum per-bin coverage floor
++
+covered-seconds weighting for accepted bins
+```
+
+The result exposes coverage/provenance such as effective range, selected instance-local epoch, range coverage, accepted bin count, rejected low-coverage bin count, missing bin count and weighting policy. Missing bins are never inserted as silence or zero.
+
+Descriptive distributions currently include:
+
+```text
+RMS dBFS
+LUFS-S
+Crest dB
+observed per-bin Sample Peak maxima
+observed per-bin True Peak maxima
+```
+
+Where available they report min/max, P10/P25/P50/P75/P90, IQR, P90-P10 spread and a covered-seconds weighted arithmetic mean. RMS additionally exposes a separately named covered-seconds power-domain mean.
+
+Important boundaries:
+
+- `lufs_s_interpercentile_range_lu` is P90(LUFS-S) - P10(LUFS-S), not standardized EBU LRA;
+- standardized EBU LRA is explicitly unavailable in P6a;
+- arbitrary-range Integrated LUFS is explicitly unavailable because current retained `lufs_i_latest` is pass-cumulative;
+- arbitrary-range PLR is explicitly unavailable without scope-compatible peak and integrated loudness;
+- observed per-bin peak distributions are not a reconstructed sample stream;
+- section deltas are descriptive only and do not create a dynamics/mastering quality score;
+- no fixed LUFS/LRA/PLR/crest target belongs in Analyzer MCP core logic.
+
+Detailed semantics: `dynamics-evidence.md`.
+
+## Direct energy-aware mono-fold compatibility
+
+### `audio_mono_compatibility()`
+
+P7a is MCP-side and reuses existing recent Mid/Side fields. It adds no realtime DSP and no OSC fields.
+
+Current Worker identity:
+
+```text
+M = 0.5 * (L + R)
+S = 0.5 * (L - R)
+(L_power + R_power)/2 = M_power + S_power
+```
+
+Therefore the current Mid RMS is the normal equal-weight `(L+R)/2` mono-fold RMS.
+
+P7a current scope is a recent receive-time window (`0.5..60` seconds). It does not reconstruct arbitrary historical/Section 32-band evidence from Song Memory.
+
+Full-band fields include:
+
+```text
+stereo_rms_db
+mono_fold_rms_db
+mono_fold_rms_delta_db
+floor_censored
+```
+
+At each existing Analyzer logarithmic band center it derives:
+
+```text
+mid_db
+side_db
+stereo_equivalent_energy_db
+mono_fold_delta_db
+energy_loss_fraction
+relative_band_energy
+inspection_priority
+```
+
+with sampled energy semantics:
+
+```text
+stereo_equivalent_band_power ~= mid_power + side_power
+mono_fold_band_power         ~= mid_power
+```
+
+The band-center representation is descriptive sampled evidence, not a perfect integrated-band transfer function.
+
+The shortlist deliberately energy-weights the fold-down loss so a nearly silent strongly cancelled band does not automatically outrank an energetic band. `inspection_priority` remains only an inspection aid, not a calibrated audibility/quality/problem probability or pass/fail result.
+
+When Mid reaches the Analyzer's `-120 dB` absolute measurement floor, the result marks `floor_censored=true` and uses that floor as the conservative numerator for the relative delta. Do not report a precise cancellation depth below the measurement floor.
+
+P7a explicitly leaves these unavailable:
+
+```text
+historical arbitrary-range 32-band mono compatibility
+cached Section 32-band mono compatibility
+mono-fold Sample Peak
+mono-fold True Peak
+```
+
+Do not infer mono-fold peak/True Peak from stereo Peak, stereo True Peak, correlation, RMS, Side/Mid, or negative-cross evidence. Direct peak/True-Peak fold-down belongs to optional P7b.
+
+Keep correlation, Side/Mid, negative-cross and direct fold-down energy as independent evidence dimensions. Do not create one universal stereo-quality score or fixed `all lows mono` / `correlation < 0 bad` / `delta < X fail` rule.
+
+Detailed semantics: `mono-compatibility.md`.
+
 ## Recent-window verification
 
 ```text
@@ -399,7 +527,7 @@ Detailed semantics: `verification-evidence.md`.
 
 ## Control boundary
 
-Analyzer MCP owns measurement, retained memory, project/runtime identity-scope disclosure, derived structure/relationships/range resolution, comparison, verification conditions, deterministic binding evidence, and Analyzer Analysis Profile control only.
+Analyzer MCP owns measurement, retained memory, project/runtime identity-scope disclosure, derived structure/relationships/range resolution, coverage-aware retained dynamics distributions, recent direct mono-fold compatibility evidence, comparison, verification conditions, deterministic binding evidence, and Analyzer Analysis Profile control only.
 
 The external DAW-control layer owns exact project state, future authoritative stable project identity, and all non-Analyzer writes/readback.
 
@@ -407,6 +535,6 @@ Never invent project identity, write success, readback values, semantic section 
 
 ## OSC compatibility
 
-OSC analysis protocol remains append-only **1.2** with existing indexes `0..149` unchanged by Track Story, relationships, range verification, identity-scope disclosure, or MCP self-description.
+OSC analysis protocol remains append-only **1.2** with existing indexes `0..149` unchanged by Track Story, relationships, range verification, identity-scope disclosure, MCP self-description, P6a retained dynamics distributions, or P7a derived mono-fold energy evidence.
 
 Analyzer-owned Profile control remains a separate loopback-only control protocol, revision 1.

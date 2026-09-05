@@ -21,6 +21,8 @@ Current layers:
 - section_relationship_tools: bounded cross-track relationships across sections/families
 - verification_tools: recent-window controlled Before/After verification sessions
 - range_verification_tools: transport-anchored same-range Before/After verification
+- dynamics_tools: coverage-aware retained dynamics/mastering distributions
+- mono_compatibility_tools: direct recent-window mono-fold RMS and energy-aware band evidence
 - self_description: server instructions and Skill-backed MCP guide resources
 
 Set AI_ANALYZER_SELF_TEST=1 to validate source or packaged runtime without
@@ -81,6 +83,8 @@ import track_story_tools as story  # noqa: E402
 import section_relationship_tools as relationships  # noqa: E402
 import verification_tools as verification  # noqa: E402,F401
 import range_verification_tools as range_verification  # noqa: E402,F401
+import dynamics_tools as dynamics  # noqa: E402,F401
+import mono_compatibility_tools as mono_compatibility  # noqa: E402,F401
 
 self_description.register_resources(mcp)
 
@@ -131,6 +135,8 @@ EXPECTED_TOOLS = {
     "audio_begin_range_verification",
     "audio_complete_range_verification",
     "audio_range_verification_status",
+    "audio_dynamics_distribution",
+    "audio_mono_compatibility",
 }
 
 
@@ -189,6 +195,7 @@ def self_test() -> None:
         "missing retained coverage is not silence",
         "same-range verification",
         "Analysis Profile",
+        "audio_mono_compatibility",
     ):
         if required_phrase.casefold() not in mcp.instructions.casefold():
             raise RuntimeError(

@@ -188,13 +188,19 @@ jobs:
             mcp/verification_tools.py \
             mcp/range_tools.py \
             mcp/range_verification_tools.py \
+            mcp/dynamics_tools.py \
+            mcp/mono_compatibility_tools.py \
             mcp/ci_regression.py \
             mcp/relationship_regression.py \
-            mcp/range_verification_regression.py
+            mcp/range_verification_regression.py \
+            mcp/dynamics_regression.py \
+            mcp/mono_compatibility_regression.py
           AI_ANALYZER_SELF_TEST=1 python mcp/server.py
           python mcp/ci_regression.py
           python mcp/relationship_regression.py
           python mcp/range_verification_regression.py
+          python mcp/dynamics_regression.py
+          python mcp/mono_compatibility_regression.py
 
       - name: Package MCP and Skill folders
         shell: bash
@@ -220,13 +226,19 @@ jobs:
           cp mcp/verification_tools.py dist/mcp/
           cp mcp/range_tools.py dist/mcp/
           cp mcp/range_verification_tools.py dist/mcp/
+          cp mcp/dynamics_tools.py dist/mcp/
+          cp mcp/mono_compatibility_tools.py dist/mcp/
           cp mcp/requirements.txt dist/mcp/
           cp mcp/cherry-studio.example.json dist/mcp/
           cp -R skills/ai-analyzer-flstudio/. dist/skill/
           test -s dist/mcp/self_description.py
+          test -s dist/mcp/dynamics_tools.py
+          test -s dist/mcp/mono_compatibility_tools.py
           test ! -e dist/mcp/ci_regression.py
           test ! -e dist/mcp/relationship_regression.py
           test ! -e dist/mcp/range_verification_regression.py
+          test ! -e dist/mcp/dynamics_regression.py
+          test ! -e dist/mcp/mono_compatibility_regression.py
           AI_ANALYZER_SKILL_DIR="$PWD/dist/skill" AI_ANALYZER_REQUIRE_GUIDES=1 AI_ANALYZER_SELF_TEST=1 python dist/mcp/server.py
           find dist -maxdepth 3 -type f -print | sort
 

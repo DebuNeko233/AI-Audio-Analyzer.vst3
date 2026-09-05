@@ -1,6 +1,6 @@
 ---
 name: ai-analyzer-flstudio
-description: Technical usage skill for Cherry Studio + AI Audio Analyzer MCP. Teaches explicit project/runtime identity scope, deterministic Analyzer binding, adaptive Analysis Profile control, transport-aware Song Memory, explainable song structure, Track Story, bounded section-aware relationships, measurement validity, performance telemetry, recent-window verification, and transport-anchored same-range verification around externally controlled DAW changes. It does not prescribe a mixing style, LUFS target, EQ/compression/sidechain/stereo recipe, semantic section label, key change, harmony edit, or aesthetic decision.
+description: Technical usage skill for Cherry Studio + AI Audio Analyzer MCP. Teaches explicit project/runtime identity scope, deterministic Analyzer binding, adaptive Analysis Profile control, transport-aware Song Memory, explainable song structure, Track Story, bounded section-aware relationships, coverage-aware retained dynamics distributions, direct energy-aware mono-fold compatibility evidence, measurement validity, performance telemetry, recent-window verification, and transport-anchored same-range verification around externally controlled DAW changes. It does not prescribe a mixing style, LUFS target, EQ/compression/sidechain/stereo recipe, semantic section label, key change, harmony edit, or aesthetic decision.
 ---
 
 # AI Audio Analyzer MCP Usage Skill
@@ -48,6 +48,8 @@ aianalyzer://guide/song-memory
 aianalyzer://guide/section-structure
 aianalyzer://guide/track-story
 aianalyzer://guide/section-relationships
+aianalyzer://guide/dynamics-evidence
+aianalyzer://guide/mono-compatibility
 aianalyzer://guide/masking-evidence
 aianalyzer://guide/stereo-evidence
 aianalyzer://guide/tonal-evidence
@@ -125,11 +127,13 @@ Then choose the smallest follow-up:
 audio_track_story(track, map_id)          # one track across sections
 audio_section_profile(section_id, map_id) # many tracks inside one section
 audio_section_relationships(map_id)       # bounded cross-track shortlist
+audio_dynamics_distribution(...)          # retained pass/range/section dynamics distributions
+audio_mono_compatibility(track, seconds)  # recent direct fold-down RMS / band-center energy evidence
 ```
 
 Use `audio_song_timeline()` only when raw DAW-time evolution is still required.
 
-Do not call all 42 tools mechanically.
+Do not call all 44 tools mechanically.
 
 ## 2. Deterministic Analyzer ↔ FL Mixer mapping
 
@@ -191,6 +195,7 @@ Transport / signal / Peak-RMS-Crest   Eco
 LUFS / True Peak                      Balanced
 Spectrum / basic masking              Balanced
 Deep Mid/Side / stereo                Balanced
+P7a mono-fold energy evidence         Balanced
 Temporal                              Mix
 Tonal / chroma / harmonic             Full
 ```
@@ -329,7 +334,162 @@ Directional descriptors such as B-minus-A preserve numeric direction only; they 
 
 Detailed `audio_masking_evidence()`, `audio_stereo_compare()` and `audio_temporal_compare()` remain recent-window tools. Do not claim their current results describe a historical section unless the DAW is actually replaying/measuring that passage.
 
-## 6. Validate evidence before interpreting it
+## 6. Coverage-aware retained dynamics distributions
+
+Use:
+
+```text
+audio_dynamics_distribution(
+  track,
+  transport_epoch=None,
+  start_seconds=None,
+  end_seconds=None,
+  map_id=None,
+  section_id=None,
+  compare_section_id=None,
+  minimum_range_coverage=...,
+  minimum_bin_coverage=...
+)
+```
+
+Supported scopes:
+
+```text
+selected retained transport-pass span
+explicit DAW-time range
+cached Section Map section
+optional section-to-section comparison
+```
+
+P6a is MCP-side and uses retained one-second Song Memory. It does not add realtime percentile work or new OSC fields.
+
+Coverage policy:
+
+```text
+minimum per-bin coverage floor
++
+covered-seconds weighting for accepted bins
+```
+
+The result reports accepted, rejected-low-coverage and missing bins. Missing evidence is never inserted as silence or zero.
+
+Descriptive metric groups include:
+
+```text
+RMS dBFS
+LUFS-S
+Crest dB
+observed per-bin Sample Peak maxima
+observed per-bin True Peak maxima
+```
+
+Where available, distributions expose min/max, P10/P25/P50/P75/P90, IQR and P90-P10 spread. RMS may additionally expose `covered_seconds_power_mean_db`, which is a power-domain mean and must stay separate from dB percentiles / arithmetic dB averaging.
+
+Critical terminology boundaries:
+
+- `lufs_s_interpercentile_range_lu` is descriptive P90(LUFS-S) - P10(LUFS-S), **not EBU Loudness Range**;
+- standardized EBU LRA remains unavailable in P6a;
+- current retained `lufs_i_latest` is pass-cumulative, so arbitrary-range Integrated LUFS remains unavailable;
+- arbitrary-range PLR remains unavailable without scope-compatible peak and integrated-loudness evidence;
+- an observed per-bin peak distribution is not a reconstructed sample stream;
+- section-to-section deltas are descriptive context only;
+- do not invent a universal dynamics/mastering quality score or fixed genre loudness/crest/LRA/PLR target.
+
+Detailed rules: `references/dynamics-evidence.md`.
+
+## 6.1 Direct energy-aware mono-fold compatibility
+
+Use:
+
+```text
+audio_mono_compatibility(track, seconds=5.0)
+```
+
+P7a uses the Analyzer's existing Mid/Side measurement identity:
+
+```text
+M = 0.5 * (L + R)
+S = 0.5 * (L - R)
+(L_power + R_power)/2 = M_power + S_power
+```
+
+so it adds direct fold-down energy evidence without new realtime DSP or OSC fields.
+
+Current scope is a **recent receive-time window** from 0.5 to 60 seconds. It is not an arbitrary historical Song Memory / Section query.
+
+Full-band evidence includes:
+
+```text
+stereo_rms_db
+mono_fold_rms_db
+mono_fold_rms_delta_db
+floor_censored
+```
+
+`mono_fold_rms_db` is the existing Mid RMS, i.e. RMS of `(L+R)/2`.
+
+The 32 Analyzer band-center Mid/Side representation derives:
+
+```text
+stereo_equivalent_energy_db
+mono_fold_delta_db
+energy_loss_fraction
+relative_band_energy
+inspection_priority
+```
+
+with:
+
+```text
+stereo_equivalent_band_power ~= mid_power + side_power
+mono_fold_band_power         ~= mid_power
+mono_fold_delta_db           = 10*log10(mid_power / (mid_power + side_power))
+```
+
+These are **band-center sampled energy descriptors**, not perfect integrated-band transfer functions.
+
+`inspection_priority` is only an energy-aware shortlist aid:
+
+```text
+relative sampled stereo-equivalent energy
+*
+mono-fold energy-loss fraction
+```
+
+It is not audibility probability, phase-problem probability, quality score, pass/fail status, or processing advice.
+
+When Mid reaches the Analyzer `-120 dB` measurement floor, `floor_censored=true`. Interpret the returned delta as floor-limited evidence of strong cancellation; do not claim precise cancellation depth below the measurement floor.
+
+Completely unmeasurable Mid+Side energy remains unavailable rather than becoming a synthetic extreme-loss band.
+
+Keep existing stereo descriptors separate:
+
+```text
+L/R correlation
+frequency-dependent correlation
+Side/Mid ratio
+negative-cross energy
+low-band stereo evidence
+```
+
+Direct fold-down energy shows what energy changes; correlation/Side/Mid/negative-cross can help explain why. Do not combine them into one universal stereo-quality score.
+
+Current P7a limitations are explicit:
+
+```text
+historical arbitrary DAW-range 32-band mono fold   unavailable
+cached Section 32-band mono fold                   unavailable
+mono-fold Sample Peak                              unavailable
+mono-fold True Peak                                unavailable
+```
+
+Do not infer mono peak or mono True Peak from stereo Peak/True Peak, RMS, correlation, or Side/Mid. Direct peak/true-peak fold-down belongs to optional P7b.
+
+Never hard-code rules such as `all lows must be mono`, `correlation < 0 = bad`, or `mono_fold_delta < X = fail`.
+
+Detailed rules: `references/mono-compatibility.md`.
+
+## 7. Validate evidence before interpreting it
 
 Inspect relevant validity/coverage fields:
 
@@ -351,7 +511,9 @@ For historical range evidence, use what was actually retained in that pass. Do n
 
 Before reusing historical project-level evidence across a reopen/switch, inspect `audio_project_identity_status()` and require a trustworthy external project identity or a clean MCP session boundary.
 
-## 7. Choose the smallest evidence tool
+For P7a specifically, do not turn a recent receive-time result into a historical Section claim. Replay/measure that passage or wait for retained-detail support.
+
+## 8. Choose the smallest evidence tool
 
 Recent stable single track:
 
@@ -386,11 +548,23 @@ audio_stereo_profile(...)
 audio_stereo_compare(...)
 ```
 
+Direct mono fold-down compatibility:
+
+```text
+audio_mono_compatibility(...)
+```
+
 Tonal:
 
 ```text
 audio_tonal_profile(...)
 audio_tonal_compare(...)
+```
+
+Dynamics:
+
+```text
+audio_dynamics_distribution(...)
 ```
 
 Master technical summary:
@@ -401,7 +575,7 @@ audio_master_status(...)
 
 These tools provide evidence, not automatic processing instructions.
 
-## 8. Snapshot A/B
+## 9. Snapshot A/B
 
 ```text
 audio_capture_snapshot("before", seconds=5)
@@ -417,11 +591,11 @@ Snapshots are MCP-session memory and are not currently tagged with a stable proj
 
 Snapshots are still recent-window evidence and are not a substitute for transport-anchored same-range verification when the exact DAW passage matters.
 
-## 9. Closed-loop verification
+## 10. Closed-loop verification
 
 When coordinating a real DAW/plugin modification through an external control MCP, **prefer same-range verification whenever an explicit passage is known**.
 
-### 9.1 Transport-anchored same-range verification
+### 10.1 Transport-anchored same-range verification
 
 ```text
 audio_begin_range_verification(
@@ -463,7 +637,7 @@ Do **not** report arbitrary-range LUFS-I delta. Current retained `lufs_i_latest`
 
 A same-range verification session is not proof of persistent project identity. Do not carry it across a suspected project switch/reopen unless external project identity is authoritative.
 
-### 9.2 Recent-window verification
+### 10.2 Recent-window verification
 
 Fallback when explicit retained range anchoring is unavailable/unnecessary:
 
@@ -496,7 +670,7 @@ Neither means After is better or should be kept.
 
 Detailed rules: `references/verification-evidence.md`.
 
-## 10. Critical distinctions
+## 11. Critical distinctions
 
 Always keep these distinct:
 
@@ -510,9 +684,19 @@ Always keep these distinct:
 - RMS != LUFS.
 - LUFS-S != LUFS-I.
 - pass-cumulative LUFS-I != arbitrary-range LUFS-I.
+- LUFS-S interpercentile spread != standardized EBU LRA.
+- arbitrary-range peak/LUFS-S relation != PLR.
+- dB percentile != power-domain mean.
+- observed per-bin peak maxima distribution != reconstructed sample stream.
 - spectrum dB != calibrated SPL.
 - stereo correlation != Side/Mid energy.
 - low correlation != anti-correlation.
+- correlation / Side-Mid / negative-cross != direct mono-fold energy change.
+- mono-fold band-center evidence != integrated-band transfer function.
+- floor-censored mono-fold delta != precise cancellation depth below -120 dB.
+- P7a mono-fold RMS/energy != mono-fold Sample Peak / True Peak.
+- recent P7a mono compatibility != arbitrary historical/Section mono compatibility.
+- mono-fold inspection priority != quality score / audibility probability / pass-fail.
 - overlap/masking heuristics != audible-masking probability.
 - chroma != MIDI note probability.
 - tonal-center correlation != key probability.
@@ -531,7 +715,7 @@ Always keep these distinct:
 - Analyzer Profile ACK != fresh measurement telemetry.
 - `null` != zero.
 
-## 11. Boundary with FL Studio control MCP
+## 12. Boundary with FL Studio control MCP
 
 AI Audio Analyzer MCP owns:
 
@@ -543,6 +727,8 @@ remember transport-aligned evidence
 infer explainable structural boundaries / neutral recurrence families
 summarize Track Story
 shortlist bounded section-aware relationships
+compute coverage-aware retained dynamics distributions
+compute recent direct mono-fold RMS / energy-aware compatibility evidence
 compare measurements
 resolve retained DAW-time ranges
 verify Before/After measurement conditions
@@ -563,7 +749,7 @@ transaction / rollback when implemented by that layer
 
 Never invent project identity, control tools, write success, readback values, track roles, semantic section labels, or processing certainty.
 
-## 12. Output discipline
+## 13. Output discipline
 
 When using Analyzer evidence, include enough provenance to audit the claim:
 
@@ -572,7 +758,9 @@ project identity confidence when cross-session/reopen continuity matters
 selector / runtime context
 DAW-time range + selected local epoch when retained evidence is used
 section_id / family_id / map_id when structure is used
-coverage / data age / lag / drops when relevant
+coverage / accepted-rejected-missing bins when distribution evidence is used
+recent receive-time window + floor_censored state when P7a mono evidence is used
+data age / lag / drops when relevant
 Analysis Profile / available feature group when relevant
 measurement window/resolution
 verification requested/effective range and freshness when relevant

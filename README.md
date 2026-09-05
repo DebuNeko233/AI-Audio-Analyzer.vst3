@@ -4,7 +4,7 @@
 
 **AI Audio Analyzer** is a JUCE VST3 machine-readable audio measurement layer for AI/LLM-assisted music-production workflows.
 
-It measures audio inside the DAW, publishes structured OSC telemetry to the Analyzer MCP Bridge, and exposes level, loudness, spectrum, stereo, temporal, masking, tonal, project, transport-aligned Song Memory, explainable song structure, Track Story, section-aware mix relationships, performance telemetry, identity-scope disclosure, and closed-loop verification evidence to Cherry Studio or another MCP client.
+It measures audio inside the DAW, publishes structured OSC telemetry to the Analyzer MCP Bridge, and exposes level, loudness, spectrum, stereo, temporal, masking, tonal, project, transport-aligned Song Memory, explainable song structure, Track Story, section-aware mix relationships, coverage-aware retained dynamics distributions, direct energy-aware mono-fold compatibility evidence, performance telemetry, identity-scope disclosure, and closed-loop verification evidence to Cherry Studio or another MCP client.
 
 Current product version: **1.2.0**.
 
@@ -55,6 +55,8 @@ FL Studio / DAW
                  +-- explainable section boundaries + recurrence families
                  +-- Track Story across sections/families
                  +-- bounded section-aware relationship shortlist
+                 +-- coverage-aware retained dynamics distributions
+                 +-- direct recent-window mono-fold RMS / energy evidence
                  +-- recent-window + transport-range verification
                  +-- temporal / masking / stereo / tonal evidence
                          |
@@ -84,6 +86,8 @@ The LLM is intentionally outside the realtime measurement path. Analyzer continu
 - bounded one-second Song Memory with 100 ms coverage slots;
 - explainable section boundaries and neutral recurring A/B/C families;
 - section profiles, Track Story and section-aware relationship shortlisting;
+- coverage-aware retained RMS / LUFS-S / crest / observed peak distributions;
+- direct recent-window mono-fold RMS and energy-aware 32-band-center compatibility evidence derived from existing Mid/Side measurements;
 - project Snapshot A/B and recent-window verification;
 - transport-anchored same-range Before/After verification;
 - adaptive Analysis Profiles and worker/FIFO telemetry.
@@ -241,6 +245,103 @@ It does not create one overall quality/consistency score, infer a track role, or
 
 Detailed masking/stereo/temporal pair tools remain recent-window based. A historical section shortlist does not automatically turn those detailed tools into historical range analyzers.
 
+## Coverage-aware dynamics distributions
+
+P6a adds one high-level retained-distribution tool:
+
+```text
+audio_dynamics_distribution(
+  track,
+  transport_epoch=None,
+  start_seconds=None,
+  end_seconds=None,
+  map_id=None,
+  section_id=None,
+  compare_section_id=None,
+  minimum_range_coverage=...,
+  minimum_bin_coverage=...
+)
+```
+
+Supported scopes are the selected retained transport-pass span, an explicit DAW-time range, or one cached Section Map section. `compare_section_id` can return descriptive section-to-section deltas.
+
+Coverage policy:
+
+```text
+minimum per-bin coverage floor
++
+covered-seconds weighting for accepted one-second bins
+```
+
+The result reports accepted/rejected/missing bins and never inserts missing coverage as silence or zero.
+
+Descriptive distributions include RMS, LUFS-S, Crest, observed sample-peak maxima and observed True-Peak maxima with P10/P25/P50/P75/P90, IQR and P90-P10 spread where available. RMS also exposes a separately labelled covered-seconds power-domain mean so dB percentiles are not conflated with energy-domain averaging.
+
+Important terminology boundaries:
+
+- `lufs_s_interpercentile_range_lu` is descriptive `P90(LUFS-S) - P10(LUFS-S)` evidence, **not EBU Loudness Range**;
+- standardized EBU LRA is not implemented in P6a;
+- arbitrary-range Integrated LUFS is unavailable because retained `lufs_i_latest` is pass-cumulative;
+- arbitrary-range PLR is unavailable without scope-compatible peak and integrated-loudness evidence;
+- section deltas are descriptive context only, not a quality score or processing recommendation;
+- no fixed mastering/genre loudness, crest, LRA or PLR target is built into MCP logic.
+
+See `skills/ai-analyzer-flstudio/references/dynamics-evidence.md`.
+
+## Energy-aware mono-fold compatibility
+
+P7a adds one direct recent-window fold-down tool:
+
+```text
+audio_mono_compatibility(track, seconds=5.0)
+```
+
+The VST3 already computes:
+
+```text
+M = 0.5 * (L + R)
+S = 0.5 * (L - R)
+```
+
+so P7a requires no new realtime DSP or OSC fields. Existing Mid RMS is the ordinary `(L+R)/2` mono-fold RMS, and Mid/Side powers satisfy:
+
+```text
+(L_power + R_power)/2 = M_power + S_power
+```
+
+The tool returns direct full-band fold-down evidence and 32 Analyzer band-center energy evidence including:
+
+```text
+stereo_rms_db
+mono_fold_rms_db
+mono_fold_rms_delta_db
+mid_db / side_db
+stereo_equivalent_energy_db
+mono_fold_delta_db
+energy_loss_fraction
+relative_band_energy
+inspection_priority
+```
+
+Grouped summaries cover `20-120 Hz`, `120-500 Hz`, `500 Hz-2 kHz`, `2-5 kHz`, and `5-20 kHz`.
+
+`inspection_priority` is only an energy-aware shortlist aid. It is **not** audibility probability, a phase-problem probability, a quality score, a pass/fail threshold, or a processing recommendation.
+
+When Mid reaches the Analyzer's `-120 dB` measurement floor, P7a marks `floor_censored=true` and reports a floor-limited relative loss rather than pretending to know an infinitely precise cancellation depth.
+
+Current boundaries are deliberate:
+
+- P7a is recent receive-time evidence, not arbitrary historical/Section 32-band analysis;
+- current Song Memory does not retain full historical 32-band Mid/Side detail;
+- mono-fold Sample Peak is unavailable in P7a;
+- mono-fold True Peak is unavailable in P7a;
+- neither peak metric may be inferred from stereo Peak, True Peak, RMS, correlation or Side/Mid;
+- direct peak/True-Peak fold-down belongs to optional P7b;
+- correlation, Side/Mid, negative-cross and direct fold-down loss remain separate evidence dimensions;
+- no rule such as `correlation < 0 = bad`, `all lows must be mono`, or `mono_fold_delta < X = fail` is built into MCP logic.
+
+See `skills/ai-analyzer-flstudio/references/mono-compatibility.md`.
+
 ## Controlled verification
 
 Two verification paths coexist.
@@ -344,6 +445,8 @@ aianalyzer://guide/song-memory
 aianalyzer://guide/section-structure
 aianalyzer://guide/track-story
 aianalyzer://guide/section-relationships
+aianalyzer://guide/dynamics-evidence
+aianalyzer://guide/mono-compatibility
 aianalyzer://guide/masking-evidence
 aianalyzer://guide/stereo-evidence
 aianalyzer://guide/tonal-evidence
@@ -358,7 +461,7 @@ CI requires every registered MCP tool and guide resource to expose a non-empty d
 
 ## MCP tools
 
-MCP **1.2 exposes 42 tools**.
+MCP **1.2 exposes 44 tools** on this stacked P7a branch.
 
 High-level tools include:
 
@@ -374,6 +477,8 @@ audio_section_map(...)
 audio_section_profile(...)
 audio_track_story(...)
 audio_section_relationships(...)
+audio_dynamics_distribution(...)
+audio_mono_compatibility(...)
 audio_begin_range_verification(...)
 audio_complete_range_verification(...)
 audio_range_verification_status(...)
@@ -381,7 +486,7 @@ audio_range_verification_status(...)
 
 At a new Agent/MCP session, and especially after a user may have switched or reopened a DAW project, inspect `audio_project_identity_status()` before assuming retained-state continuity.
 
-Do not mechanically run all 42 tools. Start high-level and drill down only where needed.
+Do not mechanically run all 44 tools. Start high-level and drill down only where needed.
 
 ## User installation
 
@@ -424,16 +529,16 @@ There is exactly one supported source/PyInstaller entrypoint:
 mcp/server.py
 ```
 
-Current metadata:
+Current stacked P7a branch metadata:
 
 ```text
 Product version             1.2.0
 MCP version                 1.2
 OSC analysis protocol       1.2
 Analyzer control protocol   local revision 1
-MCP tools                   42
+MCP tools                   44
 Self-description schema     1
-Guide resources             13
+Guide resources             15
 ```
 
 Runtime modules:
@@ -457,6 +562,8 @@ mcp/section_relationship_tools.py
 mcp/verification_tools.py
 mcp/range_tools.py
 mcp/range_verification_tools.py
+mcp/dynamics_tools.py
+mcp/mono_compatibility_tools.py
 ```
 
 Repository-only regressions:
@@ -465,6 +572,8 @@ Repository-only regressions:
 mcp/ci_regression.py
 mcp/relationship_regression.py
 mcp/range_verification_regression.py
+mcp/dynamics_regression.py
+mcp/mono_compatibility_regression.py
 ```
 
 Regression files are not shipped in beginner user Releases.
@@ -473,7 +582,7 @@ Regression files are not shipped in beginner user Releases.
 
 Analysis address: `/aianalyzer/frame`.
 
-OSC **1.2** remains append-only. Existing indexes `0..149` are unchanged by Track Story, section relationships, transport-range verification, project-identity disclosure, or MCP self-description.
+OSC **1.2** remains append-only. Existing indexes `0..149` are unchanged by Track Story, section relationships, transport-range verification, project-identity disclosure, MCP self-description, P6a retained dynamics distributions, or P7a derived mono-fold energy evidence.
 
 The Analyzer-owned Analysis Profile control is a separate loopback-only control protocol, revision 1.
 
@@ -491,6 +600,8 @@ skills/ai-analyzer-flstudio/references/song-memory.md
 skills/ai-analyzer-flstudio/references/section-structure.md
 skills/ai-analyzer-flstudio/references/track-story.md
 skills/ai-analyzer-flstudio/references/section-relationships.md
+skills/ai-analyzer-flstudio/references/dynamics-evidence.md
+skills/ai-analyzer-flstudio/references/mono-compatibility.md
 skills/ai-analyzer-flstudio/references/verification-evidence.md
 skills/ai-analyzer-flstudio/references/analyzer-mcp.md
 ```
