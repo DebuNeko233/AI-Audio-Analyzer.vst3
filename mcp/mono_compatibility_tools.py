@@ -120,15 +120,14 @@ def _finalize_relative_energy(bands: list[dict[str, Any]]) -> None:
         default=0.0,
     )
     for band in bands:
-        if not band.get("available") or maximum <= _POWER_FLOOR:
-            band.pop("_stereo_power", None)
-            band.pop("_mid_power", None)
-            band.pop("_side_power", None)
-            continue
-        relative = max(0.0, min(1.0, float(band["_stereo_power"]) / maximum))
-        loss = float(band["energy_loss_fraction"])
-        band["relative_band_energy"] = round(relative, 6)
-        band["inspection_priority"] = round(relative * loss, 6)
+        if band.get("available") and maximum > _POWER_FLOOR:
+            relative = max(0.0, min(1.0, float(band["_stereo_power"]) / maximum))
+            loss = float(band["energy_loss_fraction"])
+            band["relative_band_energy"] = round(relative, 6)
+            band["inspection_priority"] = round(relative * loss, 6)
+        band.pop("_stereo_power", None)
+        band.pop("_mid_power", None)
+        band.pop("_side_power", None)
 
 
 def _group_summary(bands: list[dict[str, Any]], label: str, lo: float, hi: float) -> dict[str, Any]:
