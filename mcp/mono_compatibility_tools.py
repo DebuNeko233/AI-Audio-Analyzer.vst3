@@ -54,21 +54,24 @@ def _power_to_db(power: float) -> float | None:
 
 
 def _power_mean_db(values: list[float]) -> float | None:
-    powers = [_db_to_power(float(value)) for value in values if math.isfinite(float(value))]
-    powers = [value for value in powers if value > 0.0]
-    if not powers:
+    finite = [float(value) for value in values if math.isfinite(float(value))]
+    if not finite:
         return None
-    return _power_to_db(sum(powers) / len(powers))
+    powers = [_db_to_power(value) for value in finite]
+    mean_power = sum(powers) / len(powers)
+    value = _power_to_db(mean_power)
+    return FLOOR_DB if value is None else value
 
 
 def _delta_from_powers(mono_power: float, stereo_power: float) -> float | None:
     if stereo_power <= _POWER_FLOOR:
         return None
     if mono_power <= _POWER_FLOOR:
-        # The Analyzer has a -120 dB display floor. Returning a finite value at
-        # that floor is more honest than -inf, while retaining the strong-loss
-        # meaning and avoiding fabricated energy below the measurement floor.
-        return FLOOR_DB
+        # Mid is below the Analyzer's absolute -120 dB measurement floor. Use
+        # that floor as a conservative numerator so the returned relative loss
+        # is floor-censored instead of pretending to know an infinite/precise
+        # cancellation depth below the measurement floor.
+        return 10.0 * math.log10(_POWER_FLOOR / stereo_power)
     return 10.0 * math.log10(mono_power / stereo_power)
 
 
@@ -84,6 +87,7 @@ def _band_evidence(mid_db: float, side_db: float, center_hz: float) -> dict[str,
             "side_db": None,
             "stereo_equivalent_energy_db": None,
             "mono_fold_delta_db": None,
+            "floor_censored": False,
             "energy_loss_fraction": None,
             "relative_band_energy": None,
             "inspection_priority": None,
@@ -96,10 +100,11 @@ def _band_evidence(mid_db: float, side_db: float, center_hz: float) -> dict[str,
     return {
         "center_hz": round(float(center_hz), 4),
         "available": True,
-        "mid_db": None if mid_power <= _POWER_FLOOR else round(float(mid_db), 4),
-        "side_db": None if side_power <= _POWER_FLOOR else round(float(side_db), 4),
+        "mid_db": FLOOR_DB if mid_power <= _POWER_FLOOR else round(float(mid_db), 4),
+        "side_db": FLOOR_DB if side_power <= _POWER_FLOOR else round(float(side_db), 4),
         "stereo_equivalent_energy_db": None if stereo_db is None else round(stereo_db, 4),
         "mono_fold_delta_db": None if delta_db is None else round(delta_db, 4),
+        "floor_censored": mid_power <= _POWER_FLOOR,
         "energy_loss_fraction": round(loss_fraction, 6),
         "relative_band_energy": None,
         "inspection_priority": None,
@@ -138,6 +143,7 @@ def _group_summary(bands: list[dict[str, Any]], label: str, lo: float, hi: float
             "range": label,
             "available": False,
             "mono_fold_delta_db": None,
+            "floor_censored": False,
             "energy_loss_fraction": None,
             "relative_group_energy": None,
             "inspection_priority": None,
@@ -153,6 +159,7 @@ def _group_summary(bands: list[dict[str, Any]], label: str, lo: float, hi: float
         "available": True,
         "sampled_band_centers": len(selected),
         "mono_fold_delta_db": None if delta is None else round(delta, 4),
+        "floor_censored": mid_power <= _POWER_FLOOR,
         "energy_loss_fraction": round(loss, 6),
         "relative_group_energy": None,
         "inspection_priority": None,
@@ -264,6 +271,7 @@ def _build_result(track: str, seconds: float) -> dict[str, Any]:
             {
                 "center_hz": band["center_hz"],
                 "mono_fold_delta_db": band["mono_fold_delta_db"],
+                "floor_censored": band["floor_censored"],
                 "relative_band_energy": band["relative_band_energy"],
                 "energy_loss_fraction": band["energy_loss_fraction"],
                 "inspection_priority": band["inspection_priority"],
@@ -311,6 +319,7 @@ def _build_result(track: str, seconds: float) -> dict[str, Any]:
             "stereo_rms_db": None if stereo_rms_db is None else round(stereo_rms_db, 4),
             "mono_fold_rms_db": None if mono_rms_db is None else round(mono_rms_db, 4),
             "mono_fold_rms_delta_db": None if full_delta is None else round(full_delta, 4),
+            "floor_censored": mono_power <= _POWER_FLOOR and stereo_power > _POWER_FLOOR,
             "formula": "10*log10(P_mid / P_stereo), where P_mid is M=(L+R)/2 and P_stereo=(L^2+R^2)/2",
         },
         "frequency": {
@@ -321,6 +330,11 @@ def _build_result(track: str, seconds: float) -> dict[str, Any]:
             "inspection_priority_semantics": (
                 "relative sampled stereo-equivalent energy * mono-fold energy-loss fraction; "
                 "shortlist aid only, not audibility probability, quality score, or fail threshold."
+            ),
+            "floor_censoring_semantics": (
+                "When Mid reaches the Analyzer -120 dB measurement floor, mono_fold_delta_db uses "
+                "that absolute floor as a conservative numerator and floor_censored=true; it is not "
+                "a precise cancellation depth below the measurement floor."
             ),
         },
         "existing_stereo_context": existing_context,
@@ -344,6 +358,7 @@ def _build_result(track: str, seconds: float) -> dict[str, Any]:
         "warnings": [
             "Do not treat correlation, Side/Mid, negative-cross evidence, or mono-fold delta as one universal stereo-quality score.",
             "Do not assume all low frequencies must be mono or apply a fixed mono-fold-loss pass/fail threshold.",
+            "Floor-censored mono-fold deltas are lower-bound evidence, not precise cancellation depth below -120 dB.",
             "Arbitrary historical/Section 32-band mono-fold analysis is unavailable until retained-detail support exists.",
         ],
     }
