@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Transport-anchored same-range verification for AI Audio Analyzer MCP.
 
-This is deliberately separate from the legacy recent-window verification API.
-It freezes a retained Before range, requires a clean post-baseline replay of the
-same effective DAW-time range, and returns auditable After-minus-Before evidence.
+This layer is deliberately separate from recent-window verification. It freezes
+one retained Before range, requires a clean post-baseline replay of the same
+normalized DAW-time range, and returns auditable After-minus-Before evidence.
 """
 
 from __future__ import annotations
@@ -23,20 +23,6 @@ RANGE_VERIFICATION_LIMIT = 12
 
 _range_verification_lock = threading.RLock()
 _range_verifications: dict[str, dict[str, Any]] = {}
-
-
-def _live_feature_masks() -> dict[str, int]:
-    masks: dict[str, int] = {}
-    for runtime_id in project._live_runtime_ids():
-        with core._lock:
-            frame = dict(core._tracks.get(runtime_id, {}))
-            binding = copy.deepcopy(core._bindings.get(runtime_id))
-        selector = project._binding_selector(binding, runtime_id)
-        try:
-            masks[selector] = max(0, int(frame.get("analysis_feature_mask", 63)))
-        except (TypeError, ValueError):
-            masks[selector] = 63
-    return masks
 
 
 def _state_summary(state: dict[str, Any]) -> dict[str, Any]:
@@ -77,6 +63,8 @@ def _target_delta(before: dict[str, Any], after: dict[str, Any]) -> dict[str, An
         "rms_db": project._safe_delta(before.get("rms_db"), after.get("rms_db")),
         "crest_db": project._safe_delta(before.get("crest_db"), after.get("crest_db")),
         "lufs_s": project._safe_delta(before.get("lufs_s"), after.get("lufs_s")),
+        # Intentionally no LUFS-I delta here: retained lufs_i_latest is
+        # cumulative over the transport pass, not integrated over this range.
         "true_peak_dbtp": project._safe_delta(
             before.get("true_peak_dbtp"), after.get("true_peak_dbtp")
         ),
@@ -99,14 +87,26 @@ def _target_delta(before: dict[str, Any], after: dict[str, Any]) -> dict[str, An
     }
 
 
+def _feature_comparison(
+    before: dict[str, Any], after: dict[str, Any]
+) -> tuple[dict[str, bool], dict[str, bool], list[str]]:
+    before_features = copy.deepcopy(before.get("feature_availability") or {})
+    after_features = copy.deepcopy(after.get("feature_availability") or {})
+    names = sorted(set(before_features) | set(after_features))
+    comparable = [
+        name
+        for name in names
+        if bool(before_features.get(name)) and bool(after_features.get(name))
+    ]
+    return before_features, after_features, comparable
+
+
 def _comparison(
     before_state: dict[str, Any],
     after_state: dict[str, Any],
     targets: list[str],
     *,
     baseline_ready: bool,
-    baseline_feature_masks: dict[str, int],
-    after_feature_masks: dict[str, int],
     receive_fence: float,
 ) -> dict[str, Any]:
     before_tracks = before_state.get("tracks") or {}
@@ -129,7 +129,7 @@ def _comparison(
     missing_targets: list[str] = []
     invalid_targets: list[str] = []
     retained_feature_mismatch_targets: list[str] = []
-    live_feature_mask_mismatch_targets: list[str] = []
+    no_common_feature_targets: list[str] = []
     dropped_block_regression_targets: list[str] = []
     stale_after_targets: list[str] = []
     target_rows: list[dict[str, Any]] = []
@@ -146,17 +146,12 @@ def _comparison(
         if not before_valid or not after_valid:
             invalid_targets.append(identity)
 
-        before_features = copy.deepcopy(before.get("feature_availability") or {})
-        after_features = copy.deepcopy(after.get("feature_availability") or {})
-        retained_features_compatible = before_features == after_features and bool(before_features)
-        if not retained_features_compatible:
+        before_features, after_features, comparable_features = _feature_comparison(before, after)
+        retained_features_equal = before_features == after_features and bool(before_features)
+        if not retained_features_equal:
             retained_feature_mismatch_targets.append(identity)
-
-        before_mask = baseline_feature_masks.get(identity)
-        after_mask = after_feature_masks.get(identity)
-        live_feature_mask_compatible = before_mask is not None and before_mask == after_mask
-        if not live_feature_mask_compatible:
-            live_feature_mask_mismatch_targets.append(identity)
+        if not comparable_features:
+            no_common_feature_targets.append(identity)
 
         before_quality = (before.get("range_provenance") or {}).get("data_quality") or {}
         after_quality = (after.get("range_provenance") or {}).get("data_quality") or {}
@@ -191,7 +186,6 @@ def _comparison(
                     "first_received_at": (before.get("range_provenance") or {}).get("first_received_at"),
                     "last_received_at": (before.get("range_provenance") or {}).get("last_received_at"),
                     "feature_availability": before_features,
-                    "live_feature_mask_at_freeze": before_mask,
                     "dropped_blocks_cumulative": before_drops,
                 },
                 "after": {
@@ -201,14 +195,13 @@ def _comparison(
                     "first_received_at": after_first_received,
                     "last_received_at": (after.get("range_provenance") or {}).get("last_received_at"),
                     "feature_availability": after_features,
-                    "live_feature_mask_at_freeze": after_mask,
                     "dropped_blocks_cumulative": after_drops,
                     "post_baseline_receive_fence": after_is_new,
                 },
                 "analysis_valid_before": before_valid,
                 "analysis_valid_after": after_valid,
-                "retained_feature_availability_compatible": retained_features_compatible,
-                "live_feature_mask_compatible": live_feature_mask_compatible,
+                "retained_feature_availability_equal": retained_features_equal,
+                "comparable_feature_families": comparable_features,
                 "dropped_block_regression": dropped_regression,
                 "active_ratio_before": before_active,
                 "active_ratio_after": after_active,
@@ -224,7 +217,7 @@ def _comparison(
         and topology_unchanged
         and not missing_targets
         and not invalid_targets
-        and not retained_feature_mismatch_targets
+        and not no_common_feature_targets
         and not dropped_block_regression_targets
         and not stale_after_targets
     )
@@ -241,9 +234,12 @@ def _comparison(
     if invalid_targets:
         warnings.append("Some targets do not have adequate retained coverage in both passes.")
     if retained_feature_mismatch_targets:
-        warnings.append("Some targets retained different measurement families in Before and After, so their range evidence is not feature-compatible.")
-    if live_feature_mask_mismatch_targets:
-        warnings.append("Some live Analyzer feature masks differ at the Before/After freeze moments. This is audit context only; historical comparability is judged from retained range evidence.")
+        warnings.append(
+            "Some targets expose different retained measurement-family availability in Before and After. "
+            "This can reflect content-dependent evidence as well as Profile scope, so it is reported per target rather than used as an automatic whole-comparison blocker; only common available dimensions should be interpreted."
+        )
+    if no_common_feature_targets:
+        warnings.append("Some targets have no common retained measurement family to compare.")
     if dropped_block_regression_targets:
         warnings.append("Some targets report a higher cumulative dropped-block count after the change.")
     if stale_after_targets:
@@ -258,7 +254,7 @@ def _comparison(
             "missing_targets": missing_targets,
             "invalid_targets": invalid_targets,
             "retained_feature_mismatch_targets": retained_feature_mismatch_targets,
-            "live_feature_mask_mismatch_targets": live_feature_mask_mismatch_targets,
+            "no_common_feature_targets": no_common_feature_targets,
             "dropped_block_regression_targets": dropped_block_regression_targets,
             "stale_after_targets": stale_after_targets,
             "warnings": warnings,
@@ -282,8 +278,10 @@ def _comparison(
             "delta_convention": "After - Before",
             "active_ratio": "Descriptive evidence only in same-range mode; it is not used as a proxy for passage identity.",
             "controlled_comparison": "Technical same-range comparability only. It does not mean the artistic change is better.",
-            "retained_feature_availability": "Derived from measurement families actually present in each retained range summary. It is the historical feature-compatibility gate for P4a.",
-            "live_feature_mask": "Captured from the live Analyzer frame at each freeze moment for audit context only. Song Memory does not yet retain an exact per-bin feature-mask bitfield.",
+            "retained_feature_availability": (
+                "Derived from measurement families actually represented in each retained range summary. "
+                "Because some evidence is content-dependent, unequal availability is an audit warning rather than proof that the Analysis Profile changed. Interpret only dimensions available in both passes."
+            ),
         },
     }
 
@@ -338,11 +336,18 @@ def audio_begin_range_verification(
     if not tracks:
         blockers.append("No live Analyzer instances are available.")
     if not project_status.get("project_ready"):
-        blockers.append("Project Analyzer mapping/readiness is incomplete; establish deterministic bindings and clear stale streams first.")
-    invalid = [identity for identity in effective_targets if not (tracks.get(identity) or {}).get("analysis_valid")]
+        blockers.append(
+            "Project Analyzer mapping/readiness is incomplete; establish deterministic bindings and clear stale streams first."
+        )
+    invalid = [
+        identity
+        for identity in effective_targets
+        if not (tracks.get(identity) or {}).get("analysis_valid")
+    ]
     if invalid:
         blockers.append(
-            f"Before range does not have adequate retained coverage for targets: {invalid}. Play/capture the intended range and retry."
+            f"Before range does not have adequate retained coverage for targets: {invalid}. "
+            "Play/capture the intended range and retry."
         )
 
     receive_fence = time.time()
@@ -360,7 +365,6 @@ def audio_begin_range_verification(
         "minimum_coverage": before_state.get("minimum_coverage"),
         "receive_fence": receive_fence,
         "before_state": before_state,
-        "baseline_feature_masks": _live_feature_masks(),
         "baseline_project_status": copy.deepcopy(project_status),
         "ready_for_external_change": not blockers,
         "baseline_blockers": blockers,
@@ -423,7 +427,6 @@ def audio_complete_range_verification(
         receive_fence = float(session["receive_fence"])
         minimum_coverage = float(session["minimum_coverage"])
         requested = copy.deepcopy(session["requested_range"])
-        baseline_feature_masks = copy.deepcopy(session.get("baseline_feature_masks") or {})
 
     after_project_status = project.audio_project_status()
     after_state = ranges.capture_range_state(
@@ -433,14 +436,11 @@ def audio_complete_range_verification(
         after_received_at=receive_fence,
         minimum_coverage=minimum_coverage,
     )
-    after_feature_masks = _live_feature_masks()
     comparison = _comparison(
         before_state,
         after_state,
         targets,
         baseline_ready=baseline_ready,
-        baseline_feature_masks=baseline_feature_masks,
-        after_feature_masks=after_feature_masks,
         receive_fence=receive_fence,
     )
     readback_supplied = bool(clean_readback)
@@ -478,8 +478,13 @@ def audio_complete_range_verification(
             "closed_loop_complete_requires_readback": True,
         },
         "interpretation": {
-            "controlled_comparison": "Technical same-range measurement comparability only; not artistic success.",
-            "closed_loop_complete": "True only when the same-range comparison is controlled and caller-supplied actual host readback is present. It still does not mean the change is artistically better.",
+            "controlled_comparison": (
+                "Technical same-range measurement comparability only; not artistic success."
+            ),
+            "closed_loop_complete": (
+                "True only when the same-range comparison is controlled and caller-supplied actual host readback is present. "
+                "It still does not mean the change is artistically better."
+            ),
         },
     }
 
@@ -500,7 +505,7 @@ def audio_complete_range_verification(
     response["recommended_next_step"] = (
         "Use the measured same-range deltas plus specialized evidence to decide whether to keep, refine, or roll back the external DAW change."
         if closed_loop_complete
-        else "Resolve the reported coverage/new-pass/retained-feature/topology/readback gap before treating this as a complete verification."
+        else "Resolve the reported coverage/new-pass/topology/drop/readback gap before treating this as a complete verification."
     )
     return response
 
@@ -517,7 +522,9 @@ def audio_range_verification_status(verification_id: str = "") -> dict[str, Any]
                 raise ValueError(f"Unknown range verification {clean_id!r}.")
             response = _public(copy.deepcopy(session), include_result=True)
             response["ok"] = True
-            response["age_seconds"] = round(max(0.0, now - float(session["created_at"])), 3)
+            response["age_seconds"] = round(
+                max(0.0, now - float(session["created_at"])), 3
+            )
             response["note"] = "Range verification state is MCP-session memory only."
             return response
         sessions = [copy.deepcopy(value) for value in _range_verifications.values()]
@@ -530,12 +537,18 @@ def audio_range_verification_status(verification_id: str = "") -> dict[str, Any]
                 "verification_id": session["verification_id"],
                 "label": session["label"],
                 "status": session["status"],
-                "age_seconds": round(max(0.0, now - float(session["created_at"])), 3),
-                "ready_for_external_change": bool(session.get("ready_for_external_change")),
+                "age_seconds": round(
+                    max(0.0, now - float(session["created_at"])), 3
+                ),
+                "ready_for_external_change": bool(
+                    session.get("ready_for_external_change")
+                ),
                 "target_selectors": list(session.get("target_selectors") or []),
                 "effective_range": copy.deepcopy(session.get("effective_range")),
                 "controlled_comparison": (
-                    ((session.get("result") or {}).get("comparison") or {}).get("controlled_comparison")
+                    ((session.get("result") or {}).get("comparison") or {}).get(
+                        "controlled_comparison"
+                    )
                     if session.get("status") == "completed"
                     else None
                 ),
@@ -547,5 +560,7 @@ def audio_range_verification_status(verification_id: str = "") -> dict[str, Any]
             }
             for session in sessions
         ],
-        "note": "Range verification sessions are in-memory and disappear when the Analyzer MCP exits.",
+        "note": (
+            "Range verification sessions are in-memory and disappear when the Analyzer MCP exits."
+        ),
     }
