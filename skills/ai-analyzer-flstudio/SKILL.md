@@ -1,6 +1,6 @@
 ---
 name: ai-analyzer-flstudio
-description: Technical usage skill for Cherry Studio + AI Audio Analyzer MCP. Teaches deterministic Analyzer binding, adaptive Analysis Profile control, transport-aware Song Memory, explainable song structure, Track Story, bounded section-aware relationships, measurement validity, performance telemetry, recent-window verification, and transport-anchored same-range verification around externally controlled DAW changes. It does not prescribe a mixing style, LUFS target, EQ/compression/sidechain/stereo recipe, semantic section label, key change, harmony edit, or aesthetic decision.
+description: Technical usage skill for Cherry Studio + AI Audio Analyzer MCP. Teaches explicit project/runtime identity scope, deterministic Analyzer binding, adaptive Analysis Profile control, transport-aware Song Memory, explainable song structure, Track Story, bounded section-aware relationships, measurement validity, performance telemetry, recent-window verification, and transport-anchored same-range verification around externally controlled DAW changes. It does not prescribe a mixing style, LUFS target, EQ/compression/sidechain/stereo recipe, semantic section label, key change, harmony edit, or aesthetic decision.
 ---
 
 # AI Audio Analyzer MCP Usage Skill
@@ -12,15 +12,46 @@ Use this Skill to:
 
 It is not a mixing/mastering style guide. Analyzer measurements do not imply a mandatory processor, parameter value, section name, track role, chord/key edit, stereo action, or aesthetic choice.
 
-## 1. Start high-level
+## 1. Start with project identity scope, then project status
 
-For project work begin with:
+At the beginning of a new Agent/MCP session, and whenever the user may have switched or reopened a DAW project, first inspect:
+
+```text
+audio_project_identity_status()
+```
+
+Current expected identity semantics are:
+
+```text
+stable_project_id                       null
+project_identity_confidence             UNRESOLVED
+runtime_id scope                        live_plugin_instance
+runtime_id persistent                   false
+runtime_id serialized with project      false
+same-project reopen UUID stable         false
+binding scope                           mcp_session
+cross-project retained-state isolation  not guaranteed
+```
+
+Critical rules:
+
+- `runtime_id` identifies one live Analyzer plugin instance only;
+- reopening the **same** project recreates Analyzer runtime UUIDs;
+- a new runtime UUID does **not** prove that the project changed;
+- MCP bindings are session-scoped, not persistent track identity;
+- retained Song Memory, Section Maps, snapshots, relationships and verification sessions may remain in MCP RAM while the user switches/reopens projects;
+- until exact external project identity is integrated, do not assume retained state belongs to the current project after a project switch/reopen;
+- when strict isolation matters, ask/use the workflow that restarts Analyzer MCP before analyzing the newly opened/reopened project.
+
+Do not invent a project ID from runtime UUIDs, tempo, track count, names, topology fingerprints, transport epochs, or Mixer indexes.
+
+Then inspect project readiness:
 
 ```text
 audio_project_status()
 ```
 
-Use it to check Bridge/OSC health, live instances, deterministic bindings, stale streams, duplicate names, and project readiness.
+Use it to check Bridge/OSC health, live instances, deterministic bindings, stale streams, duplicate names, and current-session analysis readiness.
 
 Only descend when needed:
 
@@ -52,7 +83,7 @@ audio_section_relationships(map_id)       # bounded cross-track shortlist
 
 Use `audio_song_timeline()` only when raw DAW-time evolution is still required.
 
-Do not call all 41 tools mechanically.
+Do not call all 42 tools mechanically.
 
 ## 2. Deterministic Analyzer ↔ FL Mixer mapping
 
@@ -87,7 +118,9 @@ mixer:<index>/slot:<slot>
 
 Never guess instance mapping from spectrum, chroma, or musical role when Identify is available.
 
-Runtime UUIDs and bindings are session-scoped.
+Runtime UUIDs and bindings are session-scoped. If a plugin instance is recreated or the project is reopened, rediscover the binding.
+
+A deterministic current-session binding does **not** become persistent track identity.
 
 ## 3. Analysis Profile is a measurement-performance control
 
@@ -158,6 +191,8 @@ coverage slot        100 ms
 retained bins        up to 1200 / instance
 scope                current MCP session
 ```
+
+Song Memory is not yet partitioned by a stable project ID. After a project switch/reopen while MCP keeps running, retained state must be treated as potentially belonging to an earlier project until exact identity is available or the MCP session is restarted.
 
 Keep data-quality concepts separate:
 
@@ -268,6 +303,8 @@ The feature mask / retained field availability is authoritative. Disabled or unm
 
 For historical range evidence, use what was actually retained in that pass. Do not use the **current** live Analysis Profile as proof of what was measured earlier.
 
+Before reusing historical project-level evidence across a reopen/switch, inspect `audio_project_identity_status()` and require a trustworthy external project identity or a clean MCP session boundary.
+
 ## 7. Choose the smallest evidence tool
 
 Recent stable single track:
@@ -330,6 +367,8 @@ Use comparable passages and feature availability.
 
 Snapshot deltas are `After - Before`.
 
+Snapshots are MCP-session memory and are not currently tagged with a stable project identity. Do not compare a snapshot created before a project switch/reopen with a new snapshot unless an authoritative external project identity proves they belong together.
+
 Snapshots are still recent-window evidence and are not a substitute for transport-anchored same-range verification when the exact DAW passage matters.
 
 ## 9. Closed-loop verification
@@ -376,6 +415,8 @@ A higher cumulative dropped-block count in the selected After evidence is a data
 
 Do **not** report arbitrary-range LUFS-I delta. Current retained `lufs_i_latest` is pass-cumulative, not an isolated integrated loudness for the requested sub-range.
 
+A same-range verification session is not proof of persistent project identity. Do not carry it across a suspected project switch/reopen unless external project identity is authoritative.
+
 ### 9.2 Recent-window verification
 
 Fallback when explicit retained range anchoring is unavailable/unnecessary:
@@ -413,6 +454,12 @@ Detailed rules: `references/verification-evidence.md`.
 
 Always keep these distinct:
 
+- runtime UUID != persistent project ID.
+- runtime UUID != persistent track ID.
+- a new runtime UUID != proof of a different project.
+- same project reopened != same runtime UUID.
+- current-session Mixer/Slot binding != persistent track identity.
+- MCP session memory != project-isolated persistent memory.
 - Sample Peak != True Peak.
 - RMS != LUFS.
 - LUFS-S != LUFS-I.
@@ -445,6 +492,7 @@ AI Audio Analyzer MCP owns:
 ```text
 measure
 read Analyzer state
+disclose current project/runtime identity guarantees
 remember transport-aligned evidence
 infer explainable structural boundaries / neutral recurrence families
 summarize Track Story
@@ -459,6 +507,7 @@ The DAW-control MCP owns:
 
 ```text
 DAW topology / exact project data
+stable project identity when available
 markers / Playlist / arrangement metadata when exposed
 plugin access
 all non-Analyzer artistic/technical writes
@@ -466,13 +515,14 @@ actual host-state readback for those writes
 transaction / rollback when implemented by that layer
 ```
 
-Never invent control tools, write success, readback values, track roles, semantic section labels, or processing certainty.
+Never invent project identity, control tools, write success, readback values, track roles, semantic section labels, or processing certainty.
 
 ## 12. Output discipline
 
 When using Analyzer evidence, include enough provenance to audit the claim:
 
 ```text
+project identity confidence when cross-session/reopen continuity matters
 selector / runtime context
 DAW-time range + selected local epoch when retained evidence is used
 section_id / family_id / map_id when structure is used
