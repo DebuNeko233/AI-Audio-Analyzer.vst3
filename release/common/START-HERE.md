@@ -2,100 +2,130 @@
 
 [English guide](INSTALL.en.md) | [中文教程](INSTALL.zh-CN.md) | [Agent / MCP setup](MCP-SETUP.md)
 
-This package is designed for users who have never used Python, a terminal, or programming tools.
-
-You only need to **unzip the downloaded Release once** and run the installer inside.
+This Release is designed for users with no Python or programming experience. **Unzip the downloaded package once**, then run the installer inside.
 
 ## Windows
 
 1. Download the file ending in `Windows.zip`.
-2. Right-click the ZIP and choose **Extract All**.
+2. Right-click it and choose **Extract All**.
 3. Open the extracted folder.
 4. Double-click `Install.cmd`.
-5. Approve the Windows permission prompt if it appears.
-6. Wait until the installer says **Installation completed successfully**.
+5. Approve the permission prompt if Windows shows one.
+6. Wait for **Installation completed successfully**.
 7. Restart FL Studio and rescan plugins if needed.
-8. Open `MCP-SETUP.md` and add the generated MCP configuration to the Agent/Assistant that will use Analyzer.
-9. Import the packaged `skill` folder for the same Agent/Assistant.
+8. Follow `MCP-SETUP.md` to add the generated MCP configuration to the Agent/Assistant that will use Analyzer.
+9. Import the packaged `skill` folder for that same Agent/Assistant.
 
 ## macOS Apple Silicon
 
 1. Download the file ending in `macOS.zip`.
-2. Double-click the ZIP to extract it.
+2. Double-click it to extract it.
 3. Open the extracted folder.
 4. Double-click `Install.command`.
 5. If macOS blocks it, right-click `Install.command` and choose **Open**.
-6. Wait until the installer says **Installation completed successfully**.
+6. Wait for the installer to report success.
 7. Restart FL Studio and rescan plugins if needed.
-8. Open `MCP-SETUP.md` and add the generated MCP configuration to the Agent/Assistant that will use Analyzer.
-9. Import the packaged `skill` folder for the same Agent/Assistant.
+8. Follow `MCP-SETUP.md` and import the packaged `skill` folder for the same Agent.
 
-Current macOS Release supports **Apple Silicon (arm64) only**. Intel Macs are not supported by the packaged Release.
+Current macOS Release supports **Apple Silicon arm64 only**. It is ad-hoc signed, not Apple Developer ID notarized.
 
 ## What is inside
 
 ```text
 AI Audio Analyzer.vst3
-mcp/                         standalone Analyzer MCP executable
+mcp/                         standalone one-file MCP executable
 skill/                       Cherry Studio / LLM Skill
 Install.cmd / Install.ps1    Windows installer
 Install.command / install.sh macOS installer
 START-HERE.md
-MCP-SETUP.md                 Agent/MCP setup + copyable JSON examples
+MCP-SETUP.md
 INSTALL.en.md
 INSTALL.zh-CN.md
 VERSION.txt
 LICENSE
 ```
 
-There is **no MCP Python source code** in the user Release. There is also no Python environment, requirements file, PyInstaller `_internal` tree, developer source configuration example, or nested Release ZIP.
+The user Release contains **no MCP Python source**, `requirements.txt`, venv, PyInstaller `_internal`, developer source config, or nested Release ZIP.
 
-After installation, the installer tells you where to find the generated `cherry-studio-mcp.json`, `MCP-SETUP.md`, and installed Skill folder. The generated JSON contains the correct absolute MCP executable path for your computer.
+The installer generates `cherry-studio-mcp.json` with the correct absolute path to the installed MCP executable.
 
-AI Audio Analyzer 1.2 adds DAW-time Song Memory so the Agent can query audio evidence after the passage has already played. The MCP can build an explainable section map and group recurring sections into neutral A/B/C families. It can use `audio_track_story()` to summarize how one Analyzer track changes across those sections, and `audio_section_relationships()` to return a bounded shortlist of track pairs whose measured relationship changes across sections/families while keeping missing coverage explicit. A/B/C families are **not automatic Verse/Chorus/Drop labels**. Track Story does not infer Bass/Vocal/Drums roles, and relationship `shortlist_priority` is only an inspection-ranking heuristic—not a masking/mix-problem probability or processing instruction. Exact DAW/project metadata remains authoritative when available.
+## What the Agent can do
 
-Analysis Profiles (`Eco`, `Balanced`, `Mix`, `Full`) reduce unnecessary Analyzer work in projects with many plugin instances. They affect measurement computation only and do not change the audio. Current Analyzer MCP can change a live Analyzer's own Analysis Profile through its local control channel and receive an explicit acknowledgement. This control is intentionally limited to Analyzer measurement workload; all sound-changing DAW/plugin parameters still belong to the actual DAW-control MCP.
+MCP 1.2 exposes **41 tools** for measurement and evidence workflows, including:
 
-Current MCP 1.2 exposes **38 tools**.
+```text
+Song Memory
+explainable Section Map
+Track Story
+Section-aware Mix Relationships
+Analysis Profile control
+recent-window verification
+transport-anchored same-range verification
+```
+
+When verifying a real DAW/plugin change over a known musical passage, the Agent can now use:
+
+```text
+audio_begin_range_verification(...)
+-> external DAW-control write + actual host readback
+-> replay returned effective_range
+audio_complete_range_verification(...)
+```
+
+This compares the same retained DAW-time range before and after. The range is normalized to one-second Song Memory bins, different Analyzer instances may use different local transport epochs, and pre-change memory cannot silently be reused as the After pass.
+
+`controlled_comparison=true` means only that technical comparability checks passed. `closed_loop_complete=true` additionally requires actual caller-supplied host readback. Neither means the change sounds better.
+
+A/B/C section families are not automatic Verse/Chorus/Drop labels. Track Story does not infer Bass/Vocal/Drums roles. Relationship `shortlist_priority` is not a masking/mix-problem probability or processing instruction.
+
+Analysis Profiles (`Eco`, `Balanced`, `Mix`, `Full`) affect Analyzer computation only. All sound-changing DAW/plugin writes still belong to the actual DAW-control MCP.
 
 ---
 
 # 中文快速说明
 
-这个 Release 按“**完全没接触过编程也能安装**”设计。
-
-你不需要安装 Python，不需要 pip，不需要打开命令行，也不需要理解 MCP 源码。
+这个 Release 按“**完全没接触过编程也能安装**”设计。你不需要安装 Python、pip 或开发环境。
 
 ## Windows
 
-1. 下载名称以 `Windows.zip` 结尾的文件；
-2. 右键 ZIP → **全部解压缩**；
+1. 下载 `Windows.zip`；
+2. 右键 → **全部解压缩**；
 3. 打开解压后的文件夹；
 4. 双击 `Install.cmd`；
-5. Windows 弹出权限确认时点击允许；
-6. 等待显示 **Installation completed successfully**；
-7. 重启 FL Studio，需要时重新扫描插件；
-8. 打开 `MCP-SETUP.md`，把安装器生成的 MCP 配置加入实际要使用 Analyzer 的 Agent/Assistant；
-9. 把 `skill` 文件夹导入给同一个 Agent/Assistant。
+5. 等待显示 **Installation completed successfully**；
+6. 重启 FL Studio，需要时重新扫描插件；
+7. 按 `MCP-SETUP.md` 把安装器生成的 MCP 配置加入实际使用 Analyzer 的 Agent；
+8. 把 `skill` 文件夹导入给同一个 Agent。
 
 ## macOS Apple Silicon
 
-1. 下载名称以 `macOS.zip` 结尾的文件；
+1. 下载 `macOS.zip`；
 2. 双击 ZIP 解压；
-3. 打开解压后的文件夹；
-4. 双击 `Install.command`；
-5. 如果 macOS 阻止运行，右键 `Install.command` → **打开**；
-6. 等待显示安装成功；
-7. 重启 FL Studio，需要时重新扫描插件；
-8. 打开 `MCP-SETUP.md`，把安装器生成的 MCP 配置加入实际要使用 Analyzer 的 Agent/Assistant；
-9. 把 `skill` 文件夹导入给同一个 Agent/Assistant。
+3. 打开文件夹并双击 `Install.command`；
+4. 若 macOS 阻止运行，右键 `Install.command` → **打开**；
+5. 等待安装成功；
+6. 重启 FL Studio，需要时重新扫描插件；
+7. 按 `MCP-SETUP.md` 配置 MCP，并导入同一个 `skill` 文件夹。
 
-当前 macOS Release **只支持 Apple Silicon / arm64**，不提供 Intel Mac 包。
+当前 macOS Release **只支持 Apple Silicon / arm64**。
 
-安装完成后，安装器会显示 `cherry-studio-mcp.json`、`MCP-SETUP.md` 和 Skill 文件夹的位置。生成的 JSON 已写好本机 MCP 可执行文件的真实绝对路径。
+安装器会生成包含真实 MCP 可执行文件绝对路径的 `cherry-studio-mcp.json`。
 
-AI Audio Analyzer 1.2 支持 DAW 时间轴 Song Memory，LLM 即使晚几秒读取也能查询已经播放过的证据；同时 MCP 可以生成可解释的歌曲 Section Map，并把重复结构归为中性的 A/B/C 家族。之后 `audio_track_story()` 可以把某一个 Analyzer 实例在各个 Section 中的活动度、能量、频谱、立体声、时间变化和覆盖质量整理出来；`audio_section_relationships()` 则会有界筛出“哪些轨道组合在某个 Section/Family 值得继续检查”。**A/B/C 不等于自动识别的 Verse/Chorus/Drop，Track Story 不会自动把轨道判成 Bass/Vocal/Drums，relationship 的 `shortlist_priority` 也只是检查优先级，不是 Masking/Mix Problem 概率或处理指令**。如果 DAW/工程里有精确 Marker、Track Name 等信息，应优先使用真实工程信息。
+当前 MCP 1.2 共 **41 个工具**，包括 Song Memory、Section Map、Track Story、Section-aware Relationships、Analysis Profile Control，以及 Recent-window / Transport-anchored Same-range 两种验证路径。
 
-`Eco / Balanced / Mix / Full` Analysis Profile 只控制 Analyzer 的测量计算量，不会改变声音。当前 Analyzer MCP 可以通过本机控制通道修改 live Analyzer 自己的 Analysis Profile，并收到明确 ACK；这个写入范围只限 Analyzer 的测量负载，任何会改变声音或工程状态的 DAW/插件参数仍由真正的 DAW Control MCP 负责。
+对于已知的歌曲时间范围，优先使用：
 
-当前 MCP 1.2 共提供 **38 个工具**。
+```text
+audio_begin_range_verification(...)
+-> 外部 DAW-control MCP 修改并回读真实宿主状态
+-> 重放返回的 effective_range
+audio_complete_range_verification(...)
+```
+
+它会按同一个 DAW 时间范围比较 Before/After，并阻止把修改前旧 Song Memory 偷偷当成 After。
+
+`controlled_comparison=true` 只表示技术可比性通过；`closed_loop_complete=true` 还要求真实 Host Readback。两者都不表示 After 在艺术上更好。
+
+A/B/C 不是自动 Verse/Chorus/Drop；Track Story 不自动判断轨道角色；Relationship Shortlist 也不是 Masking/Mix Problem 概率。
+
+`Eco / Balanced / Mix / Full` 只改变 Analyzer 测量计算量，不改变声音。所有真正改变声音或工程的参数仍由 DAW-control MCP 负责。

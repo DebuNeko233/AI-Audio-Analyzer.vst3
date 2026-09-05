@@ -6,7 +6,7 @@ User-facing Release packages are created by:
 .github/workflows/release.yml
 ```
 
-The normal `build` workflow is for development validation/artifacts. It is not the user distribution path.
+The normal `build` workflow is for development validation/artifacts, not final user distribution.
 
 Current product target:
 
@@ -15,27 +15,25 @@ AI Audio Analyzer 1.2.0
 MCP 1.2
 OSC analysis protocol 1.2
 Analyzer control protocol local revision 1
-38 MCP tools
+41 MCP tools
 ```
 
 ## Release audience
 
-The GitHub Release is designed for people who may have **no programming experience at all**.
+GitHub Release is designed for users with **no programming experience**.
 
-Expected user flow:
+Expected flow:
 
 ```text
-download one ZIP
-→ extract once
-→ double-click installer
-→ restart FL Studio
-→ add generated MCP config to the intended Agent
-→ import/use the Skill with the same Agent
+download one platform ZIP
+-> extract once
+-> double-click installer
+-> restart/rescan FL Studio if needed
+-> add generated MCP config to the intended Agent
+-> import the packaged Skill for the same Agent
 ```
 
-Do not require users to install or understand Python, pip, venv, PyPI, source code, build tools, command-line package managers, or repository structure.
-
-The package must include `MCP-SETUP.md`, which explains how to attach the installed MCP server to an MCP-capable Agent/client and provides copyable Windows/macOS JSON examples. The installer-generated `cherry-studio-mcp.json` remains preferred because it contains the real absolute executable path for that computer.
+Do not require Python, pip, venv, source code, build tools, package managers, or repository knowledge.
 
 ## Supported targets
 
@@ -44,25 +42,31 @@ Windows x64
 macOS Apple Silicon arm64
 ```
 
-Intel/x86_64 macOS is intentionally not packaged.
+Intel/x86_64 macOS is not packaged.
 
 ## MCP runtime
 
-The MCP executable is built with PyInstaller one-file mode:
+Release MCP uses PyInstaller one-file mode:
 
 ```text
 -F / --onefile
 ```
 
-Build-time source entrypoint remains:
+Stable source entrypoint:
 
 ```text
 mcp/server.py
 ```
 
-MCP 1.2 imports all required feature modules, including:
+Runtime modules include:
 
 ```text
+analyzer_core.py
+project_tools.py
+temporal_tools.py
+masking_tools.py
+stereo_tools.py
+semantic_tools.py
 performance_tools.py
 control_tools.py
 song_tools.py
@@ -70,18 +74,19 @@ section_tools.py
 track_story_tools.py
 section_relationship_tools.py
 verification_tools.py
+range_tools.py
+range_verification_tools.py
 ```
-
-into the single executable. Python may be used by the build pipeline, but the **user package must not contain MCP Python source or repository test code**.
 
 Repository-only regressions include:
 
 ```text
 mcp/ci_regression.py
 mcp/relationship_regression.py
+mcp/range_verification_regression.py
 ```
 
-They must never be shipped to ordinary users.
+Regression/test Python files must never be shipped to ordinary users.
 
 ## User package layout
 
@@ -126,151 +131,133 @@ requirements.txt
 cherry-studio.example.json
 venv/
 _internal/
-mcp/ci_regression.py
-mcp/relationship_regression.py
+repository regression/test scripts
 inner Release ZIP files
 ```
 
-`MCP-SETUP.md` is beginner-facing installation material, not a developer source configuration file, and is required in the Release.
-
-## Licensing
-
-AI Audio Analyzer project code is released under the **MIT License**. The repository-root `LICENSE` file is authoritative and must be copied unchanged into every Windows and macOS user package.
-
-Third-party components retain their own licenses.
+`MCP-SETUP.md` and `LICENSE` are required.
 
 ## Single-compression rule
 
-Platform jobs stage ordinary directories. The publish job downloads those directories and creates each final Release ZIP exactly once.
+Platform jobs stage ordinary directories. The publish job creates each final user ZIP exactly once.
 
-The final Release ZIP must not contain another `.zip` file. GitHub Actions artifacts are transport containers only, not another user-facing archive layer.
+A final Release ZIP must not contain another `.zip` file. GitHub Actions artifacts are transport containers only.
 
 ## Required validation
 
-Before publication, verify at least:
+Before publication verify at least:
 
 ```text
-source MCP syntax/self-test
-MCP 1.2 exact 38-tool registry
-Analyzer control revision 1 parser / deterministic candidate-port regression
-historical measurement/evidence regressions
-transport 1.2 parser + Song Memory regressions
-transport epoch separation / coverage regressions
-section-boundary + recurring-family synthetic regression
-end-to-end section tools through real OSC parser/Song Memory
-cross-instance section alignment with different epoch IDs
-Track Story synthetic adjacent-delta / low-coverage / family-spread regression
-Track Story end-to-end regression on a section map with different per-instance epoch IDs
-Section Relationship bounded-shortlist / low-coverage self-test
-Section Relationship end-to-end regression with pair appearance/disappearance across families and different per-instance epoch IDs
-closed-loop verification positive/negative regressions
+source MCP py_compile/self-test
+MCP 1.2 exact 41-tool registry
+Analyzer control revision 1 regression
+historical evidence regressions
+transport parser + Song Memory coverage/epoch regressions
+section boundary/recurrence regressions
+Track Story regression
+Section Relationship regression
+recent-window verification regressions
+transport-range verification regression
+range normalization / coverage-first pass selection
+post-baseline After freshness fence
+cross-instance different-epoch same-range comparison
 adaptive Full/Eco validity regressions
 PyInstaller -F one-file build
-packaged MCP native self-test
-no PyInstaller _internal tree
+packaged runtime native self-test
+no _internal tree
 Windows x64 VST3 build
 macOS arm64 VST3 build/signature
-Analyzer profile-control receiver builds on both supported VST3 targets
 Windows installer parse
 macOS installer syntax
-MCP-SETUP.md present in both staged/final packages
-MIT LICENSE present in both staged/final packages
+MCP-SETUP.md + LICENSE present
 no MCP source/developer/test files
 no nested ZIP
 final checksums
 Release draft/prerelease/public state matches workflow inputs
 ```
 
-`-F / --onefile` is a Release invariant. If `_internal/` appears in staged/final user content, the package is invalid.
+A successful source self-test alone does not prove PyInstaller, VST3, package assembly, or publication succeeded.
 
-A successful source self-test does not prove PyInstaller, VST3, package assembly, asset upload, or publication state succeeded.
+## Analysis Profile note
 
-## Adaptive-analysis and Analyzer-owned control note
+Release notes may explain `Eco / Balanced / Mix / Full` as Analyzer measurement-performance profiles only.
 
-Release notes may explain:
+`audio_set_analysis_profile()` and `audio_set_project_analysis_profile()` may change only Analyzer's own `analysis_profile` parameter through loopback-only local control with explicit ACK.
 
-```text
-Eco
-Balanced
-Mix
-Full
-```
+Keep `control_acknowledged` distinct from `telemetry_confirmed`.
 
-Keep the explanation user-oriented:
+Do not market `worker_load_ratio` as DAW realtime audio-thread CPU or claim fixed CPU reduction percentages.
 
-- profiles affect Analyzer measurement workload only;
-- they do not change/process the audio;
-- Full remains the compatibility default;
-- `audio_set_analysis_profile()` can change one live Analyzer's own profile;
-- `audio_set_project_analysis_profile()` can change selected/all live Analyzer profiles;
-- control is loopback-only, runtime-UUID addressed, and returns an explicit ACK;
-- profile application occurs outside the realtime audio callback;
-- no extra installation step is required.
+This Profile control is the only Analyzer MCP write exception. All sound/project writes remain external.
 
-Keep `control_acknowledged` distinct from `telemetry_confirmed`: ACK proves the live VST3 accepted/applied the request, while telemetry confirmation requires a measurement frame reporting the requested profile.
+## Song Memory / structure / relationship note
 
-Do not market `worker_load_ratio` as DAW audio-thread CPU. Do not imply a fixed CPU reduction percentage.
-
-The Analyzer-owned profile control is the **only Analyzer MCP write exception**. It must never be broadened into general DAW/plugin control. EQ, compression, gain, pan, routing, automation, synth parameters, project edits and other sound-changing/technical writes remain the responsibility of the actual DAW-control MCP.
-
-Older VST3 builds that do not implement control revision 1 must time out cleanly; never report a write as successful without ACK.
-
-## Transport-aware Song Memory user-facing note
-
-MCP/OSC 1.2 provides latency-resilient whole-song context:
+MCP/OSC 1.2 provides transport-aware retained evidence:
 
 ```text
 audio_song_status
 audio_song_overview
 audio_song_timeline
-```
-
-Release notes may explain:
-
-- Analyzer remembers measured evidence against the DAW timeline while the LLM is thinking or using other tools;
-- playback starts/seeks/loop jumps create separate continuous playback epochs;
-- the worker exposes estimated Analyzer backlog and dropped-block telemetry;
-- Song Memory uses observed coverage and is bounded/session-scoped;
-- transport coordinates are suitable for whole-song/section reasoning, not sample-accurate editing.
-
-Do not market `estimated_analysis_lag_ms` as total Agent/network latency. Do not claim Song Memory removes all latency; it makes delayed perception **recoverable and auditable**.
-
-## Explainable structure, Track Story, and section-aware relationships user-facing note
-
-The current MCP 1.2 runtime additionally exposes:
-
-```text
 audio_section_map
 audio_section_profile
 audio_track_story
 audio_section_relationships
-38 total MCP tools
 ```
 
-These layers consume existing Song Memory and therefore do not change OSC analysis protocol 1.2.
+User-facing claims must preserve:
 
-Release notes may explain:
+- Song Memory is bounded and MCP-session scoped;
+- transport epochs are instance-local;
+- transport coordinates are not sample-accurate;
+- missing coverage is not silence;
+- A/B/C recurrence families are not automatic Verse/Chorus/Drop names;
+- Track Story does not infer Bass/Vocal/Drums roles or prescribe processing;
+- relationship `shortlist_priority` is an inspection heuristic, not masking/mix-problem probability or quality;
+- detailed masking/stereo/temporal pair tools remain recent-window based.
 
-- Analyzer can identify section-scale change points from multiple measured evidence families;
-- repeated sections can be grouped into neutral A/B/C/... structural families;
-- section profiles expose per-track evidence for a selected song range;
-- Track Story follows one Analyzer instance across the map and reports coverage-aware section observations, adjacent-section deltas, recurring-family per-dimension variation and relative extrema;
-- section-aware relationships provide a bounded project-level shortlist of track pairs whose measured relationship appears, disappears, or changes across sections/families;
-- relationship evidence preserves each track's selected instance-local epoch, coverage, activity, RMS/stereo context and B-minus-A directional descriptors;
-- `shortlist_priority` is an inspection-ranking heuristic only, not a masking/mix-problem probability, quality score, or processing recommendation;
-- current detailed masking/stereo/temporal pair tools are recent-window based, so a historical target section should be replayed/selected before those tools are presented as deeper evidence for that section;
-- supporting/target tracks are matched by overlapping DAW time rather than requiring equal instance-local epoch numbers;
-- a Track Story target can resolve its own best-overlapping retained epoch even when it was not part of the map's original supporting-track set;
-- missing Song Memory or insufficient pair coverage is reported as missing evidence rather than interpreted as silence/inactivity/structure/conflict;
-- the feature is explainable and lightweight; no neural structure/relationship model is required for this implementation.
+## Closed-loop verification note
 
-Do **not** market A/B/C as automatic Verse/Chorus/Drop detection. Do not market Track Story as automatic Bass/Vocal/Drums role recognition or as an automatic processing recommender. Do not market a relationship shortlist as a confirmed masking/problem detector. Exact DAW markers/project labels/track names remain authoritative when available. Boundary strength, family similarity, Track Story comparisons and relationship priorities are descriptive/heuristic evidence, not calibrated probabilities or artistic judgments.
+MCP 1.2 now contains **two** verification paths.
+
+Recent-window compatibility path:
+
+```text
+audio_begin_verification
+audio_complete_verification
+audio_verification_status
+```
+
+Transport-anchored same-range path:
+
+```text
+audio_begin_range_verification
+audio_complete_range_verification
+audio_range_verification_status
+```
+
+For a known musical passage, Release/Skill docs should prefer the same-range path.
+
+Same-range public semantics:
+
+- requested fractional boundaries remain visible;
+- actual `effective_range` is normalized to one-second Song Memory bins;
+- each Analyzer selects its own best retained epoch by coverage first, then recency;
+- equal epoch numbers across tracks are not required;
+- After must come from a clean retained pass first observed after the frozen receive-time fence;
+- old Before memory cannot silently become After;
+- historical feature comparability uses retained field availability rather than the current live Profile;
+- higher selected After dropped-block evidence blocks a controlled comparison;
+- `active_ratio` is descriptive and not used as passage identity in same-range mode;
+- arbitrary-range LUFS-I delta is intentionally unavailable because current retained `lufs_i_latest` is pass-cumulative, not isolated range-integrated loudness;
+- actual external host readback is still required for `closed_loop_complete=true`.
+
+Never market `controlled_comparison=true` as “the change is better”. It means technical comparability only.
+
+Never market `closed_loop_complete=true` as artistic success. It additionally means caller-supplied actual host readback was present.
 
 ## Analyzer control protocol compatibility
 
-The Analyzer-owned profile-control path is separate from `/aianalyzer/frame` and must not repurpose or append analysis-frame indexes merely to support control.
-
-Current control contract:
+Analyzer Profile control is separate from `/aianalyzer/frame`.
 
 ```text
 transport       UDP loopback only
@@ -280,37 +267,21 @@ identity        live runtime UUID
 ACK             explicit request-scoped acknowledgement
 ```
 
-The analysis OSC frame remains protocol 1.2 with existing indexes `0..149` unchanged.
-
-## Closed-loop verification note
-
-The Release includes controlled measurement verification around changes made by an external DAW-control MCP.
-
-Do not market `controlled_comparison=true` as “the change is better”. It only means technical comparability guardrails passed.
-
-`closed_loop_complete=true` additionally requires caller-supplied actual host readback; it still does not mean artistic success.
-
-Current verification remains recent-window based; do not claim transport-anchored same-range verification until implemented.
+OSC analysis frame remains append-only 1.2 with existing indexes `0..149` unchanged by Track Story, relationships, or range verification.
 
 ## Draft / prerelease semantics
 
-`draft=true` means the Release is intentionally a **Draft**. It is not public and does not become GitHub's Latest release.
+`draft=true` means the Release is a Draft and is not public/Latest.
 
-When a tag already exists, the workflow must synchronize assets, notes, draft state and prerelease state. Rerunning the same tag with Draft OFF should explicitly publish an existing Draft when requested.
-
-## Historical Release-pipeline validation record
-
-The beginner packaging pipeline has been exercised on both supported platforms, including PyInstaller `-F`, native runtime self-tests, VST3 builds, source/`_internal`/nested-ZIP rejection, final compression, checksums and asset upload.
-
-Packaging success and public publication state remain separate concerns.
+When rerunning an existing tag, assets, notes, draft state and prerelease state must be synchronized with workflow inputs.
 
 ## macOS signing
 
-Current macOS builds are ad-hoc signed and are **not Apple Developer ID notarized**. Documentation must not claim notarization until the workflow really performs and verifies it.
+Current macOS builds are ad-hoc signed and are **not Apple Developer ID notarized**. Do not claim notarization until the workflow performs and verifies it.
 
 ## Documentation rule
 
-When Release layout, version metadata, installation behavior, publication semantics, tool count or public capability changes, review together:
+When Release layout, metadata, installation behavior, tool count or public capability changes, review together:
 
 ```text
 release/common/START-HERE.md
@@ -325,4 +296,4 @@ AGENT.md
 skills/ai-analyzer-flstudio/*
 ```
 
-User-facing Release docs should explain what the person needs to click and how to attach the generated MCP configuration to the intended Agent, not how the software was built.
+Not every file needs modification. User-facing Release docs should explain what users need to click/use, not internal build complexity.

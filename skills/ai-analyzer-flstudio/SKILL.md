@@ -1,26 +1,26 @@
 ---
 name: ai-analyzer-flstudio
-description: Technical usage skill for Cherry Studio + AI Audio Analyzer MCP. Teaches deterministic Analyzer discovery/binding, adaptive Analysis Profile control, transport-aware Song Memory, explainable song-section structure, Track Story across sections, bounded section-aware relationship shortlisting, latency/data-quality handling, measurement validity, evidence semantics, performance telemetry, and controlled Before/After verification around externally controlled DAW changes. It does not prescribe a mixing style, LUFS target, EQ/compression/sidechain/stereo recipe, semantic section label, key change, harmony edit, or aesthetic decision.
+description: Technical usage skill for Cherry Studio + AI Audio Analyzer MCP. Teaches deterministic Analyzer binding, adaptive Analysis Profile control, transport-aware Song Memory, explainable song structure, Track Story, bounded section-aware relationships, measurement validity, performance telemetry, recent-window verification, and transport-anchored same-range verification around externally controlled DAW changes. It does not prescribe a mixing style, LUFS target, EQ/compression/sidechain/stereo recipe, semantic section label, key change, harmony edit, or aesthetic decision.
 ---
 
 # AI Audio Analyzer MCP Usage Skill
 
-Use this Skill for two things only:
+Use this Skill to:
 
 1. call **AI Audio Analyzer MCP** correctly;
-2. interpret returned measurements/evidence without overstating them.
+2. interpret its evidence without overstating it.
 
-It is **not** a mixing, mastering, harmony, arrangement, tuning, or style guide. Measurements, section families, Track Story, relationship shortlists, transport memory, and Analysis Profiles do not imply a mandatory processor, parameter value, semantic section name, track role, key change, chord edit, stereo action, or aesthetic choice.
+It is not a mixing/mastering style guide. Analyzer measurements do not imply a mandatory processor, parameter value, section name, track role, chord/key edit, stereo action, or aesthetic choice.
 
-## 1. Start with project state
+## 1. Start high-level
 
-For a project-level request, begin with:
+For project work begin with:
 
 ```text
 audio_project_status()
 ```
 
-Use it to check Bridge/OSC health, live instances, deterministic bindings, active input, stale streams, duplicate names, and Master candidates.
+Use it to check Bridge/OSC health, live instances, deterministic bindings, stale streams, duplicate names, and project readiness.
 
 Only descend when needed:
 
@@ -30,17 +30,13 @@ audio_list_tracks()
 audio_instance_map()
 ```
 
-Do not call every tool mechanically.
-
-For a **whole song, a past passage, section-to-section evolution, or mixing/mastering work where Agent/tool latency matters**, next call:
+For whole-song, past-passage, section, or latency-sensitive work next use:
 
 ```text
 audio_song_status()
 ```
 
-The Analyzer observes continuously; the LLM does not need to observe continuously.
-
-If enough of the intended pass has been captured, prefer a structural compression step before requesting raw timeline detail:
+If enough of the intended pass has been captured, prefer structural compression:
 
 ```text
 audio_section_map()
@@ -49,23 +45,18 @@ audio_section_map()
 Then choose the smallest follow-up:
 
 ```text
-audio_track_story(track, map_id)          # one track across the structure
+audio_track_story(track, map_id)          # one track across sections
 audio_section_profile(section_id, map_id) # many tracks inside one section
-audio_section_relationships(map_id)       # bounded pair shortlist across sections/families
+audio_section_relationships(map_id)       # bounded cross-track shortlist
 ```
 
-Use `audio_song_timeline()` only when the question still requires raw DAW-time evolution.
+Use `audio_song_timeline()` only when raw DAW-time evolution is still required.
 
-If the request involves many Analyzer instances, CPU/load concerns, or a measurement family that may be disabled, also inspect:
-
-```text
-audio_project_performance()
-audio_analysis_status(track)
-```
+Do not call all 41 tools mechanically.
 
 ## 2. Deterministic Analyzer ↔ FL Mixer mapping
 
-The VST3 exposes:
+Host-visible parameter:
 
 ```text
 Parameter ID: identify
@@ -73,640 +64,261 @@ Display name: Identify
 Type: Boolean
 ```
 
-When an Analyzer is unbound and the connected FL Studio control MCP can access plugin parameters:
+Preferred discovery flow:
 
 ```text
-find the real Mixer Track / Plugin Slot
-→ read current Identify value
-→ toggle Identify
-→ audio_last_identify()
-→ verify fresh + unconsumed event
-→ audio_bind_last_identified(fl_track_index, fl_track_name, slot)
-→ audio_instance_map()
+locate real Mixer Track / Plugin Slot with the DAW-control MCP
+-> read current Identify value
+-> toggle Identify
+-> audio_last_identify()
+-> verify fresh + unconsumed event
+-> audio_bind_last_identified(fl_track_index, fl_track_name, slot)
+-> audio_instance_map()
 ```
 
-One Identify event may be consumed only once.
-
-Preferred selector order:
+Preferred selectors:
 
 ```text
 mixer:<index>/slot:<slot>
-→ unique FL Mixer track name
-→ runtime UUID
-→ unique Analyzer display name
+-> unique FL Mixer track name
+-> runtime UUID
+-> unique Analyzer display name
 ```
 
-If multiple Analyzer instances exist on one Mixer Track, include `slot`.
+Never guess instance mapping from spectrum, chroma, or musical role when Identify is available.
 
-Never guess mapping from track names, spectrum, chroma, or musical content when Identify is available.
+Runtime UUIDs and bindings are session-scoped.
 
-## 3. Analysis Profile is an Analyzer-owned performance control
-
-The VST3 exposes:
+## 3. Analysis Profile is a measurement-performance control
 
 ```text
 Parameter ID: analysis_profile
 Display name: Analysis Profile
-Choices:
-0 Eco
-1 Balanced
-2 Mix
-3 Full
+
+0 Eco       Core
+1 Balanced  Core + Loudness + Spectrum + Stereo
+2 Mix       Balanced + Temporal
+3 Full      Mix + Semantic
 ```
 
-Profile groups:
+`Full` is the compatibility default.
+
+Profiles change Analyzer computation only. They do not change the audio signal or artistic quality.
+
+Minimum profile examples:
 
 ```text
-Eco       Core
-Balanced  Core + Loudness + Spectrum + Stereo
-Mix       Balanced + Temporal
-Full      Mix + Semantic
+Transport / signal / Peak-RMS-Crest   Eco
+LUFS / True Peak                      Balanced
+Spectrum / basic masking              Balanced
+Deep Mid/Side / stereo                Balanced
+Temporal                              Mix
+Tonal / chroma / harmonic             Full
 ```
 
-`Full` is the default for backward compatibility.
-
-Profiles change **Analyzer computation**, not the audio signal and not artistic quality.
-
-Minimum profile by evidence family:
-
-```text
-Transport / Identify / signal / Peak-RMS-Crest   Eco
-LUFS / True Peak                                  Balanced
-Spectrum / basic masking                          Balanced
-Deep Mid/Side / stereo                            Balanced
-Temporal profile/compare                          Mix
-Masking with temporal interaction                 Mix
-Chroma / tonal / single-F0 evidence               Full
-```
-
-A section map, Track Story, or section-relationship shortlist can use whichever evidence was actually captured. Missing feature families remain unavailable rather than becoming zero-valued structural features.
-
-Current control-capable Analyzer builds expose:
+Analyzer-owned write tools:
 
 ```text
 audio_set_analysis_profile(track, profile)
 audio_set_project_analysis_profile(profile, tracks=None)
 ```
 
-These are the only Analyzer-owned write tools. They may change only the Analyzer's own `analysis_profile` measurement-performance parameter. They must never be used as precedent for writing EQ, compression, gain, pan, routing, synth, automation, or other artistic/project state.
+These are the **only** Analyzer-owned write tools. Never expand this exception into EQ, compression, gain, pan, routing, synth, automation, or project-state writes.
 
-Preferred temporary-escalation flow:
-
-```text
-audio_analysis_status(target)
-→ remember current profile
-→ determine the minimum required profile
-→ audio_set_analysis_profile(target, required_profile)
-→ require a successful control ACK when a change was needed
-→ when fresh frames are available, audio_analysis_status(target)
-→ verify the expected feature group
-→ collect the required measurement window/pass
-→ call the needed Analyzer evidence tool
-→ restore the previous profile when appropriate
-→ verify restored telemetry when fresh frames are available
-```
-
-The local control ACK does not require playback. Fresh Analyzer telemetry normally does, so keep these distinct:
+Keep separate:
 
 ```text
-control_acknowledged = target VST3 accepted/applied the profile request
-telemetry_confirmed  = a measurement frame also reports the requested profile
+control_acknowledged = target VST3 accepted/applied the Profile request
+telemetry_confirmed  = a fresh measurement frame reports the Profile
 ```
 
-If the Analyzer-owned control tool returns no ACK, do not assume success. The VST3 may be an older build without local control. If the connected DAW-control MCP can write the historical host-visible `analysis_profile` parameter, it may be used as a compatibility fallback, followed by Analyzer telemetry verification.
+No ACK means no confirmed change. Older VST3 builds may lack the local receiver.
 
-Do not invent FL Studio MCP tool names. Do not set every Analyzer to `Full` merely because one track needs tonal analysis.
-
-Detailed rules: `references/performance-evidence.md`.
-
-## 4. Whole-song memory and Agent latency
-
-Do **not** assume the newest Analyzer frame corresponds to the audio the user hears at the instant the LLM reads it.
-
-The chain can contain:
-
-```text
-Analyzer worker backlog
-OSC/MCP transport
-LLM reasoning
-external control tool calls
-human/host interaction
-```
-
-Protocol 1.2 addresses this by attaching DAW transport context and keeping bounded song-time memory.
+## 4. Song Memory and transport epochs
 
 Use:
 
 ```text
 audio_song_status()
 audio_song_overview()
-audio_song_timeline(track, resolution_seconds=5, ...)
+audio_song_timeline(...)
 ```
 
-Recommended whole-song flow:
+A `transport_epoch` is one **instance-local continuous playback pass**.
+
+Playback start, seek, loop jump, or another detected discontinuity may create a new epoch.
+
+Never require equal numeric epochs across independently loaded Analyzer instances. Cross-track retained analysis aligns by overlapping DAW-time coverage.
+
+Song Memory:
 
 ```text
-audio_project_status()
-→ fix mapping/readiness if necessary
-→ audio_song_status()
-→ play/capture the song or target passage
-→ allow Analyzer to keep collecting while the Agent reasons/works
-→ audio_section_map()
-→ audio_track_story() for tracks whose behavior across sections matters
-→ audio_section_profile() for sections that need multi-track drill-down
-→ audio_section_relationships() when a bounded cross-track shortlist across sections/families is useful
-→ audio_song_overview() when a compact pass-level summary helps
-→ audio_song_timeline() only when raw time evolution is still required
-→ replay/select a target historical section before using recent-window pair tools as section-specific evidence
-→ drill into Temporal / Masking / Stereo / Tonal evidence only as needed
+canonical bin size   1 second
+coverage slot        100 ms
+retained bins        up to 1200 / instance
+scope                current MCP session
 ```
 
-Do not repeatedly poll all Analyzer tools during playback just to avoid missing an event.
-
-### Transport epoch
-
-`transport_epoch` means one **instance-local continuous playback pass**.
-
-A new epoch can begin on:
-
-```text
-stopped → playing
-seek / playhead jump
-loop jump
-other detected transport discontinuity
-```
-
-The worker discards queued pre-jump FIFO audio and resets pass-dependent Loudness/Temporal/Semantic state before measuring the new epoch.
-
-Never assume equal epoch numbers from independently loaded Analyzer instances are a permanent project-wide pass identity.
-
-### Data quality
-
-Keep these distinct:
+Keep data-quality concepts separate:
 
 ```text
 estimated_analysis_lag_ms
-  Analyzer FIFO + FFT-window estimate only.
-  Not network latency and not LLM latency.
+  Analyzer FIFO + analysis-window estimate only.
 
 data_age_seconds
-  Wall-clock age of retained MCP evidence.
-  Old evidence can still be exactly the requested historical song range.
+  Wall-clock age of retained evidence.
 
 dropped_blocks
   Cumulative Analyzer FIFO push failures.
-  Non-zero means some input audio was not measured.
 
 coverage_ratio
-  Fraction of a requested/coarse interval represented by retained 100 ms coverage slots.
+  Fraction of the requested interval represented by retained coverage slots.
 ```
 
-Transport coordinates are useful for song/section reasoning, not sample-accurate edits, transient placement, or phase alignment.
+Missing coverage is not silence.
 
-Current Song Memory resolutions:
+Transport coordinates are suitable for song/section/range reasoning, not sample-accurate editing or phase alignment.
+
+## 5. Explainable structure
 
 ```text
-1 2 5 10 15 30 seconds
+audio_section_map(...)
 ```
 
-Prefer the coarsest resolution that answers the question.
+The section detector combines available retained evidence such as activity, energy/loudness, spectral balance, chroma, stereo, crest and temporal change.
 
-Detailed rules: `references/song-memory.md`.
+Returned `boundary strength` is structural novelty evidence, not a calibrated formal-boundary probability.
 
-## 5. Explainable song structure, Track Story, and section-aware relationships
-
-Use the structure layer to compress a captured song into boundaries and recurring contexts before doing detailed mix analysis.
-
-```text
-audio_section_map(
-  reference_track=None,
-  transport_epoch=None,
-  min_section_seconds=8,
-  sensitivity=0.55,
-  family_similarity=0.78,
-  max_sections=48,
-  max_tracks=32
-)
-```
-
-The detector compares multi-scale left/right contexts using available evidence from:
-
-```text
-cross-track activity
-energy / loudness
-spectral balance
-chroma
-stereo
-dynamics
-temporal change
-```
-
-Returned `boundary strength` is structural novelty evidence, not a calibrated probability.
-
-Sections are assigned neutral recurring families:
+Neutral recurring families:
 
 ```text
 S01 A
 S02 B
-S03 C
-S04 B
-S05 C
+S03 A
 ```
 
-Never automatically translate those families into:
+Never automatically translate them to Intro/Verse/Chorus/Drop.
 
-```text
-A = Intro
-B = Verse
-C = Chorus
-```
+Exact DAW markers, Playlist/arrangement labels, MIDI/project annotations, or explicit user structure are authoritative for exact names.
 
-`family_id` only means substantial structural recurrence under the current explainable model.
-
-Prefer exact DAW/project structure sources for exact names:
-
-```text
-markers
-Playlist/arrangement labels
-pattern names
-MIDI/project annotations
-explicit user-provided structure
-```
-
-If exact project metadata conflicts with Analyzer audio inference, exact project metadata wins for semantic naming.
-
-### Epoch alignment across tracks
-
-The section reference uses one requested/latest reference epoch. Supporting tracks are selected by **DAW-time coverage overlap**, not by equal numeric epoch IDs.
-
-A legitimate map may use:
-
-```text
-Master epoch 7
-Kick epoch 3
-Vocal epoch 11
-```
-
-when those passes cover the same song-time range.
-
-### Missing evidence
-
-A coverage gap is not silence and not a transition. Inspect:
-
-```text
-coverage_gaps
-reference.coverage_ratio
-warnings
-```
-
-If coverage is weak, prefer replaying the target range over lowering quality expectations merely to force a section map.
-
-### Track Story: one track across sections
-
-After a map is generated:
+### Track Story
 
 ```text
 audio_track_story(track, map_id)
 ```
 
-Use it when the question is about how one track evolves across the arrangement rather than what all tracks do inside one section.
-
-It exposes:
+Use it for one track across sections. It exposes:
 
 ```text
-section-scoped active_ratio / RMS / LUFS-S / crest
-centroid + coarse spectral regions
+activity
+RMS / LUFS-S / crest
+spectral centroid / coarse regions
 stereo correlation / width
-temporal spectral flux
-chroma + strongest pitch classes
-per-section coverage / lag / drops
-current-minus-previous section deltas
-same-family per-dimension min/max/mean/spread
-relative per-metric extrema across adequately covered sections
+temporal flux
+chroma / strongest pitch classes
+coverage / lag / drops
+current-minus-previous deltas
+same-family per-dimension variation
+relative extrema
 ```
 
-Important rules:
+Rules:
 
 ```text
 missing coverage != silence
 low active_ratio != muted
 low-frequency energy != Bass role
-centered mid-forward signal != Vocal role
-family A/B/C != Intro/Verse/Chorus
+A/B/C != Intro/Verse/Chorus
+descriptor delta != required processing move
 ```
 
-`delta_from_previous` is descriptive current-minus-previous evidence. Do not automatically translate a positive or negative delta into an inverse EQ/compression/stereo action.
+Do not invent one overall track consistency/quality score.
 
-Same-family variation remains per-dimension. Do not invent one overall "track consistency" or "quality" score.
-
-If `map_id` is omitted, the tool uses the latest cached map and can create a default map when none is available. For deterministic multi-step analysis, pass the exact `map_id` returned by `audio_section_map()`.
-
-Detailed rules: `references/track-story.md`.
-
-### Section drill-down: many tracks inside one section
+### Section-aware relationships
 
 ```text
-audio_section_profile("S02", map_id)
+audio_section_relationships(...)
 ```
 
-Use it to inspect:
+Use it to shortlist bounded track pairs across sections/families.
 
-```text
-same-family sections
-related section similarities
-per-track activity / levels / spectral / stereo / tonal summaries
-selected transport epoch for each track
-per-track data quality
-```
+`shortlist_priority` is inspection priority only. It is not masking probability, audibility probability, mix-problem probability, quality score, or a processing recommendation.
 
-Then choose only the deeper evidence that the question needs.
+Directional descriptors such as B-minus-A preserve numeric direction only; they do not say which track should be processed.
 
-### Section-aware relationships: bounded pair shortlist
+Detailed `audio_masking_evidence()`, `audio_stereo_compare()` and `audio_temporal_compare()` remain recent-window tools. Do not claim their current results describe a historical section unless the DAW is actually replaying/measuring that passage.
 
-```text
-audio_section_relationships(
-  map_id=None,
-  max_pairs=12,
-  max_tracks=32,
-  include_master=False,
-  min_activity_overlap=0.15,
-  min_shortlist_priority=0.18
-)
-```
+## 6. Validate evidence before interpreting it
 
-Use this when the question is **which track pairs change across sections/families and merit deeper inspection**, not when the user already named one exact pair and only wants a recent-window measurement.
-
-The shortlist combines available retained evidence from:
-
-```text
-common activity
-coarse spectral-shape overlap
-relative RMS proximity
-stereo-width proximity
-coverage guards
-```
-
-It is deliberately bounded:
-
-```text
-Master excluded by default
-bounded tracks considered
-bounded active/covered candidates per section
-bounded returned pairs
-```
-
-`shortlist_priority` is only an inspection-ranking heuristic. It is **not**:
-
-```text
-masking probability
-audibility probability
-mix-problem probability
-quality score
-processing recommendation
-```
-
-Preserve directional evidence such as `rms_db_b_minus_a`, `stereo_width_b_minus_a`, and `spectral_region_b_minus_a_db` as **B - A**. Direction does not imply which track should be processed.
-
-Use family presence/absence and adjacent `entered_shortlist` / `left_shortlist` / relationship-change records as context evidence only. A pair appearing in one family and disappearing in another does not prove that either section is wrong.
-
-Coverage rules:
-
-```text
-missing coverage != silence
-insufficient pair coverage != no relationship
-insufficient pair coverage must not create a false conflict
-```
-
-Current detailed `audio_masking_evidence()`, `audio_stereo_compare()`, and `audio_temporal_compare()` tools are recent-window based. They are **not yet historical Section-range tools**. Before using them as deeper evidence for a historical section:
-
-```text
-identify the target section/time range
-→ use the real DAW-control layer to select/replay that range when available
-→ collect fresh comparable recent-window evidence
-→ then call the detailed pair tool
-```
-
-Do not silently use whatever is currently playing and label it as evidence for an older section.
-
-Detailed rules: `references/section-relationships.md`.
-
-`map_id` is bounded MCP-session memory, not a persistent project ID.
-
-Detailed structure rules: `references/section-structure.md`.
-
-## 6. Validate data before interpretation
-
-For content-related measurements inspect:
+Inspect relevant validity/coverage fields:
 
 ```text
 signal_present
 analysis_valid
 active_ratio
 analysis_features
+coverage_ratio
+data_age_seconds
+estimated_analysis_lag_ms
+dropped_blocks
+warnings
 ```
 
-Signal gate is approximately:
+The feature mask / retained field availability is authoritative. Disabled or unmeasured families are unavailable, not zero.
 
-```text
-close   below -50 dBFS for ~0.4 s
-reopen  above -48 dBFS
-```
+For historical range evidence, use what was actually retained in that pass. Do not use the **current** live Analysis Profile as proof of what was measured earlier.
 
-`null` means **unavailable**, not numeric zero.
+## 7. Choose the smallest evidence tool
 
-Feature-specific validity includes:
-
-```text
-Temporal:
-  temporal_supported
-  temporal_valid
-  temporal_window_seconds
-
-Deep stereo:
-  stereo_v08_supported
-  stereo_v08_valid
-  stereo_frames
-
-Tonal / semantic:
-  semantic_v09_supported
-  semantic_v09_valid
-  valid_frames
-  evidence_quality.mean_chroma_energy_ratio
-  evidence_quality.normalized_pitch_class_entropy
-  evidence_quality.tonal_center_top2_margin
-  evidence_quality.valid_frame_ratio
-
-Transport / Song Memory:
-  transport_v12_supported
-  transport_epoch
-  estimated_analysis_lag_ms
-  dropped_blocks
-  data_quality.coverage_ratio
-
-Section structure:
-  reference.coverage_ratio
-  boundaries[].context_coverage
-  coverage_gaps
-  warnings
-
-Track Story:
-  sections[].coverage_ratio
-  sections[].evidence_available
-  sections[].data_quality
-  sections[].delta_from_previous
-  warnings
-
-Section Relationships:
-  pairs[].selected_transport_epochs
-  pairs[].section_evidence[].coverage_ratio_a
-  pairs[].section_evidence[].coverage_ratio_b
-  pairs[].section_evidence[].evidence_available
-  pairs[].section_evidence[].status
-  pairs[].family_presence
-  warnings
-```
-
-The **feature mask is authoritative**; disabled measurements are unavailable even if append-only compatibility positions physically exist.
-
-## 7. Performance telemetry
-
-Use:
-
-```text
-audio_analysis_status(track)
-audio_project_performance()
-```
-
-Important fields:
-
-```text
-analysis_profile
-analysis_features
-worker_load_ratio
-fifo_fill_ratio
-fft_runs_per_second
-semantic_runs_per_second
-```
-
-`worker_load_ratio` is the Analyzer background-worker busy ratio, not DAW realtime CPU. Sustained FIFO growth can indicate measurement lag. Do not convert performance telemetry into audio-quality judgments.
-
-## 8. Choose the smallest tool that answers the question
-
-Project readiness:
-
-```text
-audio_project_status()
-```
-
-Whole-song context:
-
-```text
-audio_song_status()
-audio_song_overview()
-```
-
-Structural compression / section-aware evolution / bounded relationships:
-
-```text
-audio_section_map()
-audio_track_story(track, map_id)
-audio_section_profile(section_id, map_id)
-audio_section_relationships(map_id)
-```
-
-Raw historical timeline only when needed:
-
-```text
-audio_song_timeline(...)
-```
-
-Project performance/control:
-
-```text
-audio_project_performance()
-audio_analysis_status(track)
-audio_set_analysis_profile(track, profile)
-audio_set_project_analysis_profile(profile, tracks=None)
-```
-
-Recent project overview:
-
-```text
-audio_mix_overview(seconds=10, max_tracks=32)
-```
-
-Stable recent single track:
+Recent stable single track:
 
 ```text
 audio_average(track, seconds=5)
 ```
 
-Current frame / connection state:
+Current frame:
 
 ```text
 audio_snapshot(track)
 ```
 
-### Temporal evidence
-
-Requires Temporal (`Mix` or `Full`):
+Temporal:
 
 ```text
-audio_temporal_profile(track, seconds=5)
-audio_temporal_compare(track_a, track_b, seconds=5, low_hz=40, high_hz=160, alignment_tolerance_ms=80)
+audio_temporal_profile(...)
+audio_temporal_compare(...)
 ```
 
-Spectral Flux and RMS Rise are change evidence, not ground-truth onset labels.
-
-### Masking evidence
-
-Spectrum requires `Balanced` or higher. Temporal interaction requires `Mix` or `Full`.
+Masking:
 
 ```text
 audio_project_masking_scan(...)
 audio_masking_evidence(...)
 ```
 
-ERB handling is re-binning, not a gammatone/cochlear filterbank. Scores are heuristic evidence, not audible-masking probabilities.
-
-Legacy spectrum-only paths remain:
+Stereo:
 
 ```text
-audio_compare_tracks(track_a, track_b)
-audio_detect_masking(track_a, track_b)
+audio_stereo_profile(...)
+audio_stereo_compare(...)
 ```
 
-### Deep stereo evidence
-
-Requires Stereo (`Balanced` or higher):
+Tonal:
 
 ```text
-audio_stereo_profile(track, seconds=5)
-audio_stereo_compare(track_a, track_b, seconds=5)
+audio_tonal_profile(...)
+audio_tonal_compare(...)
 ```
 
-Keep signed correlation, Side/Mid energy, decorrelation proxy, negative-cross evidence, and frequency-dependent stereo relation independent.
-
-### Tonal / music-semantic evidence
-
-Requires Semantic (`Full`):
+Master technical summary:
 
 ```text
-audio_tonal_profile(track, seconds=8)
-audio_tonal_compare(track_a, track_b, seconds=8)
+audio_master_status(...)
 ```
 
-Do not use audio inference to replace exact symbolic project data. Tonal-center correlation is not key probability; single-F0 evidence is not note transcription.
+These tools provide evidence, not automatic processing instructions.
 
-### Master technical summary
-
-```text
-audio_master_status(track="Master")
-```
-
-It summarizes measurements; it does not define universal mastering targets.
-
-## 9. Snapshot A/B
+## 8. Snapshot A/B
 
 ```text
 audio_capture_snapshot("before", seconds=5)
@@ -714,92 +326,119 @@ audio_capture_snapshot("after", seconds=5)
 audio_compare_snapshots("before", "after")
 ```
 
-Use comparable passages, similar windows, comparable active coverage, and the same relevant feature availability.
+Use comparable passages and feature availability.
 
-Deltas are `After - Before`.
+Snapshot deltas are `After - Before`.
 
-Snapshot tools do not independently reset Loudness. For protocol-1.2 instances, LUFS-I / pass-max True Peak accumulate inside the current transport epoch; playback start/seek/loop discontinuity creates a new epoch and Loudness state.
+Snapshots are still recent-window evidence and are not a substitute for transport-anchored same-range verification when the exact DAW passage matters.
 
-## 10. Controlled external-change verification
+## 9. Closed-loop verification
 
-Use when the Agent coordinates a real DAW modification through an external control MCP and the user wants measured verification.
+When coordinating a real DAW/plugin modification through an external control MCP, **prefer same-range verification whenever an explicit passage is known**.
+
+### 9.1 Transport-anchored same-range verification
+
+```text
+audio_begin_range_verification(
+  label,
+  start_seconds,
+  end_seconds,
+  target_selectors=None,
+  minimum_coverage=...
+)
+-> inspect ready_for_external_change / baseline_blockers
+-> external DAW-control MCP performs the real write
+-> external DAW-control MCP reads actual host state back
+-> replay the returned effective_range
+-> audio_complete_range_verification(
+     verification_id,
+     change_summary="...",
+     host_readback="..."
+   )
+```
+
+Key rules:
+
+```text
+requested fractional range != fake sub-second precision
+effective range = normalized one-second Song Memory bins
+pass selection = coverage first, recency second
+epoch IDs remain instance-local
+After must be first-observed after the frozen receive-time fence
+pre-change retained bins cannot silently become After
+missing coverage != silence
+active_ratio is descriptive, not passage identity
+```
+
+Historical feature comparability is based on measurement fields actually retained in Before and After, not the current live Profile.
+
+A higher cumulative dropped-block count in the selected After evidence is a data-quality regression and blocks a controlled comparison.
+
+Do **not** report arbitrary-range LUFS-I delta. Current retained `lufs_i_latest` is pass-cumulative, not an isolated integrated loudness for the requested sub-range.
+
+### 9.2 Recent-window verification
+
+Fallback when explicit retained range anchoring is unavailable/unnecessary:
 
 ```text
 audio_begin_verification(...)
-→ inspect ready_for_external_change / baseline_blockers
-→ external control MCP performs the real write
-→ external control MCP reads actual host state back
-→ replay the intended passage
-→ audio_complete_verification(...)
+-> external write + actual host readback
+-> replay a comparable passage
+-> audio_complete_verification(...)
 ```
 
-`host_readback` must represent actual state returned by the external control MCP, not the intended value.
+This older mode uses recent windows and an active-ratio comparability guard. Do not describe it as exact same-range verification.
 
-`controlled_comparison=true` is a technical comparability gate only.
+### Shared interpretation
 
-`closed_loop_complete=true` additionally requires supplied host readback.
+`host_readback` must be actual state returned by the external DAW-control MCP, not the intended setting.
 
-Neither means After is better, the change should be kept, or the processor setting is correct.
+```text
+controlled_comparison=true
+```
 
-Current verification remains recent-window based; do not claim it is already transport-anchored to an exact DAW-time range.
+means technical comparability only.
+
+```text
+closed_loop_complete=true
+```
+
+additionally requires supplied host readback.
+
+Neither means After is better or should be kept.
 
 Detailed rules: `references/verification-evidence.md`.
 
-## 11. Critical distinctions
+## 10. Critical distinctions
 
-Always keep these distinctions:
+Always keep these distinct:
 
-- Sample Peak ≠ True Peak.
-- RMS ≠ LUFS.
-- LUFS-S ≠ LUFS-I.
-- Protocol-1.2 LUFS-I pass scope ≠ permanent project loudness history.
-- Analyzer spectrum dB is not calibrated SPL.
-- Stereo Correlation ≠ Side/Mid energy.
-- Low correlation ≠ anti-correlation.
-- Spectral overlap / temporal overlap / masking evidence are not audible-masking probabilities.
-- Chroma is not note probability or MIDI transcription.
-- Tonal-center correlation is not key probability.
-- Harmonic F0 candidate is not a detected musical note.
-- `transport_epoch` is instance-local pass identity, not a persistent project hash.
-- `estimated_analysis_lag_ms` is Analyzer backlog/window latency, not total Agent latency.
-- `data_age_seconds` is not the same thing as invalid historical evidence.
-- section `boundary strength` is novelty evidence, not formal-boundary probability.
-- section `family_id` is recurrence evidence, not Verse/Chorus/Drop identity.
-- Track Story `active_ratio` is observed signal presence, not mute state or musical role.
-- Track Story adjacent deltas are descriptive differences, not processing instructions.
-- Track Story family spreads are independent dimensions, not one consistency/quality score.
-- Section Relationship `shortlist_priority` is inspection priority, not masking/mix-problem probability or quality.
-- a Section Relationship entering/leaving the shortlist is a context change, not proof that a section is wrong.
-- B-minus-A relationship descriptors preserve direction, not which track should be processed.
-- a Song Memory coverage gap is not silence or a section boundary.
-- insufficient pair coverage is missing evidence, not absence of interaction.
-- `map_id` is session memory, not a persistent project/arrangement ID.
-- topology fingerprint is not a persistent DAW-project hash.
-- `host_readback` is caller-supplied control-MCP evidence, not Analyzer-verified host state.
-- `controlled_comparison` is technical comparability, not artistic quality.
-- `worker_load_ratio` is background Analyzer-worker load, not realtime DAW CPU.
-- Analysis Profile is computation scope, not audio quality.
-- Analyzer Profile control ACK ≠ fresh measurement telemetry.
-- Analyzer-owned Profile control ≠ permission to modify unrelated DAW/plugin parameters.
-- `null` is unavailable, not zero.
+- Sample Peak != True Peak.
+- RMS != LUFS.
+- LUFS-S != LUFS-I.
+- pass-cumulative LUFS-I != arbitrary-range LUFS-I.
+- spectrum dB != calibrated SPL.
+- stereo correlation != Side/Mid energy.
+- low correlation != anti-correlation.
+- overlap/masking heuristics != audible-masking probability.
+- chroma != MIDI note probability.
+- tonal-center correlation != key probability.
+- harmonic F0 candidate != certain musical note.
+- `transport_epoch` != persistent project identity.
+- `data_age_seconds` != invalid historical evidence.
+- section family != semantic section name.
+- Track Story activity != mute/role state.
+- relationship shortlist != confirmed mix problem.
+- coverage gap != silence.
+- topology fingerprint != DAW project hash.
+- `host_readback` != Analyzer-verified host state.
+- `controlled_comparison` != artistic quality.
+- `worker_load_ratio` != DAW realtime CPU.
+- Analysis Profile != audio quality.
+- Analyzer Profile ACK != fresh measurement telemetry.
+- `null` != zero.
 
-Detailed references:
-
-```text
-references/parameters.md
-references/performance-evidence.md
-references/song-memory.md
-references/section-structure.md
-references/track-story.md
-references/section-relationships.md
-references/masking-evidence.md
-references/stereo-evidence.md
-references/tonal-evidence.md
-references/verification-evidence.md
-references/analyzer-mcp.md
-```
-
-## 12. Boundary with FL Studio control MCP
+## 11. Boundary with FL Studio control MCP
 
 AI Audio Analyzer MCP owns:
 
@@ -808,70 +447,42 @@ measure
 read Analyzer state
 remember transport-aligned evidence
 infer explainable structural boundaries / neutral recurrence families
-summarize one Analyzer track across those sections (Track Story)
-shortlist bounded section/family track relationships for deeper inspection
-compare
-identity/binding evidence
-performance/profile readback
-Analyzer-owned Analysis Profile control only
-verification measurement conditions
+summarize Track Story
+shortlist bounded section-aware relationships
+compare measurements
+resolve retained DAW-time ranges
+verify Before/After measurement conditions
+control Analyzer Analysis Profile only
 ```
 
-FL Studio control MCP owns:
+The DAW-control MCP owns:
 
 ```text
-DAW topology / project data
-exact markers / Playlist / arrangement metadata when exposed
+DAW topology / exact project data
+markers / Playlist / arrangement metadata when exposed
 plugin access
-all non-Analyzer artistic/technical parameter writes
-EQ / compression / gain / pan / routing / synth / automation writes
-actual host state readback for those external changes
+all non-Analyzer artistic/technical writes
+actual host-state readback for those writes
+transaction / rollback when implemented by that layer
 ```
 
-The Analyzer's own Profile control is a narrow performance exception because it changes measurement computation only and never changes the audio signal. Do not expand that exception into general DAW control.
+Never invent control tools, write success, readback values, track roles, semantic section labels, or processing certainty.
 
-Never invent control tools, controls, notes, write success, profile state, track roles, semantic section labels, relationship certainty, or readback values.
+## 12. Output discipline
 
-## 13. Output discipline
-
-When citing Analyzer evidence, include enough context to make it auditable:
+When using Analyzer evidence, include enough provenance to audit the claim:
 
 ```text
-instance / selector
-DAW-time range / transport epoch when Song Memory is used
-section_id / family_id / map_id when structure evidence is used
-Track Story coverage and delta/family context when used
-Section Relationship track A/B identity, selected epochs, coverage and shortlist context when used
-Analysis Profile / enabled feature group when relevant
-measurement window or timeline resolution
-signal validity / active ratio
-data age / estimated Analyzer lag / dropped blocks / coverage when relevant
-boundary evidence / recurrence components when relevant
-evidence-quality fields
-frequency / stereo band / ERB region / pitch-class context when relevant
-alignment quality for temporal evidence
-verification topology / coverage / readback context when relevant
-measurement/evidence value
+selector / runtime context
+DAW-time range + selected local epoch when retained evidence is used
+section_id / family_id / map_id when structure is used
+coverage / data age / lag / drops when relevant
+Analysis Profile / available feature group when relevant
+measurement window/resolution
+verification requested/effective range and freshness when relevant
+external host-readback status when relevant
+measurement value / delta
 what the metric can and cannot establish
 ```
 
-Do not present these as Analyzer-measured facts:
-
-- a sound should be warmer/brighter/wider/louder/narrower;
-- a genre must hit a fixed LUFS number;
-- a frequency must be cut/boosted by a specific amount;
-- masking evidence automatically requires EQ/sidechain;
-- a section-relationship shortlist automatically means audible masking or a mix problem;
-- stereo evidence automatically requires mono/narrowing/widening/phase rotation;
-- the top tonal-center candidate is certainly the song key;
-- an F0 candidate is certainly the played note;
-- `A/B/C` section families are certainly Intro/Verse/Chorus/Drop;
-- Track Story proves a track is Bass/Vocal/Drums from its measurements;
-- a Track Story section with low activity is certainly muted when coverage is incomplete;
-- a Track Story delta necessarily requires the inverse processing move;
-- a structure boundary necessarily requires a processing change;
-- `controlled_comparison=true` means After is better;
-- `Full` means higher audio quality than `Eco`;
-- `worker_load_ratio` is the DAW audio-thread CPU percentage.
-
-Those are artistic, symbolic, processing, or external-host-state judgments outside the measurement scope of this MCP and Skill.
+All LLM-facing Skill/reference content remains English-only.

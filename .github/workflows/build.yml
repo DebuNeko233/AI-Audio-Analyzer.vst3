@@ -184,11 +184,15 @@ jobs:
             mcp/track_story_tools.py \
             mcp/section_relationship_tools.py \
             mcp/verification_tools.py \
+            mcp/range_tools.py \
+            mcp/range_verification_tools.py \
             mcp/ci_regression.py \
-            mcp/relationship_regression.py
+            mcp/relationship_regression.py \
+            mcp/range_verification_regression.py
           AI_ANALYZER_SELF_TEST=1 python mcp/server.py
           python mcp/ci_regression.py
           python mcp/relationship_regression.py
+          python mcp/range_verification_regression.py
 
       - name: Package MCP and Skill folders
         shell: bash
@@ -210,11 +214,14 @@ jobs:
           cp mcp/track_story_tools.py dist/mcp/
           cp mcp/section_relationship_tools.py dist/mcp/
           cp mcp/verification_tools.py dist/mcp/
+          cp mcp/range_tools.py dist/mcp/
+          cp mcp/range_verification_tools.py dist/mcp/
           cp mcp/requirements.txt dist/mcp/
           cp mcp/cherry-studio.example.json dist/mcp/
           cp -R skills/ai-analyzer-flstudio/. dist/skill/
           test ! -e dist/mcp/ci_regression.py
           test ! -e dist/mcp/relationship_regression.py
+          test ! -e dist/mcp/range_verification_regression.py
           find dist -maxdepth 3 -type f -print | sort
 
       - uses: actions/upload-artifact@v4

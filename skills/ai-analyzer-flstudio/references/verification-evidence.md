@@ -1,258 +1,267 @@
-# V1.0 Closed-loop Verification Evidence
+# Closed-loop Verification Evidence
 
-This reference explains the V1.0 verification-session semantics used to measure a DAW change made through an external control MCP.
+This reference explains both verification paths exposed by AI Audio Analyzer MCP 1.2.
 
-It does **not** decide what change should be made and does not label an artistic result better or worse.
+Neither path decides what DAW change should be made, and neither path labels an artistic result better or worse.
 
-## Canonical flow
+AI Audio Analyzer never performs the sound-changing DAW operation. The external DAW-control MCP owns the real write and actual host readback. Analyzer owns measurement evidence and comparability checks.
+
+## Which verification path to use
+
+Prefer **transport-anchored same-range verification** whenever a specific DAW-time passage is known or can be replayed:
 
 ```text
-audio_project_status()
-→ establish deterministic Analyzer bindings if needed
-→ play the intended comparison passage
-→ audio_begin_verification(...)
-→ external DAW-control MCP performs the intended change
-→ external DAW-control MCP reads back the actual host state
-→ play the same intended comparison passage
-→ audio_complete_verification(..., host_readback="...")
-→ use specialized temporal/masking/stereo/tonal tools only if deeper evidence is needed
+audio_begin_range_verification(label, start_seconds, end_seconds, ...)
+-> inspect ready_for_external_change / baseline_blockers
+-> external DAW-control MCP performs the real write
+-> external DAW-control MCP reads actual host state back
+-> replay the returned effective_range
+-> audio_complete_range_verification(..., host_readback="...")
 ```
 
-AI Audio Analyzer never performs the DAW change in this flow. It owns the measurement baseline, the After measurement, and the comparability evidence.
+Use the older **recent-window verification** only when an explicit retained DAW-time range is not practical:
 
-## `verification_id`
+```text
+audio_begin_verification(label, seconds=5, ...)
+-> inspect ready_for_external_change / baseline_blockers
+-> external DAW-control MCP performs the real write
+-> external DAW-control MCP reads actual host state back
+-> replay a comparable passage
+-> audio_complete_verification(..., host_readback="...")
+```
 
-A Bridge-session identifier for one verification experiment.
+Do not silently describe the recent-window path as exact same-range verification.
 
-It is not:
+## Shared rules
 
-- a permanent project identifier;
-- a DAW undo identifier;
-- a plugin-instance UUID;
-- a persistent database key.
+### `verification_id`
 
-Verification sessions disappear when the Analyzer MCP Bridge exits.
+A Bridge-session identifier for one verification experiment. It is not a permanent project ID, DAW undo ID, plugin runtime UUID, or persistent database key.
 
-## `ready_for_external_change`
+Both verification stores disappear when the Analyzer MCP process exits.
 
-Returned by `audio_begin_verification()`.
+### `ready_for_external_change`
 
-`true` means the baseline passed the current pre-change checks, including usable Analyzer state, deterministic project readiness, requested target presence, and valid active measurements for the selected targets.
-
-It does not mean the proposed DAW change is appropriate.
+`true` means the current Before baseline passed that verification mode's technical pre-change guards. It does not mean the proposed processing move is appropriate.
 
 If false, inspect `baseline_blockers` and establish a clean baseline before changing the DAW.
 
-## `baseline_blockers`
+### Target selectors
 
-Human-readable reasons why the current Before measurement should not be treated as a clean controlled baseline.
-
-Examples include:
-
-- no Analyzer tracks captured;
-- incomplete/stale Analyzer mapping;
-- requested selectors missing;
-- requested targets without valid active analysis.
-
-These are measurement-workflow blockers, not artistic problems.
-
-## Target selectors
-
-When `target_selectors` are supplied, V1.0 evaluates comparability specifically for those Analyzer identities.
-
-Preferred deterministic form:
+Prefer deterministic selectors:
 
 ```text
 mixer:<track_index>/slot:<slot>
 ```
 
-If targets are omitted, the comparison can include the shared Analyzer identities captured in both states.
+Do not use equal numeric transport epochs as cross-track identity. Epochs are instance-local.
 
-## Topology fingerprint
+### `controlled_comparison`
 
-Each Before/After state receives a short SHA-256-derived fingerprint over sorted Analyzer identity/binding metadata, including runtime/binding context.
-
-It is a **consistency marker for this live measurement session**.
-
-It is not:
-
-- a persistent FL Studio project hash;
-- an audio-content fingerprint;
-- a cryptographic guarantee that every DAW setting is unchanged;
-- a replacement for external host-state readback.
-
-If topology changes intentionally, the returned measurement deltas can still be inspected, but V1.0 does not call the result a controlled comparison.
-
-## `controlled_comparison`
-
-This Boolean is intentionally strict.
-
-It becomes true only when the current implementation can establish all of the following:
-
-```text
-at least one requested/shared target was compared
-same Before/After measurement-window duration
-Analyzer topology unchanged
-no requested target missing
-valid active analysis for all compared requested targets
-active-ratio difference within tolerance for all compared requested targets
-```
-
-Current active-ratio tolerance:
-
-```text
-0.15 absolute difference
-```
-
-Example:
-
-```text
-Before active_ratio = 0.92
-After  active_ratio = 0.86
-absolute difference = 0.06 → within tolerance
-```
-
-The 0.15 value is a transparent passage-coverage guardrail. It is not a psychoacoustic threshold or mix-quality threshold.
-
-Most importantly:
-
-```text
-controlled_comparison = true
-```
-
-means only:
-
-> the current A/B measurement conditions satisfy the stated technical guardrails.
+This is a technical comparability gate only.
 
 It does **not** mean:
 
 - After is better;
-- the user should keep the change;
+- the change should be kept;
 - a processor setting is correct;
 - the mix is more professional;
-- a tonal/stereo/masking condition improved perceptually.
+- masking/stereo/tonal evidence perceptually improved.
 
-## Comparability fields
+### `closed_loop_complete`
 
-### `same_window_seconds`
+`true` additionally requires caller-supplied actual host readback from the external DAW-control layer.
 
-Whether the requested Before and After measurement-window durations are equal.
+`host_readback` must describe what the host actually returned after the write, not the intended value.
 
-`audio_complete_verification()` uses the baseline duration by default when its `seconds` argument is `0` or negative.
+Analyzer stores this text for auditability but does not independently validate the DAW/plugin parameter state.
 
-### `topology_unchanged`
-
-Whether the Before/After topology fingerprint and captured Analyzer identity set remained unchanged.
-
-### `missing_targets`
-
-Requested targets absent from either Before or After.
-
-### `invalid_targets`
-
-Requested targets that lack valid active analysis in Before or After.
-
-### `coverage_mismatch_targets`
-
-Requested targets whose absolute Before/After `active_ratio` difference exceeds the current `0.15` tolerance, or whose active coverage cannot be compared.
-
-### `warnings`
-
-Human-readable explanations for failed comparability guards. Treat them as audit context, not processing instructions.
-
-## Delta convention
-
-V1.0 basic verification deltas use:
+### Delta convention
 
 ```text
 Delta = After - Before
 ```
 
-The result currently includes basic project-state deltas such as:
+A positive delta only means the After measurement is numerically higher on that axis.
+
+## Transport-anchored same-range verification
+
+Tools:
 
 ```text
-peak_db
-rms_db
-crest_db
-lufs_s
-lufs_i
-true_peak_dbtp
-centroid_hz
-rolloff_hz
-flatness
-stereo_correlation
-stereo_width
-broad spectral-region dB features
+audio_begin_range_verification(...)
+audio_complete_range_verification(...)
+audio_range_verification_status(...)
 ```
 
-A positive delta only means the After measurement is numerically higher on that axis. It does not mean better.
+This path freezes a retained Song Memory range before the external change and requires a clean replay of the same normalized DAW-time range after the change.
 
-For deeper evidence, call the dedicated temporal, masking, V0.8 stereo, or V0.9 tonal tools after the verification session when the user's question actually requires them.
+### Requested vs effective range
 
-## `change_summary`
+Song Memory is retained in canonical one-second bins. Fractional requests are made explicit rather than pretending sub-second precision exists.
 
-Caller-supplied description of the DAW change that was attempted.
-
-It is audit metadata. Analyzer MCP does not independently prove that the described change occurred.
-
-Keep it factual, for example describing the real parameter/control that the external control MCP changed.
-
-## `host_readback`
-
-Caller-supplied report of the **actual host state read back after the DAW change**.
-
-This should come from the external DAW-control MCP after writing the change, not from the original plan or intended value.
-
-Analyzer MCP stores this text beside the measurement result for auditability, but it does not independently validate the text against FL Studio.
-
-Therefore:
+Example:
 
 ```text
-readback_supplied = true
+requested_range  2.25 .. 4.20 s
+effective_range  2.00 .. 5.00 s
+resolution       1.0 s
 ```
 
-means readback evidence was supplied by the caller. It does not mean Analyzer itself queried or verified the DAW control state.
+Use the returned `effective_range` for replay and reporting.
 
-## Why host readback and Analyzer measurement are separate
+Transport coordinates remain approximate Analyzer/host context, not sample-accurate edit coordinates.
 
-They answer different questions:
+### Coverage-first pass selection
+
+For each Analyzer independently, the range resolver selects the retained transport epoch using:
 
 ```text
-external DAW-control MCP readback
-→ what state did the host actually report after the write?
-
-AI Audio Analyzer verification
-→ what changed in measured audio, and were Before/After conditions technically comparable?
+1. best DAW-time coverage
+2. newest pass only as a tie-breaker
 ```
 
-A reliable closed loop needs both when the user asks to modify and verify a project.
+A newer sparse pass must not displace an older complete pass merely because it is newer.
 
-## Session status
+Different tracks may legitimately select different local epoch numbers for the same musical range.
 
-`audio_verification_status()` can:
+### After freshness fence
 
-- list recent in-memory verification sessions;
-- retrieve one session by `verification_id`;
-- recover a completed result during the same Bridge session.
+`audio_begin_range_verification()` freezes a wall-clock `receive_fence`.
 
-A completed verification is idempotent: calling `audio_complete_verification()` again for the same completed ID returns the stored result instead of silently replacing the After measurement.
+The After resolver must select a retained pass whose requested range was first observed **after** that fence. Pre-change Song Memory cannot be silently reused as the After measurement.
 
-## Output discipline
+If the same range has not been replayed cleanly after the change, `stale_after_targets` prevents a controlled comparison.
 
-When reporting a V1.0 verification result, include the relevant audit context:
+### Coverage
+
+The default minimum retained coverage is a technical evidence threshold, not an artistic threshold.
+
+Missing coverage is not silence. Sparse coverage must not be interpreted as inactivity, muting, or a successful change.
+
+### Historical feature availability
+
+P4a does not pretend that the current live Analysis Profile is a perfect record of what was enabled in a historical pass.
+
+Instead, each selected retained range exposes `feature_availability`, and each target reports `comparable_feature_families`: measurement families represented in **both** Before and After retained summaries.
+
+Important nuance: some retained evidence is content-dependent. For example, Chroma may be unavailable because the content did not provide enough tonal evidence even when Semantic analysis was enabled. Therefore unequal retained feature availability is **not proof that the Analysis Profile changed**.
+
+For that reason:
+
+- `retained_feature_mismatch_targets` is an audit warning;
+- it does not automatically fail the whole same-range comparison;
+- only dimensions/families available in both passes should be interpreted;
+- `no_common_feature_targets` is a hard blocker because there is no common retained measurement family to compare.
+
+Do not substitute the current live Profile for historical evidence and do not interpret a `null` delta as zero change.
+
+### Dropped blocks
+
+A higher cumulative dropped-block count in the selected After evidence is treated as a data-quality regression and blocks `controlled_comparison=true`.
+
+This is a measurement integrity guard, not an audio-quality judgment.
+
+### Active ratio
+
+In same-range mode, `active_ratio` is descriptive evidence. It is **not** used as a proxy for passage identity, because DAW-time anchoring already defines the passage.
+
+### Range LUFS-I limitation
+
+The same-range result intentionally does **not** expose a fake range-integrated LUFS-I delta.
+
+Current retained `lufs_i_latest` is cumulative within a transport pass, not a mathematically isolated integrated loudness for an arbitrary sub-range. Until a true range-integrated loudness representation exists, do not label it as section/range LUFS-I.
+
+Use retained LUFS-S/RMS/peak/crest and other supported range evidence instead.
+
+### Same-range comparability fields
+
+Important fields include:
+
+```text
+same_effective_range
+topology_unchanged
+missing_targets
+invalid_targets
+retained_feature_mismatch_targets
+no_common_feature_targets
+dropped_block_regression_targets
+stale_after_targets
+warnings
+```
+
+Per target, also inspect:
+
+```text
+before.feature_availability
+after.feature_availability
+comparable_feature_families
+retained_feature_availability_equal
+```
+
+When reporting a result, include:
 
 ```text
 verification_id
-selected targets
-Before/After window duration
+requested_range
+effective_range
+resolution_seconds
+selected transport epoch per target for Before and After
+coverage per target
+post-baseline freshness status
+comparable feature families when relevant
 controlled_comparison
-topology_unchanged
-active-ratio comparability
-missing/invalid targets if any
-external host readback status
-measurement deltas used in the conclusion
+external host-readback status
+measurement deltas actually used
 ```
 
-If `controlled_comparison=false`, say why before making a strong A/B claim.
+## Recent-window verification
 
-Never convert `controlled_comparison`, topology fingerprints, coverage tolerance, or a numeric delta into an automatic artistic recommendation.
+Tools:
+
+```text
+audio_begin_verification(...)
+audio_complete_verification(...)
+audio_verification_status(...)
+```
+
+This older path captures recent measurement windows rather than an explicit retained DAW-time range.
+
+Its strict comparability guards include:
+
+```text
+same Before/After window duration
+Analyzer topology unchanged
+no requested target missing
+valid active analysis in both windows
+active-ratio absolute difference within 0.15
+```
+
+The `0.15` active-ratio tolerance is a transparent recent-passage comparability guardrail. It is not a psychoacoustic threshold or mix-quality threshold.
+
+Use this mode only when explicit same-range anchoring is unavailable or unnecessary. Do not claim it proves the Before and After came from the same DAW-time coordinates.
+
+## Topology fingerprint
+
+Both paths use a short SHA-256-derived consistency fingerprint over Analyzer identity/binding metadata.
+
+It is not:
+
+- a persistent FL Studio project hash;
+- an audio fingerprint;
+- proof that every DAW setting is unchanged;
+- a replacement for external host readback.
+
+## Session status and idempotence
+
+The corresponding status tool can list recent in-memory sessions or retrieve one by ID.
+
+Completing an already completed verification returns the stored result rather than silently replacing the After measurement.
+
+## Output discipline
+
+If `controlled_comparison=false`, state why before making a strong A/B claim.
+
+If retained feature availability differs, interpret only the dimensions listed as comparable and explain the limitation when it matters to the conclusion.
+
+Never convert comparability flags, topology fingerprints, coverage thresholds, freshness checks, dropped-block checks, feature-availability warnings, or numeric deltas into automatic processing instructions or artistic conclusions.

@@ -1,14 +1,14 @@
 # AI Audio Analyzer — Add MCP to an Agent / 把 MCP 加入 Agent
 
-The installer already installs the standalone MCP executable and generates a ready-to-use `cherry-studio-mcp.json` with the correct absolute path for your computer.
+The installer installs the standalone MCP executable and generates `cherry-studio-mcp.json` with the correct absolute path for your computer.
 
-**Prefer the generated JSON.** The examples below are mainly for understanding the format or configuring another MCP-compatible Agent/client manually.
+**Prefer the generated JSON.** The examples below are only for manual configuration or understanding the format.
 
 ---
 
 ## English
 
-### 1. Run the installer first
+### 1. Run the installer
 
 Windows:
 
@@ -22,37 +22,23 @@ macOS Apple Silicon:
 Install.command
 ```
 
-After installation, the Analyzer MCP runtime is located under:
-
-Windows:
+Installed MCP runtime:
 
 ```text
+Windows:
 %LOCALAPPDATA%\AI Audio Analyzer\mcp\ai-audio-analyzer-mcp.exe
-```
 
 macOS:
-
-```text
 ~/Library/Application Support/AI Audio Analyzer/mcp/ai-audio-analyzer-mcp
 ```
 
-The installer also creates:
+The installer also creates `cherry-studio-mcp.json` in the AI Audio Analyzer application-data folder and prints its location.
 
-```text
-cherry-studio-mcp.json
-```
+### 2. Add the MCP server to the Agent/client
 
-in the AI Audio Analyzer application-data folder and prints its exact location when installation finishes.
+Import the generated JSON into Cherry Studio or another MCP-compatible client, then enable/select the `ai-audio-analyzer` server for the Agent that will use the Analyzer.
 
-### 2. Add the MCP server to your Agent/client
-
-Open the MCP server settings of Cherry Studio or another MCP-compatible Agent/client. Import the generated `cherry-studio-mcp.json`, or add an MCP server named `ai-audio-analyzer` using the same `command`, `args`, and `env` fields.
-
-Then enable/select this MCP server for the Assistant/Agent that will use AI Audio Analyzer. The exact button names can vary by client version, but the resulting configuration must contain an `mcpServers` entry like the examples below.
-
-### Windows JSON example
-
-Replace `YOUR_NAME` if you are writing the configuration manually. The installer-generated JSON already contains the real absolute path, so no replacement is needed when you use that file.
+Manual Windows example:
 
 ```json
 {
@@ -69,9 +55,7 @@ Replace `YOUR_NAME` if you are writing the configuration manually. The installer
 }
 ```
 
-### macOS JSON example
-
-Replace `YOUR_NAME` if you are writing the configuration manually.
+Manual macOS example:
 
 ```json
 {
@@ -90,54 +74,67 @@ Replace `YOUR_NAME` if you are writing the configuration manually.
 
 ### 3. Add the Skill to the same Agent
 
-The installer also installs the `skill` folder. Import that folder into Cherry Studio or make its instructions available to the same Agent that has the `ai-audio-analyzer` MCP server enabled.
+Import the packaged `skill` folder into the same Agent/Assistant that has `ai-audio-analyzer` enabled.
 
-The MCP provides the tools. The Skill teaches the LLM how to call those tools, interpret measurement validity, choose the minimum Analysis Profile needed, use transport-aware Song Memory / explainable section structure / Track Story / section-aware relationship shortlisting, and perform controlled Before/After verification.
+The MCP provides tools. The Skill teaches the model how to use deterministic bindings, Analysis Profiles, Song Memory, Section Map, Track Story, Section-aware Relationships, data-quality evidence, and both verification modes safely.
 
-### 4. Verify the Agent can see the tools
+### 4. Verify the tool surface
 
-After enabling the MCP server, start or refresh the Agent session. AI Audio Analyzer MCP 1.2 currently exposes **38 tools**. A useful first call is:
+AI Audio Analyzer MCP 1.2 exposes **41 tools**.
+
+Useful first call:
 
 ```text
 audio_project_status()
 ```
 
-Whole-song reasoning can use:
+Whole-song/structure tools include:
 
 ```text
 audio_song_status()
 audio_section_map()
-audio_track_story(track, map_id=None)
-audio_section_profile(section_id, map_id=None)
-audio_section_relationships(map_id=None)
+audio_track_story(...)
+audio_section_profile(...)
+audio_section_relationships(...)
 ```
 
-`audio_track_story()` summarizes one Analyzer instance across the section map. It keeps coverage gaps explicit, does not infer Bass/Vocal/Drums roles, does not rename neutral A/B/C families as Verse/Chorus/Drop, and does not prescribe processing.
+For a real DAW change over a known passage, prefer transport-anchored same-range verification:
 
-`audio_section_relationships()` returns a bounded shortlist of track pairs whose measured relationship is worth deeper inspection in specific sections/families. Its `shortlist_priority` is an inspection-ranking heuristic only: it is not a masking probability, mix-problem probability, quality score, or automatic EQ/sidechain instruction. Until historical same-range pair analysis exists, replay/select the relevant section before using recent-window masking/stereo/temporal pair tools as deeper evidence for that section.
+```text
+audio_begin_range_verification(...)
+-> external DAW-control write + actual host readback
+-> replay returned effective_range
+audio_complete_range_verification(...)
+```
 
-For Analyzer workload control, current builds also expose:
+For cases where an explicit retained DAW-time range is not practical, the older recent-window verification tools remain available:
+
+```text
+audio_begin_verification(...)
+audio_complete_verification(...)
+audio_verification_status(...)
+```
+
+The Analyzer does not perform the sound-changing DAW write. All EQ, compression, gain, pan, routing, synth, automation and project changes remain the responsibility of the actual DAW-control MCP.
+
+Analyzer-owned profile tools:
 
 ```text
 audio_set_analysis_profile(track, profile)
 audio_set_project_analysis_profile(profile, tracks=None)
 ```
 
-These two tools can change only AI Audio Analyzer's own `Analysis Profile` (`Eco / Balanced / Mix / Full`). The profile changes measurement computation and does **not** change the audio signal. The VST3 returns an explicit local acknowledgement. This capability is intentionally not a general DAW/plugin-control interface.
+These may change only the Analyzer's own `Eco / Balanced / Mix / Full` measurement-performance profile. They do not alter audio.
 
-All EQ, compression, gain, pan, routing, synth, automation, arrangement and other sound/project changes still belong to the actual DAW-control MCP.
+If the Agent cannot see Analyzer tools:
 
-If the Agent cannot see the Analyzer tools:
+1. confirm installation completed;
+2. confirm the JSON `command` points to the installed executable;
+3. confirm the MCP server is enabled for the current Agent;
+4. refresh/restart the MCP client after configuration changes;
+5. make sure another Analyzer MCP process is not already using the same local OSC measurement endpoint.
 
-1. confirm the installer completed successfully;
-2. confirm the `command` path points to the installed `ai-audio-analyzer-mcp` executable;
-3. confirm the MCP server is enabled for the current Agent/Assistant;
-4. restart or refresh the MCP client after changing its configuration;
-5. make sure another AI Audio Analyzer MCP process is not already occupying the same local OSC measurement endpoint.
-
-If profile-control calls time out, confirm the installed VST3 is the same current build as the MCP runtime. Older Analyzer VST3 builds do not implement the local profile-control receiver and must not be reported as successfully changed without an acknowledgement.
-
-Do not point a normal Release configuration at Python source files. The Release contains a standalone one-file MCP executable and does not require Python.
+Do not configure a normal user Release to run repository Python source. The Release uses a standalone one-file executable and does not require Python.
 
 ---
 
@@ -145,49 +142,35 @@ Do not point a normal Release configuration at Python source files. The Release 
 
 ### 1. 先运行安装器
 
-Windows：双击：
+Windows：
 
 ```text
 Install.cmd
 ```
 
-macOS Apple Silicon：双击：
+macOS Apple Silicon：
 
 ```text
 Install.command
 ```
 
-安装后 MCP 程序位于：
-
-Windows：
+安装后的 MCP Runtime：
 
 ```text
+Windows:
 %LOCALAPPDATA%\AI Audio Analyzer\mcp\ai-audio-analyzer-mcp.exe
-```
 
-macOS：
-
-```text
+macOS:
 ~/Library/Application Support/AI Audio Analyzer/mcp/ai-audio-analyzer-mcp
 ```
 
-安装器还会在 AI Audio Analyzer 的应用数据目录中自动生成：
+安装器会自动生成 `cherry-studio-mcp.json`，并打印文件位置。
 
-```text
-cherry-studio-mcp.json
-```
+### 2. 把 MCP Server 加到 Agent
 
-并在安装完成时打印它的准确位置。
+优先直接导入安装器生成的 JSON，然后把 `ai-audio-analyzer` MCP Server 启用给实际要使用 Analyzer 的 Agent/Assistant。
 
-### 2. 把 MCP 加到 Agent / MCP 客户端
-
-打开 Cherry Studio 或其他支持 MCP 的 Agent/客户端的 MCP Server 设置。优先直接导入安装器生成的 `cherry-studio-mcp.json`；也可以手动新建一个名为 `ai-audio-analyzer` 的 MCP Server，并填写相同的 `command`、`args` 和 `env`。
-
-然后把这个 MCP Server **启用/分配给实际要使用 AI Audio Analyzer 的 Assistant/Agent**。不同版本客户端的按钮名称可能不同，但最终配置结构应包含下面这样的 `mcpServers` 项。
-
-### Windows JSON 示例
-
-如果手动填写，把 `YOUR_NAME` 换成你的 Windows 用户名。直接使用安装器生成的 JSON 时不需要修改，它已经写入真实绝对路径。
+手动 Windows 示例：
 
 ```json
 {
@@ -204,9 +187,7 @@ cherry-studio-mcp.json
 }
 ```
 
-### macOS JSON 示例
-
-手动填写时把 `YOUR_NAME` 换成你的 macOS 用户名。
+手动 macOS 示例：
 
 ```json
 {
@@ -223,53 +204,54 @@ cherry-studio-mcp.json
 }
 ```
 
-### 3. 把 Skill 加给同一个 Agent
+### 3. 给同一个 Agent 导入 Skill
 
-安装器也会安装 `skill` 文件夹。把这个 Skill 导入 Cherry Studio，或让同一个已经启用 `ai-audio-analyzer` MCP 的 Agent 可以读取它。
+把 Release 里的 `skill` 文件夹导入给同一个已启用 `ai-audio-analyzer` MCP 的 Agent。
 
-MCP 提供工具；Skill 告诉 LLM 应该怎样调用工具、怎样判断测量是否有效、怎样选择最低需要的 Analysis Profile、怎样使用 Song Memory / Section Structure / Track Story / Section-aware Relationships，以及怎样做 Before/After 闭环验证。
+Skill 会告诉 LLM 怎样使用确定性 Binding、Analysis Profile、Song Memory、Section Map、Track Story、Section-aware Relationships、数据质量字段和两种 Verification 模式。
 
-### 4. 检查 Agent 是否已经看到工具
+### 4. 检查工具是否可见
 
-启用 MCP 后，重新打开或刷新 Agent 会话。当前 AI Audio Analyzer MCP 1.2 共提供 **38 个工具**，建议先尝试：
+当前 AI Audio Analyzer MCP 1.2 共 **41 个工具**。
+
+建议先调用：
 
 ```text
 audio_project_status()
 ```
 
-整曲/结构理解可以继续调用：
+整曲/结构工具包括：
 
 ```text
 audio_song_status()
 audio_section_map()
-audio_track_story(track, map_id=None)
-audio_section_profile(section_id, map_id=None)
-audio_section_relationships(map_id=None)
+audio_track_story(...)
+audio_section_profile(...)
+audio_section_relationships(...)
 ```
 
-`audio_track_story()` 用于看一个 Analyzer 实例在多个 Section 中怎样变化。它会显式保留 Coverage 缺失，不会根据音频测量自动判定 Bass/Vocal/Drums，也不会把中性的 A/B/C 自动命名成 Verse/Chorus/Drop，更不会自动给出 EQ/Compression/Stereo 指令。
+如果要验证一个已知歌曲时间范围上的真实 DAW/插件修改，优先使用：
 
-`audio_section_relationships()` 用于筛出“哪些轨道组合在某个 Section/Family 值得继续检查”。其中的 `shortlist_priority` 只是检查优先级启发式，不是 Masking 概率、Mix Problem 概率、质量分数，也不等于必须做 EQ/Sidechain。当前深度 Pair 工具仍主要看最近窗口，因此在把它们作为某个历史 Section 的深度证据前，应先定位/重放对应 Section。
+```text
+audio_begin_range_verification(...)
+-> 外部 DAW-control MCP 修改并回读真实状态
+-> 重放返回的 effective_range
+audio_complete_range_verification(...)
+```
 
-当前版本还提供 Analyzer 自己的测量负载控制：
+如果不方便指定明确的 Retained DAW-time Range，旧的 Recent-window Verification 仍可使用。
+
+Analyzer MCP 不执行 EQ、Compression、Gain、Pan、Routing、Synth、Automation 或工程修改。这些操作仍属于真正的 DAW-control MCP。
+
+Analyzer 自己只允许修改测量负载：
 
 ```text
 audio_set_analysis_profile(track, profile)
 audio_set_project_analysis_profile(profile, tracks=None)
 ```
 
-这两个工具**只能**修改 AI Audio Analyzer 自己的 `Eco / Balanced / Mix / Full` Analysis Profile。Profile 只改变 Analyzer 的测量计算量，不改变音频信号；VST3 会通过本机控制通道返回明确 ACK。这个能力不是通用 DAW/插件控制接口。
+它们只修改 `Eco / Balanced / Mix / Full` Analysis Profile，不改变音频信号。
 
-EQ、Compression、Gain、Pan、Routing、Synth、Automation、Arrangement 等所有会改变声音或工程状态的操作，仍然由真正的 DAW Control MCP 负责。
+如果 Agent 看不到工具，请检查安装是否成功、JSON `command` 是否指向已安装的单文件 MCP 程序、MCP Server 是否启用，以及是否有另一个 Analyzer MCP 已占用本机 OSC 端口。
 
-如果 Agent 看不到 Analyzer 工具：
-
-1. 确认安装器确实显示安装成功；
-2. 确认 JSON 的 `command` 指向安装后的 `ai-audio-analyzer-mcp` 可执行文件；
-3. 确认这个 MCP Server 已经启用给当前 Agent/Assistant；
-4. 修改 MCP 配置后重启或刷新客户端；
-5. 确认电脑上没有另一个 AI Audio Analyzer MCP 进程正在占用同一个本地 OSC 测量端点。
-
-如果修改 Profile 的工具超时，请确认当前安装的 VST3 和 MCP Runtime 都是同一套新版文件。旧版 Analyzer VST3 没有本机 Profile Control Receiver，没有 ACK 时绝不能把写入报告为成功。
-
-普通 Release 不需要 Python，也不要把 Agent 配置指向仓库里的 Python 源码。懒人包使用的是已经打包好的单文件 MCP 程序。
+普通 Release 不需要 Python，也不要把配置指向仓库 Python 源码。

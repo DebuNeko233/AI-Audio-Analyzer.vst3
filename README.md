@@ -4,205 +4,147 @@
 
 **AI Audio Analyzer** is a JUCE VST3 machine-readable audio measurement layer for AI/LLM-assisted music-production workflows.
 
-The plugin measures audio inside the DAW, emits compact OSC data to the Analyzer MCP Bridge, and exposes structured level, loudness, spectrum, stereo, temporal, masking, tonal, project, transport-aligned Song Memory, explainable song-structure, Track Story, section-aware mix relationships, A/B, performance, and verification evidence to Cherry Studio or another MCP client.
+It measures audio inside the DAW, publishes structured OSC telemetry to the Analyzer MCP Bridge, and exposes level, loudness, spectrum, stereo, temporal, masking, tonal, project, transport-aligned Song Memory, explainable song structure, Track Story, section-aware mix relationships, performance telemetry, and closed-loop verification evidence to Cherry Studio or another MCP client.
 
 Current product version: **1.2.0**.
 
-## Project components
+## System boundary
 
 ```text
-AI Audio Analyzer
-├─ VST3    realtime-safe measurement probe + DAW transport context
-├─ MCP     measurement / profile control / Song Memory / structure / relationships / comparison / verification tools
-└─ Skill   English LLM-facing instructions for correct MCP use and evidence semantics
+AI Audio Analyzer VST3
+  -> realtime-safe measurement + DAW transport context
+
+AI Audio Analyzer MCP
+  -> observe / remember / structure / compare / verify
+  -> may control Analyzer's own Analysis Profile only
+
+External DAW-control MCP
+  -> inspect / modify / read back DAW/project/plugin state
 ```
 
-The Analyzer is deliberately evidence-oriented. It does not encode fixed LUFS targets, genre EQ recipes, mandatory sidechain/compression rules, stereo recipes, forced Verse/Chorus/Drop labels, key changes, harmony edits, or mastering chains.
-
-## Companion FL Studio MCP
-
-For DAW topology and control, the current workflow pairs Analyzer MCP with:
+For FL Studio control, the current companion project is:
 
 **[rosasynthesiz/flstudio-mcp](https://github.com/rosasynthesiz/flstudio-mcp)**
 
-```text
-AI Audio Analyzer MCP   → observe / measure / remember / structure / compare / verify
-                          + control Analyzer's own Analysis Profile only
-FL Studio MCP           → inspect / control / modify / read back FL Studio/project/plugin state
-```
+Analyzer MCP is **not** a general DAW-control server. The only Analyzer-owned write is the host-visible `analysis_profile` parameter, because it changes measurement computation only and never changes the audio signal.
 
-Analyzer MCP does **not** perform general DAW writes. The only write exception is the Analyzer-owned `Analysis Profile`, which changes measurement computation but never changes the audio signal. Real project data and all sound-changing/project/plugin writes remain the responsibility of the actual DAW-control MCP.
+EQ, compression, gain, pan, routing, synth, automation, arrangement/project state, and other artistic/technical writes remain external.
 
 ## Architecture
 
 ```text
 FL Studio / DAW
-│
-├─ Mixer Track A ─ AI Audio Analyzer.vst3
-├─ Mixer Track B ─ AI Audio Analyzer.vst3
-└─ Master        ─ AI Audio Analyzer.vst3
-                         │
-                         │ OSC UDP measurements, default 127.0.0.1:9855
-                         ▼
+|
++-- Mixer Track A -- AI Audio Analyzer.vst3
++-- Mixer Track B -- AI Audio Analyzer.vst3
++-- Master --------- AI Audio Analyzer.vst3
+                         |
+                         | OSC measurements, default 127.0.0.1:9855
+                         v
                  Analyzer MCP Bridge
-                 ├─ live instance registry + deterministic bindings
-                 ├─ adaptive-analysis status / worker telemetry
-                 ├─ Analyzer-owned loopback Profile control + ACK
-                 ├─ DAW transport + continuous playback epochs
-                 ├─ one-second Song Memory + coarse aggregation
-                 ├─ explainable section boundaries + A/B/C recurrence families
-                 ├─ per-track Track Story across sections/families
-                 ├─ bounded section-aware cross-track relationship shortlist
-                 ├─ section profiles / project overview / Snapshot A-B
-                 ├─ temporal / masking / stereo / tonal evidence
-                 └─ closed-loop verification sessions
-                         │
-                         ▼
+                 +-- live instance registry + deterministic bindings
+                 +-- adaptive-analysis status / worker telemetry
+                 +-- Analyzer-owned loopback Profile control + ACK
+                 +-- DAW transport + instance-local playback epochs
+                 +-- one-second Song Memory + coverage accounting
+                 +-- explainable section boundaries + recurrence families
+                 +-- Track Story across sections/families
+                 +-- bounded section-aware relationship shortlist
+                 +-- recent-window + transport-range verification
+                 +-- temporal / masking / stereo / tonal evidence
+                         |
+                         v
                   Cherry Studio / LLM
-                         │
-                         └─ external FL Studio control MCP for project/sound changes + host readback
+                         |
+                         +-- external DAW-control MCP for real changes/readback
 ```
 
-Multiple Analyzer instances may send to the same UDP port. Only one MCP Bridge process should bind UDP `9855`.
+Multiple Analyzer instances may send to the same UDP measurement port. Only one MCP Bridge should bind UDP `9855`.
 
-The LLM is intentionally **not** part of the realtime measurement path. Analyzer keeps measuring and remembering DAW-time evidence while the model is thinking, calling tools, or waiting for an external DAW operation.
+The LLM is intentionally outside the realtime measurement path. Analyzer continues measuring while the Agent is reasoning or calling other tools.
 
 ## Measurement capabilities
 
-Core capabilities include:
+- Sample Peak, RMS, Crest Factor;
+- LUFS-S / LUFS-I and True Peak via `libebur128`;
+- 4096-point FFT and 32 log-spaced spectrum bands;
+- Spectral Centroid, Rolloff, Flatness;
+- full-band and frequency-dependent stereo correlation;
+- Mid/Side, Side spectrum, Side/Mid and negative-cross evidence;
+- Spectral Flux, RMS Rise and low-band temporal energy;
+- 12-bin chroma, tonal-center ranking and single-F0 harmonic evidence;
+- DAW time / PPQ / BPM / time signature / loop / play / record context;
+- instance-local transport epochs;
+- estimated Analyzer lag and cumulative dropped blocks;
+- bounded one-second Song Memory with 100 ms coverage slots;
+- explainable section boundaries and neutral recurring A/B/C families;
+- section profiles, Track Story and section-aware relationship shortlisting;
+- project Snapshot A/B and recent-window verification;
+- transport-anchored same-range Before/After verification;
+- adaptive Analysis Profiles and worker/FIFO telemetry.
 
-- Sample Peak, RMS and Crest Factor;
-- LUFS-S / LUFS-I and current/pass-max True Peak via `libebur128`;
-- 4096-point FFT, Hann window and 32 log-spaced 20 Hz–20 kHz Mid-spectrum features;
-- Spectral Centroid, ~85% Rolloff and Flatness;
-- full-band and 8-band L/R Correlation;
-- Spectral Flux, RMS Rise and 40–160 Hz temporal energy;
-- Mid RMS, Side RMS, Side/Mid dB, Side spectrum, frequency-dependent Side/Mid ratio, low-band stereo relation, and negative cross-spectrum evidence;
-- 12-bin Mid-spectrum chroma, tonal-center profile ranking, and single-F0 harmonic-alignment evidence;
-- DAW transport position, PPQ/BPM/time-signature context, continuous playback epochs, estimated Analyzer backlog and cumulative dropped-block telemetry;
-- bounded one-second Song Memory with 100 ms coverage accounting and 1/2/5/10/15/30-second query aggregation;
-- explainable multi-scale song-section boundary detection and neutral recurring A/B/C families;
-- section-level per-track profiles aligned by overlapping DAW time even when instance-local epoch numbers differ;
-- per-track Track Story across sections, with coverage-aware adjacent deltas, same-family variation statistics and per-metric relative extrema;
-- bounded section-aware pair shortlisting that shows where measured track relationships appear, disappear or change without turning them into automatic mix-problem labels;
-- project overview, Snapshot A/B, masking evidence, controlled Before/After verification, and adaptive-analysis performance telemetry.
+The Analyzer is evidence-oriented. It does not hard-code genre recipes, fixed LUFS targets, mandatory EQ/sidechain/compression/stereo moves, semantic Verse/Chorus/Drop labels, key changes, harmony edits, or mastering chains.
 
-### Signal validity
+`null` means **unavailable**, not numeric zero.
 
-Approximate detector behavior:
+Missing retained coverage is not silence.
 
-```text
-close   below -50 dBFS for ~0.4 s
-reopen  above -48 dBFS
-```
+## Deterministic Analyzer ↔ FL Mixer mapping
 
-When `signal_present=false`, content-dependent measurements become unavailable rather than returning misleading zeroes. `null` means **unavailable**, not numeric zero.
-
-### Deterministic Analyzer ↔ FL Mixer mapping
-
-Every live Analyzer has a session runtime UUID and exposes a host-visible Boolean parameter:
+Each live Analyzer has a session runtime UUID and exposes:
 
 ```text
 Parameter ID: identify
 Display name: Identify
 ```
 
-Every Identify transition emits `/aianalyzer/identify`, including while transport is stopped. The Bridge can bind that UUID to a real FL Mixer Track/Slot and later use selectors such as:
+Each Identify transition emits `/aianalyzer/identify`. The Bridge can bind that runtime UUID to a real FL Mixer Track/Slot and later use selectors such as:
 
 ```text
 mixer:7/slot:9
 ```
 
-### Adaptive Analysis
+Prefer deterministic binding over guessing identity from track name or audio content.
+
+## Adaptive Analysis Profile
 
 ```text
 Parameter ID: analysis_profile
 Display name: Analysis Profile
-0 Eco
-1 Balanced
-2 Mix
-3 Full
+
+0 Eco       Core
+1 Balanced  Core + Loudness + Spectrum + Stereo
+2 Mix       Balanced + Temporal
+3 Full      Mix + Semantic
 ```
 
-Profiles control **measurement computation only**:
+`Full` remains the compatibility default.
 
-```text
-Eco       Core
-Balanced  Core + Loudness + Spectrum + Stereo
-Mix       Balanced + Temporal
-Full      Mix + Semantic
-```
-
-`Full` remains the default for backward compatibility.
-
-Analyzer MCP exposes status/performance tools:
-
-```text
-audio_analysis_status(track)
-audio_project_performance()
-```
-
-and Analyzer-owned profile-control tools:
+Analyzer-owned profile-control tools:
 
 ```text
 audio_set_analysis_profile(track, profile)
 audio_set_project_analysis_profile(profile, tracks=None)
 ```
 
-The control path is loopback-only and session-scoped. It targets the live VST3 runtime UUID, applies the host-visible `analysis_profile` parameter on the JUCE message thread, and returns an explicit ACK. It does **not** run on the audio thread and does not alter the audio signal.
-
 Keep these two confirmations separate:
 
 ```text
-control_acknowledged  target VST3 accepted/applied the profile request
-telemetry_confirmed   a measurement frame also reports the requested profile
+control_acknowledged  target VST3 accepted/applied the request
+telemetry_confirmed   a fresh frame reports the requested profile
 ```
 
-The ACK can work while playback is stopped; fresh telemetry normally requires new audio processing. Older VST3 builds without the control receiver time out cleanly rather than being treated as successful.
-
-Runtime telemetry includes:
-
-```text
-worker_load_ratio
-fifo_fill_ratio
-fft_runs_per_second
-semantic_runs_per_second
-```
-
-`worker_load_ratio` describes the Analyzer **background worker**, not DAW realtime audio-thread CPU. Sustained FIFO growth can indicate measurement lag. Disabled feature families are explicitly marked unavailable in MCP.
-
-All non-Analyzer sound/project controls remain outside Analyzer MCP.
-
-## Plugin GUI
-
-The VST3 editor has built-in **English / 中文** switching. The selected language is stored as the non-automatable `uiLanguage` GUI preference inside `AIAnalyzerState`; older project states default to English. Language selection affects presentation only and never changes host parameter IDs, OSC fields, MCP tool names, or LLM-facing Skill content.
-
-The editor also exposes operational context that already exists in protocol 1.2:
-
-```text
-DAW play / stop / record state
-DAW time, BPM, time signature, loop state and transport pass/epoch
-Analysis Profile and signal validity
-Worker load, FIFO fill, estimated analysis lag and cumulative dropped blocks
-configured OSC TX target
-```
-
-The four `Eco / Balanced / Mix / Full` buttons use the same host-visible `analysis_profile` parameter as DAW automation and Analyzer-owned MCP profile control. There is no separate GUI-only profile state.
-
-`OSC TX -> host:port` still means the configured **measurement** destination, not a generic MCP-connected indicator. Analyzer profile control uses a separate loopback-only command/ACK path.
-
-The GUI remains primarily an observation/status surface. Song Memory, section detection, Track Story, relationship reasoning, higher-level evidence reasoning and general DAW writes stay outside the realtime plugin editor.
+The local control path is loopback-only, session-scoped, and does not alter audio.
 
 ## Transport-aware Song Memory
 
-Protocol 1.2 adds DAW-time context so delayed LLM calls do not need to catch an event while it is happening.
+Protocol 1.2 attaches DAW transport context to Analyzer measurements so the LLM can inspect a passage after it happened.
 
 ```text
 DAW playback
-→ Analyzer measures continuously
-→ frames are associated with estimated DAW time / PPQ
-→ MCP builds one-second Song Memory
-→ LLM can query the remembered pass later
+-> Analyzer measures continuously
+-> MCP stores one-second DAW-time bins
+-> LLM can query retained evidence later
 ```
 
 High-level tools:
@@ -210,40 +152,33 @@ High-level tools:
 ```text
 audio_song_status()
 audio_song_overview()
-audio_song_timeline(track, resolution_seconds=5, ...)
+audio_song_timeline(...)
 ```
 
-A `transport_epoch` is one **continuous playback pass for one Analyzer instance**. Playback start, seek, loop jump, or another detected discontinuity starts a new epoch.
-
-The worker discards queued pre-jump audio and resets pass-dependent Loudness/Temporal/Semantic state. Transport publication is gated until the worker acknowledges the new epoch so old audio is not mislabeled with the new DAW position.
-
-Epoch counters are instance-local. Equal numbers across independently loaded Analyzer instances are not permanent project-wide pass IDs.
-
-Transport coordinates compensate approximately for FIFO backlog plus half the FFT window and expose:
+Song Memory characteristics:
 
 ```text
-estimated_analysis_lag_ms
-dropped_blocks
-data_age_seconds
-coverage_ratio
+canonical bin size       1 second
+coverage slot            100 ms
+retained bins            up to 1200 / Analyzer instance
+retained span            about 20 minutes / instance
+query resolutions        1 / 2 / 5 / 10 / 15 / 30 seconds
+scope                    current MCP session
 ```
 
-The canonical MCP memory keeps at most 1200 one-second bins per Analyzer instance (about 20 minutes). Coverage is tracked in 100 ms slots so sparse data cannot become false 100% coverage after coarse aggregation.
+A `transport_epoch` is one continuous playback pass for one Analyzer instance. Epoch counters are independent across instances. Equal numeric epoch values are not project-global identity.
 
-For protocol-1.2 instances, LUFS-I and pass-max True Peak restart when the transport epoch changes. Snapshot tools do not independently reset loudness.
+Transport coordinates are appropriate for whole-song/section/range reasoning, not sample-accurate edits.
 
 ## Explainable song structure
 
-The song-structure/reasoning layers are built on Song Memory and add **no OSC fields or realtime DSP work**.
-
 ```text
 Song Memory
-→ robust feature normalization
-→ multi-scale 2 / 4 / 8 s left-right novelty comparison
-→ adaptive boundary threshold + minimum spacing
-→ sections S01 / S02 / ...
-→ transparent section-to-section similarity
-→ neutral recurring A / B / C / ... families
+-> robust normalization
+-> 2 / 4 / 8 s novelty comparison
+-> adaptive boundaries
+-> S01 / S02 / ...
+-> neutral recurrence families A / B / C / ...
 ```
 
 Tools:
@@ -251,103 +186,31 @@ Tools:
 ```text
 audio_section_map(...)
 audio_section_profile(...)
+audio_track_story(...)
+audio_section_relationships(...)
 ```
 
-`boundary strength` is structural novelty evidence, **not** a calibrated probability that a human would mark a formal section boundary.
-
-Recurring families are deliberately neutral. The Analyzer does **not** automatically assert `A = Intro`, `B = Verse`, or `C = Chorus`. Exact DAW markers, Playlist/arrangement labels, MIDI/project annotations, or explicit user-provided structure are authoritative for exact semantic names.
-
-Supporting tracks are aligned by overlapping **DAW-time coverage**, not equal numeric `transport_epoch` values. Missing Song Memory is reported as missing coverage; a gap is not interpreted as silence or a structural transition.
+A/B/C families are recurrence labels only. They are not automatically Intro/Verse/Chorus/Drop.
 
 ### Track Story
 
-After a section map exists, one track can be summarized across the whole structure:
+`audio_track_story(track, map_id)` summarizes one Analyzer across the section map using activity, levels, spectrum, stereo, temporal, chroma, coverage/lag/drop, adjacent deltas, same-family per-dimension variation and relative extrema.
 
-```text
-audio_track_story(track, map_id=None)
-```
-
-The tool returns per-section evidence, current-minus-previous deltas, same-family per-dimension variation, coverage/lag/drop metadata and relative per-metric extrema. A target track can resolve its own best overlapping retained pass even if it was not part of the original section map's `max_tracks` support set.
-
-Track Story is descriptive. Missing coverage is not inactivity, low `active_ratio` is not automatically a mute state, neutral family IDs are not semantic section names, and no observed delta implies a processor/action.
+It does not create one overall quality/consistency score, infer a track role, or prescribe processing.
 
 ### Section-aware Mix Relationships
 
-For cross-track questions use:
+`audio_section_relationships(...)` returns a bounded shortlist of track pairs worth deeper inspection in particular sections/families.
 
-```text
-audio_section_relationships(
-  map_id=None,
-  max_pairs=12,
-  max_tracks=32,
-  include_master=False,
-  min_activity_overlap=0.15,
-  min_shortlist_priority=0.18
-)
-```
+`shortlist_priority` is inspection priority only. It is not masking probability, audibility probability, mix-problem probability, quality score, or a processing recommendation.
 
-The tool keeps project analysis bounded. It filters by retained coverage/activity, caps active candidates per section, then returns only the highest-priority pair/section relationships. Master is excluded by default to avoid trivial Master-vs-every-track results.
-
-`shortlist_priority` combines overlapping activity with available coarse spectral-shape, RMS-level and stereo-width proximity. It is **not** a masking probability, audibility probability, mix-problem score, quality score or processing recommendation.
-
-Returned evidence identifies where a pair enters/leaves the shortlist or changes across sections/families, while keeping A/B track coverage/activity and directional `B - A` evidence auditable. Different tracks may use different instance-local transport epochs as long as their retained passes overlap the same DAW-time range.
-
-Current detailed pair tools such as `audio_masking_evidence()`, `audio_temporal_compare()` and `audio_stereo_compare()` remain recent-window based. If a historical section from `audio_section_relationships()` deserves deeper inspection, replay/select that section first and only then call the detailed pair tool. Do not claim a current 5-second pair result came from historical `S02` unless the DAW is actually measuring that passage.
-
-Recommended whole-song path:
-
-```text
-audio_project_status()
-→ audio_song_status()
-→ capture/play enough of the intended pass
-→ audio_section_map()
-→ audio_track_story() when one track's evolution matters
-→ audio_section_relationships() when cross-track evolution matters
-→ choose one relevant section/pair
-→ replay/select the passage when deeper recent-window pair evidence is needed
-→ audio_section_profile() when one section's multi-track context matters
-→ audio_song_timeline() only if raw time evolution is still needed
-```
-
-## Evidence layers
-
-### Temporal
-
-```text
-audio_temporal_profile()
-audio_temporal_compare()
-```
-
-Temporal overlap/correlation is evidence of time co-occurrence/co-variation, not a masking probability or processing instruction.
-
-### Masking
-
-```text
-audio_masking_evidence()
-audio_project_masking_scan()
-```
-
-The current model rebins Analyzer spectrum into 16 equal ERB-rate regions, applies relative-level evidence and temporal interaction when available. It is not a calibrated cochlear model or audible-masking probability.
-
-### Stereo / Mid-Side
-
-```text
-audio_stereo_profile()
-audio_stereo_compare()
-```
-
-Signed L/R correlation, Side/Mid energy, negative-cross evidence and frequency-dependent stereo relation remain separate. No universal stereo target is defined.
-
-### Tonal / music-semantic evidence
-
-```text
-audio_tonal_profile()
-audio_tonal_compare()
-```
-
-The Analyzer exposes normalized 12-bin chroma, tonal-center template correlations and single-F0 harmonic-alignment evidence. These are not exact key/note probabilities. Prefer exact DAW/MIDI symbolic data for exact facts.
+Detailed masking/stereo/temporal pair tools remain recent-window based. A historical section shortlist does not automatically turn those detailed tools into historical range analyzers.
 
 ## Controlled verification
+
+Two verification paths coexist.
+
+### Recent-window verification
 
 ```text
 audio_begin_verification(...)
@@ -355,26 +218,74 @@ audio_complete_verification(...)
 audio_verification_status(...)
 ```
 
-Canonical flow:
+Use this when an explicit retained DAW-time range is unavailable or unnecessary.
+
+Its comparability checks include window duration, topology, target validity and an active-ratio passage guard.
+
+### Transport-anchored same-range verification
+
+Prefer this when the Agent can name/replay a specific DAW-time range:
 
 ```text
-Before baseline
-→ external DAW-control MCP write
-→ actual host readback
-→ comparable After capture
-→ comparability guardrails
-→ After-minus-Before deltas
+audio_begin_range_verification(
+  label,
+  start_seconds,
+  end_seconds,
+  target_selectors=None,
+  minimum_coverage=...
+)
+
+-> external DAW-control MCP performs the real write
+-> external DAW-control MCP reads back actual host state
+-> replay the returned effective_range
+
+audio_complete_range_verification(
+  verification_id,
+  change_summary="...",
+  host_readback="..."
+)
+
+audio_range_verification_status(...)
 ```
 
-`controlled_comparison=true` means technical comparability only. `closed_loop_complete=true` additionally requires caller-supplied actual host readback. Neither means the change is artistically better.
+Important semantics:
 
-Current verification remains recent-window based; transport-anchored same-range verification is not yet implemented.
+- fractional requests are returned alongside the normalized one-second `effective_range`;
+- each Analyzer independently chooses its best retained local epoch;
+- pass selection is coverage-first, then recency;
+- equal numeric epochs across tracks are not required;
+- After must come from a clean retained pass first observed after the frozen receive-time fence;
+- pre-change Song Memory cannot silently be reused as After;
+- retained feature availability is used for historical comparability instead of pretending the current live Profile describes the past;
+- a higher selected After dropped-block count blocks a controlled comparison;
+- `active_ratio` is descriptive in same-range mode, not a proxy for passage identity;
+- arbitrary-range LUFS-I delta is intentionally unavailable because current retained `lufs_i_latest` is pass-cumulative, not range-integrated;
+- Analyzer still performs no sound-changing write.
+
+```text
+controlled_comparison=true
+```
+
+means technical comparability only.
+
+```text
+closed_loop_complete=true
+```
+
+additionally requires caller-supplied actual host readback.
+
+Neither means After is artistically better.
+
+See `skills/ai-analyzer-flstudio/references/verification-evidence.md`.
 
 ## MCP tools
 
-MCP **1.2 exposes 38 tools**. High-level whole-song/structure/profile-control tools include:
+MCP **1.2 exposes 41 tools**.
+
+High-level tools include:
 
 ```text
+audio_project_status()
 audio_set_analysis_profile(...)
 audio_set_project_analysis_profile(...)
 audio_song_status()
@@ -384,13 +295,16 @@ audio_section_map(...)
 audio_section_profile(...)
 audio_track_story(...)
 audio_section_relationships(...)
+audio_begin_range_verification(...)
+audio_complete_range_verification(...)
+audio_range_verification_status(...)
 ```
 
-Do not mechanically run all 38 tools. Start high-level, then drill down only where the song/section context requires it.
+Do not mechanically run all 41 tools. Start high-level and drill down only where needed.
 
 ## User installation
 
-GitHub **Release packages are beginner-first** and designed for users with no programming experience.
+GitHub Release packages are beginner-first.
 
 Supported packages:
 
@@ -399,14 +313,14 @@ Windows x64
 macOS Apple Silicon arm64
 ```
 
-Each platform has one final ZIP. Extract it once.
+Each platform gets one final ZIP. User Releases deliberately contain no MCP Python source, `requirements.txt`, venv, PyInstaller `_internal`, developer source config, or nested ZIP.
 
 Typical contents:
 
 ```text
 AI Audio Analyzer.vst3
 mcp/
-└─ ai-audio-analyzer-mcp[.exe]   standalone PyInstaller -F executable
+  ai-audio-analyzer-mcp[.exe]   standalone PyInstaller -F executable
 skill/
 START-HERE.md
 MCP-SETUP.md
@@ -417,13 +331,9 @@ LICENSE
 platform installer file(s)
 ```
 
-User Releases deliberately contain **no MCP Python source**, `requirements.txt`, venv, PyInstaller `_internal`, developer source configuration examples, or nested ZIP.
+Windows: extract once and run `Install.cmd`.
 
-Windows: extract once and double-click `Install.cmd`.
-
-macOS Apple Silicon: extract once and double-click `Install.command`. Current macOS builds are ad-hoc signed, not Apple Developer ID notarized.
-
-The installer generates `cherry-studio-mcp.json` with the real absolute MCP executable path. Follow `MCP-SETUP.md`, then import the `skill` folder for the same Agent/Assistant.
+macOS Apple Silicon: extract once and run `Install.command`. Current macOS builds are ad-hoc signed, not Developer ID notarized.
 
 ## Repository MCP architecture
 
@@ -440,91 +350,63 @@ Product version             1.2.0
 MCP version                 1.2
 OSC analysis protocol       1.2
 Analyzer control protocol   local revision 1
-MCP tools                   38
+MCP tools                   41
 ```
 
-Internal modules:
+Runtime modules:
 
 ```text
-mcp/server.py                    startup / self-test / shared tool registry
-mcp/analyzer_core.py             OSC state, identity/binding, base tools
-mcp/project_tools.py             project overview / Snapshot A-B
-mcp/temporal_tools.py            temporal layer
-mcp/masking_tools.py             masking-evidence layer
-mcp/stereo_tools.py              Mid/Side and stereo layer
-mcp/semantic_tools.py            chroma / tonal-center / harmonic evidence
-mcp/performance_tools.py         adaptive profile / worker telemetry layer
-mcp/control_tools.py             loopback-only Analyzer Analysis Profile control
-mcp/song_tools.py                DAW transport / pass memory / latency-aware song summaries
-mcp/section_tools.py             explainable boundaries / recurring families / section profiles
-mcp/track_story_tools.py         per-track section/family evolution summaries
-mcp/section_relationship_tools.py bounded section-aware pair shortlist
-mcp/verification_tools.py        controlled verification sessions
-mcp/ci_regression.py             repository-only synthetic regression suite
-mcp/relationship_regression.py   repository-only P2 end-to-end regression
+mcp/server.py
+mcp/analyzer_core.py
+mcp/project_tools.py
+mcp/temporal_tools.py
+mcp/masking_tools.py
+mcp/stereo_tools.py
+mcp/semantic_tools.py
+mcp/performance_tools.py
+mcp/control_tools.py
+mcp/song_tools.py
+mcp/section_tools.py
+mcp/track_story_tools.py
+mcp/section_relationship_tools.py
+mcp/verification_tools.py
+mcp/range_tools.py
+mcp/range_verification_tools.py
 ```
 
-## Skill
-
-LLM-facing Skill content is English-only. Important references include:
+Repository-only regressions:
 
 ```text
-skills/ai-analyzer-flstudio/SKILL.md
-skills/ai-analyzer-flstudio/README-CHERRY-STUDIO.md
-skills/ai-analyzer-flstudio/references/analyzer-mcp.md
-skills/ai-analyzer-flstudio/references/parameters.md
-skills/ai-analyzer-flstudio/references/performance-evidence.md
-skills/ai-analyzer-flstudio/references/song-memory.md
-skills/ai-analyzer-flstudio/references/section-structure.md
-skills/ai-analyzer-flstudio/references/track-story.md
-skills/ai-analyzer-flstudio/references/section-relationships.md
-skills/ai-analyzer-flstudio/references/masking-evidence.md
-skills/ai-analyzer-flstudio/references/stereo-evidence.md
-skills/ai-analyzer-flstudio/references/tonal-evidence.md
-skills/ai-analyzer-flstudio/references/verification-evidence.md
+mcp/ci_regression.py
+mcp/relationship_regression.py
+mcp/range_verification_regression.py
 ```
+
+Regression files are not shipped in beginner user Releases.
 
 ## OSC protocol
 
 Analysis address: `/aianalyzer/frame`.
 
-OSC **1.2** remains append-only. The current tail is:
+OSC **1.2** remains append-only. Existing indexes `0..149` are unchanged by Track Story, section relationships, or transport-range verification.
+
+The Analyzer-owned Analysis Profile control is a separate loopback-only control protocol, revision 1.
+
+## Skill
+
+LLM-facing Skill/reference content is English-only and documents evidence semantics, validity, tool order, and control boundaries.
+
+Key references include:
 
 ```text
-128  analysis_profile
-129  analysis_feature_mask
-130  worker_load_ratio
-131  fifo_fill_ratio
-132  fft_runs_per_second
-133  semantic_runs_per_second
-134  schema marker = "1.1"
-135  transport_supported
-136  transport_time_seconds
-137  transport_ppq_position
-138  transport_bpm
-139  transport_time_signature_numerator
-140  transport_time_signature_denominator
-141  transport_is_playing
-142  transport_is_recording
-143  transport_is_looping
-144  transport_loop_start_ppq
-145  transport_loop_end_ppq
-146  transport_epoch
-147  estimated_analysis_lag_ms
-148  dropped_blocks
-149  schema marker = "1.2"
+skills/ai-analyzer-flstudio/SKILL.md
+skills/ai-analyzer-flstudio/references/song-memory.md
+skills/ai-analyzer-flstudio/references/section-structure.md
+skills/ai-analyzer-flstudio/references/track-story.md
+skills/ai-analyzer-flstudio/references/section-relationships.md
+skills/ai-analyzer-flstudio/references/verification-evidence.md
+skills/ai-analyzer-flstudio/references/analyzer-mcp.md
 ```
-
-The Analyzer-owned Profile control is intentionally separate from this frame format:
-
-```text
-control transport   UDP loopback only
-control revision    1
-control scope       Analysis Profile only
-ACK                 explicit request-scoped loopback ACK
-```
-
-No existing OSC analysis-frame index is repurposed or appended for Track Story or section relationships.
 
 ## License
 

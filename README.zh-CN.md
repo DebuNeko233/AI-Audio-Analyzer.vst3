@@ -2,222 +2,149 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-**AI Audio Analyzer** 是一个面向 AI / LLM 音乐制作工作流的 JUCE VST3 机器可读音频测量层。
+**AI Audio Analyzer** 是面向 AI / LLM 音乐制作工作流的 JUCE VST3 机器可读音频测量层。
 
-插件直接在 DAW 内测量音频，通过 OSC 将紧凑数据发送给 Analyzer MCP Bridge，再由 Cherry Studio 或其他 MCP 客户端结构化读取电平、响度、频谱、立体声、时间关系、遮蔽、调性、工程概览、DAW 时间轴整曲记忆、可解释歌曲结构、Track Story、Section-aware Mix Relationships、A/B、性能状态和闭环验证证据。
+它在 DAW 内测量音频，通过 OSC 向 Analyzer MCP Bridge 发送结构化数据，并向 Cherry Studio 或其他 MCP 客户端提供电平、响度、频谱、立体声、时间关系、遮蔽、调性、工程状态、DAW 时间轴 Song Memory、可解释歌曲结构、Track Story、Section-aware Mix Relationships、性能遥测和闭环验证证据。
 
 当前产品版本：**1.2.0**。
 
-## 项目组成
+## 系统边界
 
 ```text
-AI Audio Analyzer
-├─ VST3    DAW 内实时安全测量探针 + Transport Context
-├─ MCP     测量 / Analyzer 档位控制 / Song Memory / 结构 / Relationships / 比较 / 验证
-└─ Skill   面向 LLM 的英文 MCP 调用与证据语义说明
+AI Audio Analyzer VST3
+  -> 实时安全测量 + DAW Transport Context
+
+AI Audio Analyzer MCP
+  -> 观察 / 记忆 / 结构 / 比较 / 验证
+  -> 只允许控制 Analyzer 自己的 Analysis Profile
+
+外部 DAW-control MCP
+  -> 读取 / 修改 / 回读 DAW、工程和插件状态
 ```
 
-Analyzer 坚持“提供证据，不硬编码审美规则”。不会内置固定 LUFS、Genre EQ、强制 Sidechain/Compression、Stereo 配方、Verse/Chorus/Drop 强制命名、转调、和声修改或母带链。
-
-## 与 FL Studio MCP 的边界
-
-当前工作流可配套：
+当前 FL Studio 控制层配套项目：
 
 **[rosasynthesiz/flstudio-mcp](https://github.com/rosasynthesiz/flstudio-mcp)**
 
-```text
-AI Audio Analyzer MCP   → 观察 / 测量 / 记忆 / 结构 / 比较 / 验证
-                          + 只控制 Analyzer 自己的 Analysis Profile
-FL Studio MCP           → 读取 / 控制 / 修改 / 回读 FL Studio 工程和插件状态
-```
+Analyzer MCP **不是通用 DAW 控制服务器**。唯一的 Analyzer 自有写入是宿主可见的 `analysis_profile` 参数，因为它只改变测量计算量，不改变音频信号。
 
-Analyzer MCP **不提供通用 DAW 写入能力**。唯一的写入例外是 Analyzer 自己的 `Analysis Profile`，它只改变测量计算量，不改变音频信号。
-
-真实工程数据以及所有会改变声音/工程的参数，例如 EQ、Compression、Gain、Pan、Routing、Synth 和 Automation，仍由真实 DAW-control MCP 负责，并应进行实际宿主回读。
+EQ、Compression、Gain、Pan、Routing、Synth、Automation、Arrangement/Project State 等声音或工程修改仍由外部 DAW-control MCP 负责。
 
 ## 架构
 
 ```text
 FL Studio / DAW
-│
-├─ Mixer Track A ─ AI Audio Analyzer.vst3
-├─ Mixer Track B ─ AI Audio Analyzer.vst3
-└─ Master        ─ AI Audio Analyzer.vst3
-                         │
-                         │ OSC UDP 测量数据，默认 127.0.0.1:9855
-                         ▼
+|
++-- Mixer Track A -- AI Audio Analyzer.vst3
++-- Mixer Track B -- AI Audio Analyzer.vst3
++-- Master --------- AI Audio Analyzer.vst3
+                         |
+                         | OSC 测量，默认 127.0.0.1:9855
+                         v
                  Analyzer MCP Bridge
-                 ├─ Live Instance Registry + 确定性 Track/Slot 映射
-                 ├─ Adaptive Analysis / Worker Telemetry
-                 ├─ Analyzer 自有 Loopback Profile Control + ACK
-                 ├─ DAW Transport / Continuous Playback Epoch
-                 ├─ 1 秒 Song Memory / 多分辨率聚合
-                 ├─ 可解释 Section Boundary / A-B-C 重复结构家族
-                 ├─ 单轨跨 Section/Family 的 Track Story
-                 ├─ 有界的 Section-aware 跨轨关系 Shortlist
-                 ├─ Section Profile / Project Overview / Snapshot A-B
-                 ├─ Temporal / Masking / Stereo / Tonal Evidence
-                 └─ Closed-loop Verification
-                         │
-                         ▼
+                 +-- Live Instance Registry + 确定性 Binding
+                 +-- Adaptive Analysis / Worker Telemetry
+                 +-- Analyzer 自有 Loopback Profile Control + ACK
+                 +-- DAW Transport + 实例局部 Playback Epoch
+                 +-- 1 秒 Song Memory + Coverage Accounting
+                 +-- 可解释 Section Boundary + Recurrence Family
+                 +-- Track Story
+                 +-- 有界 Section-aware Relationship Shortlist
+                 +-- Recent-window + Transport-range Verification
+                 +-- Temporal / Masking / Stereo / Tonal Evidence
+                         |
+                         v
                   Cherry Studio / LLM
-                         │
-                         └─ 外部 FL Studio MCP 负责工程/声音修改和宿主回读
+                         |
+                         +-- 外部 DAW-control MCP 执行真实修改/回读
 ```
 
-多个 Analyzer 实例可以共用 UDP `9855`；只有一个 MCP Bridge 进程应绑定该测量端口。
+多个 Analyzer 实例可以发送到同一个 UDP 测量端口；只有一个 MCP Bridge 应绑定 UDP `9855`。
 
-LLM **不属于实时测量链路**。模型在思考、调用工具或等待 DAW 操作时，Analyzer 仍持续测量并把证据保存到 DAW 时间轴中，之后再由 LLM 查询。
+LLM 不在实时音频测量链路内。Agent 思考或调用其他工具时，Analyzer 仍持续测量。
 
 ## 当前测量能力
 
-包括：
-
 - Sample Peak、RMS、Crest Factor；
-- `libebur128` 提供 LUFS-S / LUFS-I、Current / Pass Max True Peak；
-- 4096 点 FFT、Hann Window、20 Hz–20 kHz 的 32 个对数 Mid Spectrum 特征；
-- Spectral Centroid、约 85% Rolloff、Flatness；
-- Full-band 和 8-band L/R Correlation；
-- Spectral Flux、RMS Rise、40–160 Hz Temporal Energy；
-- Mid RMS、Side RMS、Side/Mid dB、Side Spectrum、分频段 Stereo 关系和 Negative Cross-Spectrum Evidence；
-- 12-bin Chroma、Tonal-center Profile Ranking、Single-F0 Harmonic-alignment Evidence；
-- DAW Time / PPQ / BPM / Time Signature、Continuous Playback Epoch、Analyzer Backlog 和 Dropped-block Telemetry；
-- 每实例最多 1200 个 1 秒 Song Memory Bin，使用 100 ms Coverage Slot，可按 1/2/5/10/15/30 秒聚合查询；
-- 多尺度可解释歌曲段落边界检测和中性的 A/B/C 重复结构家族；
-- 即使不同 Analyzer 的实例局部 Epoch 数字不同，也能按 DAW 时间重叠选择对应 Pass，生成 Section 级每轨 Profile；
-- 单轨跨 Section 的 Track Story，包括 Coverage-aware 相邻变化、同 Family 各维度变化范围和相对极值；
-- 有界的 Section-aware Pair Shortlist，用于说明某对轨的测量关系在哪些 Section/Family 出现、消失或发生变化，但不自动判定为“混音问题”；
-- Project Overview、Snapshot A/B、Masking Evidence、Controlled Verification 和性能遥测。
+- `libebur128` 提供 LUFS-S / LUFS-I / True Peak；
+- 4096 点 FFT、32 个对数频谱带；
+- Spectral Centroid / Rolloff / Flatness；
+- 全频段和分频段 Stereo Correlation；
+- Mid/Side、Side Spectrum、Side/Mid、Negative-cross Evidence；
+- Spectral Flux、RMS Rise、Low-band Temporal Energy；
+- 12-bin Chroma、Tonal-center Ranking、Single-F0 Harmonic Evidence；
+- DAW Time / PPQ / BPM / Time Signature / Loop / Play / Record；
+- 实例局部 Transport Epoch；
+- Estimated Analyzer Lag / Dropped Blocks；
+- 1 秒 Song Memory + 100 ms Coverage Slot；
+- 可解释 Section Boundary + 中性 A/B/C Recurrence Family；
+- Section Profile、Track Story、Section-aware Relationship Shortlist；
+- Project Snapshot A/B、Recent-window Verification；
+- Transport-anchored Same-range Before/After Verification；
+- Adaptive Analysis Profile 与 Worker/FIFO Telemetry。
 
-### Signal Validity
+Analyzer 坚持“提供证据，不硬编码审美规则”。不会内置固定 LUFS、Genre EQ、强制 Sidechain/Compression/Stereo 配方、Verse/Chorus/Drop 强制命名、转调、和声修改或母带链。
 
-```text
-关闭   低于 -50 dBFS 持续约 0.4 s
-重开   高于 -48 dBFS
-```
+`null` 表示**不可用**，不是数值 0。
 
-`signal_present=false` 时，依赖内容的字段会变成 unavailable，而不是误导性的 0。`null` 表示**没有有效测量**，不是数值 0。
+缺失的 Retained Coverage 不等于静音。
 
 ## Analyzer ↔ FL Mixer 确定性映射
 
-每个 Live Analyzer 都有 Session Runtime UUID，并向宿主公开：
+每个 Live Analyzer 都有 Session Runtime UUID，并公开：
 
 ```text
 Parameter ID: identify
 Display name: Identify
 ```
 
-每次 Identify 翻转都会发送 `/aianalyzer/identify`。Bridge 可以将 Runtime UUID 绑定到真实 FL Mixer Track / Slot，之后优先使用：
+Identify 切换会发出 `/aianalyzer/identify`。Bridge 可以把该 Runtime UUID 绑定到真实 FL Mixer Track/Slot，之后优先使用：
 
 ```text
 mixer:7/slot:9
 ```
 
-## Adaptive Analysis 与 Analyzer 自有控制
+不要根据轨名或音频内容猜测实例身份。
+
+## Adaptive Analysis Profile
 
 ```text
 Parameter ID: analysis_profile
 Display name: Analysis Profile
-0 Eco
-1 Balanced
-2 Mix
-3 Full
+
+0 Eco       Core
+1 Balanced  Core + Loudness + Spectrum + Stereo
+2 Mix       Balanced + Temporal
+3 Full      Mix + Semantic
 ```
 
-Profile 只控制**测量计算量**，不会改变声音：
+`Full` 是兼容默认值。
 
-```text
-Eco       Core
-Balanced  Core + Loudness + Spectrum + Stereo
-Mix       Balanced + Temporal
-Full      Mix + Semantic
-```
-
-`Full` 是兼容旧工程的默认值。
-
-状态与性能工具：
-
-```text
-audio_analysis_status(track)
-audio_project_performance()
-```
-
-Analyzer 自己的档位控制工具：
+Analyzer 自有控制工具：
 
 ```text
 audio_set_analysis_profile(track, profile)
 audio_set_project_analysis_profile(profile, tracks=None)
 ```
 
-控制链路只使用本机 Loopback，并按目标 VST3 的 Runtime UUID 寻址：
-
-```text
-Analyzer MCP
-→ 本机 UDP Control Request
-→ 目标 VST3 Runtime UUID
-→ JUCE Message Thread
-→ Host-visible Analysis Profile
-→ 本机 ACK
-```
-
-控制请求不会在音频线程执行，也不会改变音频信号。
-
 必须区分：
 
 ```text
-control_acknowledged
-  目标 VST3 已接受并应用 Analysis Profile 请求
-
-telemetry_confirmed
-  后续测量帧也已经报告目标 Profile
+control_acknowledged  目标 VST3 已接受/应用请求
+telemetry_confirmed   新测量帧已经报告目标 Profile
 ```
 
-控制 ACK 不要求 DAW 正在播放；Telemetry Confirmation 通常需要新的音频处理/测量帧。
+这条控制链只在本机 Loopback 内工作，不改变声音。
 
-旧版 VST3 没有本机控制接收器时，工具会明确超时失败，而不会假装已经修改成功。如果外部 DAW MCP 能修改历史上已经存在的 `analysis_profile` 宿主参数，可以作为旧插件兼容 fallback，之后再用 Analyzer Telemetry 验证。
+## Transport-aware Song Memory
 
-遥测包括：
-
-```text
-worker_load_ratio
-fifo_fill_ratio
-fft_runs_per_second
-semantic_runs_per_second
-```
-
-`worker_load_ratio` 是 **Analyzer 后台 Worker** 的忙碌比例，不是 FL Studio Realtime Audio CPU。Feature Mask 仍然是可用测量族的权威来源；关闭的测量族在 MCP 中保持 unavailable，而不是 0。
-
-## 插件 GUI
-
-VST3 编辑器内置 **English / 中文** 切换。所选语言作为不可自动化的 `uiLanguage` GUI 偏好保存到 `AIAnalyzerState`；旧工程没有该字段时默认 English。语言只影响界面显示，不会修改宿主参数 ID、OSC 字段、MCP 工具名或面向 LLM 的 Skill 内容。
-
-GUI 展示：
-
-```text
-DAW 播放 / 停止 / 录音状态
-DAW 时间、BPM、拍号、Loop 和 Transport Pass/Epoch
-Eco / Balanced / Mix / Full
-Signal Validity
-Worker Load、FIFO Fill、Estimated Analysis Lag、Dropped Blocks
-配置的 OSC TX 测量目标
-```
-
-四档按钮与宿主唯一的 `analysis_profile` 参数双向同步，因此 GUI 点击、DAW Automation、工程恢复以及 Analyzer MCP 自有 Profile Control 最终都反映同一个真实宿主参数状态。
-
-`OSC TX -> host:port` 只表示**测量帧**发送目标，不等于“MCP 已连接”。Analyzer Profile Control 使用独立的本机命令/ACK 链路。
-
-GUI 仍以观察和运行状态为主。Song Memory、Section Detection、Track Story、Relationship Reasoning、高层证据推理以及通用 DAW 写入不会搬进实时插件编辑器。
-
-## 面向 LLM 延迟的 Song Memory
-
-协议 1.2 的目标不是让 LLM 更实时，而是让 LLM **晚几秒也能准确查询刚才发生的音乐**：
+协议 1.2 把 DAW Transport Context 附加到测量，使 LLM 可以在音乐经过后再查询。
 
 ```text
 DAW 播放
-→ Analyzer 持续测量
-→ 测量绑定到估算后的 DAW Time / PPQ
-→ MCP 写入 1 秒 Song Memory
-→ LLM 稍后按整曲 / 时间段读取
+-> Analyzer 持续测量
+-> MCP 保存 1 秒 DAW-time Bin
+-> LLM 稍后查询 Retained Evidence
 ```
 
 高层工具：
@@ -225,145 +152,65 @@ DAW 播放
 ```text
 audio_song_status()
 audio_song_overview()
-audio_song_timeline(track, resolution_seconds=5, ...)
+audio_song_timeline(...)
 ```
 
-`transport_epoch` 是某个 Analyzer 实例的一次**连续播放 Pass**。停止后重新播放、Seek、Loop 跳回或明显 Transport Discontinuity 都会开启新 Epoch。
-
-Epoch 改变时，Worker 会丢弃旧 FIFO Backlog，并重置 LUFS-I / Pass Max True Peak、Temporal 连续状态和 Semantic Cache。新 Epoch 的 Transport 坐标要等 Worker acknowledgement 后才重新标记有效，避免出现“旧音频 + 新位置”。
-
-不同 Analyzer 的 Epoch 是**实例局部计数器**，不能因为数字相同就假定是同一工程 Pass。
-
-数据质量字段包括：
+Song Memory：
 
 ```text
-estimated_analysis_lag_ms
-dropped_blocks
-data_age_seconds
-coverage_ratio
+Canonical Bin           1 秒
+Coverage Slot           100 ms
+Retained Bins           每 Analyzer 最多 1200
+Retained Span           每实例约 20 分钟
+Query Resolutions       1 / 2 / 5 / 10 / 15 / 30 秒
+Scope                   当前 MCP Session
 ```
 
-`estimated_analysis_lag_ms` 只描述 Analyzer FIFO + FFT Window 的估算滞后，不包含网络或 LLM 思考延迟。
+`transport_epoch` 是某个 Analyzer 实例的一次连续播放 Pass。不同实例独立计数，数字相同不代表工程全局同一 Pass。
 
-Song Memory 使用 100 ms Coverage Slot，因此把 1 秒 Bin 聚合成 5/10/30 秒时，不会把稀疏数据错误变成 100% 覆盖。
+Transport 坐标适合整曲/Section/Range 推理，不是 Sample-accurate 编辑坐标。
 
-## 可解释歌曲结构理解层
-
-歌曲结构/推理层完全建立在已有 Song Memory 上，**不增加实时 DSP，也不修改 OSC 1.2 Analysis Frame**。
+## 可解释歌曲结构
 
 ```text
 Song Memory
-→ Robust Feature Normalization
-→ 2 / 4 / 8 秒多尺度前后窗口比较
-→ Explainable Novelty Curve
-→ Adaptive Threshold + Minimum Section Spacing
-→ S01 / S02 / ... Section
-→ Section Similarity
-→ 中性 A / B / C / ... 重复结构家族
+-> Robust Normalization
+-> 2 / 4 / 8 秒 Novelty
+-> Adaptive Boundaries
+-> S01 / S02 / ...
+-> 中性 A / B / C / ... Recurrence Family
 ```
 
-结构工具：
+工具：
 
 ```text
 audio_section_map(...)
 audio_section_profile(...)
+audio_track_story(...)
+audio_section_relationships(...)
 ```
 
-`boundary strength` 只是**结构变化证据**，不是“这里一定是正式段落边界”的概率。
-
-A/B/C 只表示结构上的重复/相似，**绝不自动等于 Intro / Verse / Chorus / Drop**。如果 DAW MCP 能提供 Marker、Playlist Label、Pattern Name、Arrangement Metadata、MIDI/Project Annotation，或者用户明确给出了结构，那么这些精确工程信息优先用于命名。
-
-跨轨 Section 分析不会要求各实例 Epoch 数字相同。它会在同一 DAW 时间范围内为每个支持轨选择覆盖最好的保留 Pass。
-
-缺失 Song Memory 不会被当成静音或段落边界；`coverage_gaps` 会显式报告缺失数据。
+A/B/C 只是重复结构家族，不自动等于 Intro/Verse/Chorus/Drop。
 
 ### Track Story
 
-生成 Section Map 后，可以查看单条轨在整首结构中的变化：
+`audio_track_story(track, map_id)` 汇总单条 Analyzer 在各 Section 中的 Activity、Level、Spectrum、Stereo、Temporal、Chroma、Coverage/Lag/Drop、相邻 Delta、同 Family 各维度变化和相对极值。
 
-```text
-audio_track_story(track, map_id=None)
-```
-
-它会返回每个 Section 的测量证据、相对前一 Section 的 `Current - Previous` Delta、同一 Family 内各维度的变化范围、Coverage/Lag/Drop 信息以及不同指标的相对极值。即使目标轨没有进入原 Section Map 的 `max_tracks` Supporting Set，只要存在同一 DAW 时间范围的 Song Memory，也可以独立选择覆盖最佳的 Retained Pass。
-
-Track Story 只描述证据：缺少 Coverage 不等于不活动，低 `active_ratio` 不自动等于 Muted，A/B/C 不等于语义段落名，任何 Delta 也不自动要求 EQ、Compression 或 Stereo 操作。
+它不会生成统一“质量/一致性分数”，也不会仅凭测量推断轨道角色或自动要求处理。
 
 ### Section-aware Mix Relationships
 
-跨轨关系使用：
+`audio_section_relationships(...)` 返回有界的 Pair Shortlist，用于指出哪些轨道关系在特定 Section/Family 值得继续检查。
 
-```text
-audio_section_relationships(
-  map_id=None,
-  max_pairs=12,
-  max_tracks=32,
-  include_master=False,
-  min_activity_overlap=0.15,
-  min_shortlist_priority=0.18
-)
-```
+`shortlist_priority` 只是检查优先级，不是 Masking Probability、Audibility Probability、Mix-problem Probability、Quality Score 或处理建议。
 
-这个工具的目标是**有界筛选值得继续检查的 Pair/Section**，而不是输出全工程所有 Pair。它先要求足够 Coverage 和共同活动，再限制每个 Section 的候选轨数量，最后只返回优先级较高的关系。默认不包含 Master，避免 Master-vs-every-track 这种天然关系占满结果。
-
-`shortlist_priority` 由共同活动以及可用的粗频谱形状、RMS Level 和 Stereo Width 接近程度组合得到。它**不是** Masking Probability、Audibility Probability、Mix-problem Score、Quality Score，也不是处理指令。
-
-结果会保留 A/B 各自的 Coverage、Activity、RMS、Width、所选 Transport Epoch，以及方向明确的 `B - A` 证据，并指出某个 Pair 在哪些 Section/Family 进入 Shortlist、离开 Shortlist 或发生变化。
-
-当前 `audio_masking_evidence()`、`audio_temporal_compare()`、`audio_stereo_compare()` 等详细 Pair 工具仍然是 Recent-window。若 `audio_section_relationships()` 指出历史 `S02` 值得深挖，应先让 DAW 重放/定位到 S02，再调用详细 Pair 工具。不能因为 Shortlist 提到了 S02，就把几秒后当前窗口的结果冒充 S02 的历史深度证据。
-
-推荐整曲调用顺序：
-
-```text
-audio_project_status()
-→ audio_song_status()
-→ 播放/采集足够的目标 Pass
-→ audio_section_map()
-→ 关注某一条轨跨段变化时调用 audio_track_story()
-→ 关注跨轨关系变化时调用 audio_section_relationships()
-→ 选择真正相关的 Section + Pair
-→ 需要深度 Pair Evidence 时重放/定位目标 Section
-→ 再调用必要的 Masking / Stereo / Temporal 工具
-→ 关注某一 Section 的多轨上下文时调用 audio_section_profile()
-```
-
-## 其他证据层
-
-Temporal：
-
-```text
-audio_temporal_profile()
-audio_temporal_compare()
-```
-
-Masking：
-
-```text
-audio_masking_evidence()
-audio_project_masking_scan()
-```
-
-当前 Masking 使用 equal-ERB-rate feature re-binning，不是经过听阈校准的 cochlear 模型，分数不是可听遮蔽概率。
-
-Stereo / Mid-Side：
-
-```text
-audio_stereo_profile()
-audio_stereo_compare()
-```
-
-Signed Correlation、Side/Mid Energy、Negative-cross 和各频段 Stereo 关系保持独立，不定义万能 Stereo 目标。
-
-Tonal：
-
-```text
-audio_tonal_profile()
-audio_tonal_compare()
-```
-
-Chroma / Tonal-center / Single-F0 都属于音频域证据，不是精确 Key / Note 概率。精确符号信息应优先使用 DAW/MIDI 数据。
+详细 Masking/Stereo/Temporal Pair 工具仍是 Recent-window；历史 Section Shortlist 不会自动让它们变成 Historical Range Analyzer。
 
 ## Closed-loop Verification
+
+现在有两条验证路径。
+
+### Recent-window Verification
 
 ```text
 audio_begin_verification(...)
@@ -371,28 +218,70 @@ audio_complete_verification(...)
 audio_verification_status(...)
 ```
 
-艺术/技术 DAW 修改的闭环仍然是：
+当无法或没有必要指定明确 DAW-time Range 时使用。
+
+### Transport-anchored Same-range Verification
+
+当 Agent 可以确定并重放一个 DAW 时间范围时优先使用：
 
 ```text
-Before Baseline
-→ 外部 DAW MCP 实际写入
-→ 回读真实宿主状态
-→ Comparable After Capture
-→ Comparability Guardrails
-→ After - Before Deltas
+audio_begin_range_verification(
+  label,
+  start_seconds,
+  end_seconds,
+  target_selectors=None,
+  minimum_coverage=...
+)
+
+-> 外部 DAW-control MCP 执行真实修改
+-> 外部 DAW-control MCP 回读实际宿主状态
+-> 重放返回的 effective_range
+
+audio_complete_range_verification(
+  verification_id,
+  change_summary="...",
+  host_readback="..."
+)
+
+audio_range_verification_status(...)
 ```
 
-`controlled_comparison=true` 只表示技术可比性通过；`closed_loop_complete=true` 还要求实际 Host Readback。两者都不表示“After 更好”。
+关键语义：
 
-Analyzer 自己的 Profile Control ACK 只确认 Analyzer 配置请求，不替代外部 DAW/插件参数的真实 Host Readback。
+- 小数范围会同时返回 Requested Range 与按 1 秒 Song Memory 归一后的 `effective_range`；
+- 每个 Analyzer 独立选择覆盖最佳的本地 Epoch；
+- Pass 选择先看 Coverage，再用 Recency 破平局；
+- 跨轨不要求 Epoch 数字相同；
+- After 必须来自冻结 Receive-time Fence 之后首次观测到的干净 Retained Pass；
+- 修改前 Song Memory 不能被偷偷复用为 After；
+- 历史可比性看 Retained Evidence 实际拥有的测量族，不拿“当前 Profile”冒充过去的 Profile；
+- 若选中 After 的累计 Dropped Blocks 更高，则不通过 Controlled Comparison；
+- Same-range 模式中的 `active_ratio` 是描述证据，不再充当 Passage Identity；
+- 当前不会伪造 Arbitrary-range LUFS-I Delta，因为 Retained `lufs_i_latest` 是 Pass-cumulative，而不是任意范围独立积分值；
+- Analyzer 仍不执行任何改变声音的写入。
 
-当前 Verification 仍是 Recent-window 模式，尚未实现 Transport-anchored Same-range Verification。
+```text
+controlled_comparison=true
+```
+
+只表示技术可比性通过。
+
+```text
+closed_loop_complete=true
+```
+
+还要求调用方提供实际 Host Readback。
+
+两者都不表示 After 在艺术上更好。
 
 ## MCP 工具
 
-MCP **1.2 共 38 个工具**。高层整曲/结构/Profile 控制入口包括：
+MCP **1.2 当前共 41 个工具**。
+
+高层工具包括：
 
 ```text
+audio_project_status()
 audio_set_analysis_profile(...)
 audio_set_project_analysis_profile(...)
 audio_song_status()
@@ -402,13 +291,16 @@ audio_section_map(...)
 audio_section_profile(...)
 audio_track_story(...)
 audio_section_relationships(...)
+audio_begin_range_verification(...)
+audio_complete_range_verification(...)
+audio_range_verification_status(...)
 ```
 
-不要为了“完整”机械调用全部 38 个工具。应先高层理解整曲/Section，再按具体问题下钻。
+不要机械调用全部 41 个工具。先高层理解，再按问题下钻。
 
 ## 用户安装
 
-GitHub **Release 懒人包按“没接触过编程也能安装”设计**。
+GitHub Release 按“没有编程经验也能安装”设计。
 
 支持：
 
@@ -417,12 +309,14 @@ Windows x64
 macOS Apple Silicon arm64
 ```
 
-每个平台一个最终 ZIP，只解压一次。
+每个平台一个最终 ZIP。用户 Release 不包含 MCP Python 源码、`requirements.txt`、venv、PyInstaller `_internal`、开发配置或嵌套 ZIP。
+
+典型内容：
 
 ```text
 AI Audio Analyzer.vst3
 mcp/
-└─ ai-audio-analyzer-mcp[.exe]   PyInstaller -F 单文件程序
+  ai-audio-analyzer-mcp[.exe]   PyInstaller -F 单文件
 skill/
 START-HERE.md
 MCP-SETUP.md
@@ -433,17 +327,13 @@ LICENSE
 平台安装文件
 ```
 
-用户 Release **不会包含 MCP Python 源码**、`requirements.txt`、venv、PyInstaller `_internal`、开发源码配置示例或嵌套 ZIP。
+Windows：解压后运行 `Install.cmd`。
 
-Windows：双击 `Install.cmd`。
-
-macOS Apple Silicon：双击 `Install.command`。当前 macOS 包为 ad-hoc 签名，并非 Apple Developer ID Notarization。
-
-安装器会生成带真实 MCP 可执行文件绝对路径的 `cherry-studio-mcp.json`。按照 `MCP-SETUP.md` 添加到支持 MCP 的 Agent/Assistant，并给同一个 Agent 导入 `skill` 文件夹。
+macOS Apple Silicon：解压后运行 `Install.command`。当前 macOS 包为 ad-hoc 签名，不是 Developer ID Notarization。
 
 ## 仓库 MCP 架构
 
-源码和 PyInstaller 永远只有一个入口：
+唯一支持的源码/PyInstaller 入口：
 
 ```text
 mcp/server.py
@@ -456,71 +346,47 @@ Product version             1.2.0
 MCP version                 1.2
 OSC analysis protocol       1.2
 Analyzer control protocol   本机 revision 1
-MCP tools                   38
+MCP tools                   41
 ```
 
-内部模块：
+Runtime Modules：
 
 ```text
-mcp/server.py                     启动 / Self-test / Tool Registry
-mcp/analyzer_core.py              OSC State / Identity / Binding / Base Tools
-mcp/project_tools.py              Project Overview / Snapshot A-B
-mcp/temporal_tools.py             Temporal
-mcp/masking_tools.py              Masking Evidence
-mcp/stereo_tools.py               Mid/Side + Stereo
-mcp/semantic_tools.py             Chroma / Tonal-center / Harmonic Evidence
-mcp/performance_tools.py          Adaptive Profile / Worker Telemetry
-mcp/control_tools.py              本机 Analyzer Analysis Profile 控制
-mcp/song_tools.py                 DAW Transport / Pass Memory / Song Summaries
-mcp/section_tools.py              Section Boundary / Recurrence / Section Profile
-mcp/track_story_tools.py          单轨跨 Section/Family 演化摘要
-mcp/section_relationship_tools.py 有界 Section-aware Pair Shortlist
-mcp/verification_tools.py         Controlled Verification
-mcp/ci_regression.py              仓库内 Synthetic Regression
-mcp/relationship_regression.py    仓库内 P2 End-to-end Regression
+mcp/server.py
+mcp/analyzer_core.py
+mcp/project_tools.py
+mcp/temporal_tools.py
+mcp/masking_tools.py
+mcp/stereo_tools.py
+mcp/semantic_tools.py
+mcp/performance_tools.py
+mcp/control_tools.py
+mcp/song_tools.py
+mcp/section_tools.py
+mcp/track_story_tools.py
+mcp/section_relationship_tools.py
+mcp/verification_tools.py
+mcp/range_tools.py
+mcp/range_verification_tools.py
 ```
 
-## OSC Analysis Protocol
+仓库 CI-only Regression：
+
+```text
+mcp/ci_regression.py
+mcp/relationship_regression.py
+mcp/range_verification_regression.py
+```
+
+这些 Regression 文件不会进入面向普通用户的 Release Runtime。
+
+## OSC Protocol
 
 Analysis Address：`/aianalyzer/frame`。
 
-OSC **1.2** 继续保持 Append-only。当前尾部：
+OSC **1.2** 继续 Append-only。Track Story、Section Relationships 和 Transport-range Verification 都没有修改既有 `0..149` 索引。
 
-```text
-128  analysis_profile
-129  analysis_feature_mask
-130  worker_load_ratio
-131  fifo_fill_ratio
-132  fft_runs_per_second
-133  semantic_runs_per_second
-134  schema marker = "1.1"
-135  transport_supported
-136  transport_time_seconds
-137  transport_ppq_position
-138  transport_bpm
-139  transport_time_signature_numerator
-140  transport_time_signature_denominator
-141  transport_is_playing
-142  transport_is_recording
-143  transport_is_looping
-144  transport_loop_start_ppq
-145  transport_loop_end_ppq
-146  transport_epoch
-147  estimated_analysis_lag_ms
-148  dropped_blocks
-149  schema marker = "1.2"
-```
-
-Analyzer 自有 Profile Control **不修改这条 Analysis Frame 协议**，而是独立使用：
-
-```text
-Transport        仅本机 UDP Loopback
-Control Revision 1
-Scope            仅 Analysis Profile
-ACK              Request-scoped 显式 ACK
-```
-
-Track Story 和 Section Relationships 都只使用 MCP 已保留的证据，因此既有 `0..149` 索引没有被重新解释或追加。
+Analyzer 自有 Analysis Profile Control 使用独立的本机 Loopback Control Protocol，Revision 1。
 
 ## License
 

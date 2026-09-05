@@ -18,7 +18,8 @@ Current layers:
 - section_tools: explainable boundaries, neutral recurring families and section profiles
 - track_story_tools: per-track behavior across sections/families
 - section_relationship_tools: bounded cross-track relationships across sections/families
-- verification_tools: controlled Before/After verification sessions
+- verification_tools: recent-window controlled Before/After verification sessions
+- range_verification_tools: transport-anchored same-range Before/After verification
 
 Set AI_ANALYZER_SELF_TEST=1 to validate source or packaged runtime without
 opening the OSC listener or MCP stdio transport.
@@ -74,6 +75,7 @@ import section_tools as structure  # noqa: E402
 import track_story_tools as story  # noqa: E402
 import section_relationship_tools as relationships  # noqa: E402
 import verification_tools as verification  # noqa: E402,F401
+import range_verification_tools as range_verification  # noqa: E402,F401
 
 MCP_VERSION = "1.2"
 OSC_PROTOCOL_VERSION = "1.2"
@@ -118,6 +120,9 @@ EXPECTED_TOOLS = {
     "audio_begin_verification",
     "audio_complete_verification",
     "audio_verification_status",
+    "audio_begin_range_verification",
+    "audio_complete_range_verification",
+    "audio_range_verification_status",
 }
 
 
