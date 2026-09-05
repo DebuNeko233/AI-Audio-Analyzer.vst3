@@ -4,7 +4,7 @@
 
 **AI Audio Analyzer** 是面向 AI / LLM 音乐制作工作流的 JUCE VST3 机器可读音频测量层。
 
-它在 DAW 内测量音频，通过 OSC 向 Analyzer MCP Bridge 发送结构化数据，并向 Cherry Studio 或其他 MCP 客户端提供电平、响度、频谱、立体声、时间关系、遮蔽、调性、工程状态、DAW 时间轴 Song Memory、可解释歌曲结构、Track Story、Section-aware Mix Relationships、性能遥测和闭环验证证据。
+它在 DAW 内测量音频，通过 OSC 向 Analyzer MCP Bridge 发送结构化数据，并向 Cherry Studio 或其他 MCP 客户端提供电平、响度、频谱、立体声、时间关系、遮蔽、调性、工程状态、DAW 时间轴 Song Memory、可解释歌曲结构、Track Story、Section-aware Mix Relationships、性能遥测、身份范围说明和闭环验证证据。
 
 当前产品版本：**1.2.0**。
 
@@ -16,6 +16,7 @@ AI Audio Analyzer VST3
 
 AI Audio Analyzer MCP
   -> 观察 / 记忆 / 结构 / 比较 / 验证
+  -> 明确告知当前 Project / Runtime Identity 能保证什么、不能保证什么
   -> 只允许控制 Analyzer 自己的 Analysis Profile
 
 外部 DAW-control MCP
@@ -43,6 +44,7 @@ FL Studio / DAW
                          v
                  Analyzer MCP Bridge
                  +-- Live Instance Registry + 确定性 Binding
+                 +-- Project / Runtime Identity Scope Disclosure
                  +-- Adaptive Analysis / Worker Telemetry
                  +-- Analyzer 自有 Loopback Profile Control + ACK
                  +-- DAW Transport + 实例局部 Playback Epoch
@@ -89,6 +91,41 @@ Analyzer 坚持“提供证据，不硬编码审美规则”。不会内置固�
 
 缺失的 Retained Coverage 不等于静音。
 
+## Project / Runtime Identity 范围
+
+当前 Analyzer 的 `runtime_id` 是**一次 Live Plugin Instance 的 UUID**，不是永久 Project ID，也不是永久 Track ID。
+
+VST3 不会把这个 Runtime UUID 序列化保存进工程，因此即使重新打开的是**同一个 FL Studio 工程**，Analyzer Runtime UUID 也会重新生成。
+
+调用方可以直接调用：
+
+```text
+audio_project_identity_status()
+```
+
+当前会明确返回类似：
+
+```text
+stable_project_id                       null
+project_identity_confidence             UNRESOLVED
+runtime_id scope                        live_plugin_instance
+runtime_id persistent                   false
+same-project reopen UUID stable         false
+binding scope                           mcp_session
+cross-project retained-state isolation  not guaranteed
+```
+
+这意味着：
+
+- 不要把 `runtime_id` 当永久 Project/Track 身份；
+- 新的 Runtime UUID **不能证明**用户已经切换了工程，因为重新打开同一个工程也会产生新 UUID；
+- `mixer:<index>/slot:<slot>` Binding 是当前 MCP Session 内的确定性定位，不是永久 Track ID；
+- 如果 MCP 进程一直运行，Song Memory、Section Map、Snapshot、Relationship、Verification 等 Session Memory 可能在用户切换/重开工程后继续留在内存里；
+- 当前还不能保证这些 Retained State 已按稳定 Project ID 自动隔离；
+- 在 P3/P5 接入可信 Project Identity 之前，如果需要严格工程隔离，切换或重新打开工程后应重启 Analyzer MCP，再进行新的分析。
+
+绝不能用 BPM、轨道数量、轨道名、Mixer Index、Topology Fingerprint、Transport Epoch 或 Runtime UUID 自己拼一个“Project ID”。
+
 ## Analyzer ↔ FL Mixer 确定性映射
 
 每个 Live Analyzer 都有 Session Runtime UUID，并公开：
@@ -105,6 +142,8 @@ mixer:7/slot:9
 ```
 
 不要根据轨名或音频内容猜测实例身份。
+
+Binding 只在当前 MCP Session 内有效。插件实例重建或工程重新打开后需要重新 Identify/Bind。
 
 ## Adaptive Analysis Profile
 
@@ -167,6 +206,8 @@ Scope                   当前 MCP Session
 ```
 
 `transport_epoch` 是某个 Analyzer 实例的一次连续播放 Pass。不同实例独立计数，数字相同不代表工程全局同一 Pass。
+
+Song Memory 当前还没有 Stable Project ID 分区。用户切换/重开工程但 MCP 不重启时，必须把旧 Retained Evidence 视为“可能属于之前工程”。
 
 Transport 坐标适合整曲/Section/Range 推理，不是 Sample-accurate 编辑坐标。
 
@@ -260,6 +301,8 @@ audio_range_verification_status(...)
 - 当前不会伪造 Arbitrary-range LUFS-I Delta，因为 Retained `lufs_i_latest` 是 Pass-cumulative，而不是任意范围独立积分值；
 - Analyzer 仍不执行任何改变声音的写入。
 
+同样需要注意：Same-range Verification 只能证明技术比较条件，不会自动证明 Persistent Project Identity。怀疑用户已经切换/重开工程时，不能把旧 Verification Session 直接续到新工程。
+
 ```text
 controlled_comparison=true
 ```
@@ -276,11 +319,12 @@ closed_loop_complete=true
 
 ## MCP 工具
 
-MCP **1.2 当前共 41 个工具**。
+MCP **1.2 当前共 42 个工具**。
 
 高层工具包括：
 
 ```text
+audio_project_identity_status()
 audio_project_status()
 audio_set_analysis_profile(...)
 audio_set_project_analysis_profile(...)
@@ -296,7 +340,9 @@ audio_complete_range_verification(...)
 audio_range_verification_status(...)
 ```
 
-不要机械调用全部 41 个工具。先高层理解，再按问题下钻。
+新的 Agent/MCP Session 开始时，以及用户可能切换/重开工程时，优先检查 `audio_project_identity_status()`，再决定历史状态能不能继续使用。
+
+不要机械调用全部 42 个工具。先高层理解，再按问题下钻。
 
 ## 用户安装
 
@@ -346,7 +392,7 @@ Product version             1.2.0
 MCP version                 1.2
 OSC analysis protocol       1.2
 Analyzer control protocol   本机 revision 1
-MCP tools                   41
+MCP tools                   42
 ```
 
 Runtime Modules：
@@ -355,6 +401,7 @@ Runtime Modules：
 mcp/server.py
 mcp/analyzer_core.py
 mcp/project_tools.py
+mcp/project_identity_tools.py
 mcp/temporal_tools.py
 mcp/masking_tools.py
 mcp/stereo_tools.py
@@ -384,7 +431,7 @@ mcp/range_verification_regression.py
 
 Analysis Address：`/aianalyzer/frame`。
 
-OSC **1.2** 继续 Append-only。Track Story、Section Relationships 和 Transport-range Verification 都没有修改既有 `0..149` 索引。
+OSC **1.2** 继续 Append-only。Track Story、Section Relationships、Transport-range Verification 和 Project Identity Disclosure 都没有修改既有 `0..149` 索引。
 
 Analyzer 自有 Analysis Profile Control 使用独立的本机 Loopback Control Protocol，Revision 1。
 
