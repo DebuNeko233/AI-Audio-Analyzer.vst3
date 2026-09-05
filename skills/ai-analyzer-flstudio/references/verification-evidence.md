@@ -12,22 +12,22 @@ Prefer **transport-anchored same-range verification** whenever a specific DAW-ti
 
 ```text
 audio_begin_range_verification(label, start_seconds, end_seconds, ...)
-→ inspect ready_for_external_change / baseline_blockers
-→ external DAW-control MCP performs the real write
-→ external DAW-control MCP reads actual host state back
-→ replay the returned effective_range
-→ audio_complete_range_verification(..., host_readback="...")
+-> inspect ready_for_external_change / baseline_blockers
+-> external DAW-control MCP performs the real write
+-> external DAW-control MCP reads actual host state back
+-> replay the returned effective_range
+-> audio_complete_range_verification(..., host_readback="...")
 ```
 
 Use the older **recent-window verification** only when an explicit retained DAW-time range is not practical:
 
 ```text
 audio_begin_verification(label, seconds=5, ...)
-→ inspect ready_for_external_change / baseline_blockers
-→ external DAW-control MCP performs the real write
-→ external DAW-control MCP reads actual host state back
-→ replay a comparable passage
-→ audio_complete_verification(..., host_readback="...")
+-> inspect ready_for_external_change / baseline_blockers
+-> external DAW-control MCP performs the real write
+-> external DAW-control MCP reads actual host state back
+-> replay a comparable passage
+-> audio_complete_verification(..., host_readback="...")
 ```
 
 Do not silently describe the recent-window path as exact same-range verification.
@@ -98,7 +98,7 @@ This path freezes a retained Song Memory range before the external change and re
 
 ### Requested vs effective range
 
-Song Memory is retained in canonical one-second bins. Therefore fractional requests are made explicit rather than pretending sub-second precision exists.
+Song Memory is retained in canonical one-second bins. Fractional requests are made explicit rather than pretending sub-second precision exists.
 
 Example:
 
@@ -141,11 +141,20 @@ Missing coverage is not silence. Sparse coverage must not be interpreted as inac
 
 ### Historical feature availability
 
-Same-range comparison uses the measurement families actually present in the retained Before and After evidence.
+P4a does not pretend that the current live Analysis Profile is a perfect record of what was enabled in a historical pass.
 
-Do not substitute the Analyzer's current live Analysis Profile for historical availability. A Profile may have changed after the passage was captured.
+Instead, each selected retained range exposes `feature_availability`, and each target reports `comparable_feature_families`: measurement families represented in **both** Before and After retained summaries.
 
-Current live feature-mask values may still be useful audit context, but retained field availability determines whether a historical dimension can be compared.
+Important nuance: some retained evidence is content-dependent. For example, Chroma may be unavailable because the content did not provide enough tonal evidence even when Semantic analysis was enabled. Therefore unequal retained feature availability is **not proof that the Analysis Profile changed**.
+
+For that reason:
+
+- `retained_feature_mismatch_targets` is an audit warning;
+- it does not automatically fail the whole same-range comparison;
+- only dimensions/families available in both passes should be interpreted;
+- `no_common_feature_targets` is a hard blocker because there is no common retained measurement family to compare.
+
+Do not substitute the current live Profile for historical evidence and do not interpret a `null` delta as zero change.
 
 ### Dropped blocks
 
@@ -174,10 +183,20 @@ same_effective_range
 topology_unchanged
 missing_targets
 invalid_targets
-feature_availability_mismatch_targets
+retained_feature_mismatch_targets
+no_common_feature_targets
 dropped_block_regression_targets
 stale_after_targets
 warnings
+```
+
+Per target, also inspect:
+
+```text
+before.feature_availability
+after.feature_availability
+comparable_feature_families
+retained_feature_availability_equal
 ```
 
 When reporting a result, include:
@@ -190,6 +209,7 @@ resolution_seconds
 selected transport epoch per target for Before and After
 coverage per target
 post-baseline freshness status
+comparable feature families when relevant
 controlled_comparison
 external host-readback status
 measurement deltas actually used
@@ -242,4 +262,6 @@ Completing an already completed verification returns the stored result rather th
 
 If `controlled_comparison=false`, state why before making a strong A/B claim.
 
-Never convert comparability flags, topology fingerprints, coverage thresholds, freshness checks, dropped-block checks, or numeric deltas into automatic processing instructions or artistic conclusions.
+If retained feature availability differs, interpret only the dimensions listed as comparable and explain the limitation when it matters to the conclusion.
+
+Never convert comparability flags, topology fingerprints, coverage thresholds, freshness checks, dropped-block checks, feature-availability warnings, or numeric deltas into automatic processing instructions or artistic conclusions.
