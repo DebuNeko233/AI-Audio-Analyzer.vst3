@@ -7,7 +7,7 @@ This Skill targets:
 - AI Audio Analyzer MCP 1.2;
 - optional FL Studio control MCP: https://github.com/rosasynthesiz/flstudio-mcp
 
-Its purpose is to help an LLM call Analyzer MCP correctly, understand current project/runtime identity limits, interpret measurement validity, manage deterministic Analyzer bindings, choose only the required Analysis Profile, use transport-aware Song Memory, explainable section structure, Track Story, bounded section-aware relationships, and auditable Before/After verification around externally controlled DAW changes.
+Its purpose is to help an LLM call Analyzer MCP correctly, understand current project/runtime identity limits, interpret measurement validity, manage deterministic Analyzer bindings, choose only the required Analysis Profile, use transport-aware Song Memory, explainable song structure, Track Story, bounded section-aware relationships, coverage-aware retained dynamics distributions, and auditable Before/After verification around externally controlled DAW changes.
 
 It does **not** prescribe a mixing style, LUFS target, EQ/compression/sidechain/stereo recipe, semantic section label, track role, key/harmony edit, or mastering chain.
 
@@ -24,6 +24,7 @@ DAW Transport / instance-local playback epochs / Song Memory
 Explainable section boundaries / neutral A-B-C recurrence families
 Track Story across sections/families
 Bounded Section-aware Mix Relationships
+Coverage-aware retained Dynamics Distribution
 Temporal / Masking / Mid-Side / Stereo / Tonal evidence
 Recent-window verification
 Transport-anchored same-range verification
@@ -31,7 +32,7 @@ Transport-anchored same-range verification
 
 OSC analysis protocol remains append-only **1.2**, indexes `0..149` unchanged. Analyzer-owned Profile control remains separate local revision 1.
 
-MCP 1.2 exposes **42 tools**.
+MCP 1.2 exposes **43 tools** on the P6a branch.
 
 ## MCP self-description and Skill relationship
 
@@ -44,7 +45,7 @@ Server instructions
 -> short global startup order and hard semantic/control rules
 
 Tool descriptions
--> purpose and critical limitation for every one of the 42 tools
+-> purpose and critical limitation for every one of the 43 tools
 
 MCP Resources
 -> on-demand long-form guides under aianalyzer://guide/*
@@ -56,6 +57,7 @@ Therefore:
 
 - importing this Skill into Cherry Studio is an optional client-side enhancement, not a prerequisite for basic correct MCP use;
 - a client that supports MCP Resources can read `aianalyzer://guide/index` and then only the guide relevant to the current task;
+- P6a dynamics details are available from `aianalyzer://guide/dynamics-evidence`;
 - do not load every guide mechanically;
 - if the client does not expose MCP Resources, importing this Skill remains the preferred way to provide the full long-form guidance;
 - if the physical packaged `skill` directory is missing, Server instructions and Tool descriptions still provide the minimum self-description, but detailed guide Resources are unavailable.
@@ -127,6 +129,7 @@ Then choose the smallest query:
 audio_track_story(...)           one track across sections
 audio_section_profile(...)       many tracks inside one section
 audio_section_relationships(...) bounded pair shortlist
+audio_dynamics_distribution(...) retained pass/range/section dynamics
 audio_song_timeline(...)         raw DAW-time history only when needed
 ```
 
@@ -171,6 +174,41 @@ All EQ, compression, gain, pan, routing, synth, automation, arrangement and othe
 - Song Memory is MCP-session state and is not yet partitioned by a stable Project ID.
 
 Exact DAW/project metadata wins for exact markers, labels, routing, plugin state and symbolic information when available.
+
+## Coverage-aware retained dynamics
+
+Use:
+
+```text
+audio_dynamics_distribution(...)
+```
+
+for a selected retained transport-pass span, explicit DAW-time range or cached Section Map section. `compare_section_id` can request a descriptive section-to-section distribution shift.
+
+P6a uses a minimum per-bin coverage floor and covered-seconds weighting. The result exposes accepted, rejected-low-coverage and missing bin counts; missing bins are not inserted as silence or zero.
+
+Current descriptive groups include:
+
+```text
+RMS
+LUFS-S
+Crest
+observed per-bin Sample Peak maxima
+observed per-bin True Peak maxima
+```
+
+Keep these boundaries explicit:
+
+- `lufs_s_interpercentile_range_lu` is P90(LUFS-S) - P10(LUFS-S), not standardized EBU Loudness Range;
+- standardized EBU LRA is not implemented in P6a;
+- arbitrary-range Integrated LUFS is unavailable because retained `lufs_i_latest` is pass-cumulative;
+- arbitrary-range PLR is unavailable without scope-compatible integrated loudness and peak evidence;
+- dB percentiles are not power-domain means;
+- observed per-bin peak maxima are not a reconstructed sample stream;
+- section deltas are descriptive evidence, not a mastering quality score or processing instruction;
+- do not impose a fixed genre LUFS/LRA/PLR/Crest target.
+
+See `references/dynamics-evidence.md`.
 
 ## Verification
 
@@ -247,6 +285,7 @@ analysis_valid
 active_ratio
 analysis_features
 coverage_ratio
+accepted / rejected / missing distribution bins
 data_age_seconds
 estimated_analysis_lag_ms
 dropped_blocks
@@ -266,7 +305,7 @@ Historical feature availability comes from retained evidence, not whatever Analy
 Use AI Audio Analyzer MCP's own Server instructions and Tool descriptions as the minimum operating contract. When detailed semantics are needed, read the relevant aianalyzer://guide/* MCP Resource if the client exposes Resources; importing the ai-analyzer-flstudio Skill is an optional client-side way to provide the same long-form guidance.
 At the start of a session and whenever the user may have switched or reopened a DAW project, call audio_project_identity_status before assuming any retained-state continuity. runtime_id is a live plugin-instance identifier only, reopening the same project recreates runtime UUIDs, and a new UUID does not prove the project changed. Until exact external project identity is available, do not reuse old project-level retained state across a switch/reopen; restart Analyzer MCP when strict isolation is required.
 Then call audio_project_status and establish deterministic Identify bindings when needed.
-For whole-song or historical work, use audio_song_status and then audio_section_map when enough Song Memory exists. Use Track Story for one track across sections, Section Profile for many tracks inside one section, and Section Relationships only as a bounded inspection shortlist.
+For whole-song or historical work, use audio_song_status and then audio_section_map when enough Song Memory exists. Use Track Story for one track across sections, Section Profile for many tracks inside one section, and Section Relationships only as a bounded inspection shortlist. Use audio_dynamics_distribution only when retained dynamics distributions are needed; treat its LUFS-S interpercentile spread as descriptive evidence, not EBU LRA, and do not fabricate arbitrary-range Integrated LUFS or PLR.
 Treat A/B/C as neutral recurrence labels, missing coverage as missing evidence, and transport_epoch as instance-local.
 When verifying a real DAW change over a known passage, prefer audio_begin_range_verification / audio_complete_range_verification and replay the returned effective_range after the external write/readback. Do not reuse pre-change retained evidence as After, do not fabricate arbitrary-range LUFS-I, and do not treat controlled_comparison as artistic success or persistent project identity.
 Use recent-window verification only when explicit retained DAW-time anchoring is impractical.

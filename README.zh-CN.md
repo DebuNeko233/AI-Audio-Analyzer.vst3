@@ -4,7 +4,7 @@
 
 **AI Audio Analyzer** 是面向 AI / LLM 音乐制作工作流的 JUCE VST3 机器可读音频测量层。
 
-它在 DAW 内测量音频，通过 OSC 向 Analyzer MCP Bridge 发送结构化数据，并向 Cherry Studio 或其他 MCP 客户端提供电平、响度、频谱、立体声、时间关系、遮蔽、调性、工程状态、DAW 时间轴 Song Memory、可解释歌曲结构、Track Story、Section-aware Mix Relationships、性能遥测、身份范围说明和闭环验证证据。
+它在 DAW 内测量音频，通过 OSC 向 Analyzer MCP Bridge 发送结构化数据，并向 Cherry Studio 或其他 MCP 客户端提供电平、响度、频谱、立体声、时间关系、遮蔽、调性、工程状态、DAW 时间轴 Song Memory、可解释歌曲结构、Track Story、Section-aware Mix Relationships、Coverage-aware Dynamics Distribution、性能遥测、身份范围说明和闭环验证证据。
 
 当前产品版本：**1.2.0**。
 
@@ -55,6 +55,7 @@ FL Studio / DAW
                  +-- 可解释 Section Boundary + Recurrence Family
                  +-- Track Story
                  +-- 有界 Section-aware Relationship Shortlist
+                 +-- Coverage-aware Retained Dynamics Distribution
                  +-- Recent-window + Transport-range Verification
                  +-- Temporal / Masking / Stereo / Tonal Evidence
                          |
@@ -84,6 +85,7 @@ LLM 不在实时音频测量链路内。Agent 思考或调用其他工具时，A
 - 1 秒 Song Memory + 100 ms Coverage Slot；
 - 可解释 Section Boundary + 中性 A/B/C Recurrence Family；
 - Section Profile、Track Story、Section-aware Relationship Shortlist；
+- Coverage-aware RMS / LUFS-S / Crest / Observed Peak Distribution；
 - Project Snapshot A/B、Recent-window Verification；
 - Transport-anchored Same-range Before/After Verification；
 - Adaptive Analysis Profile 与 Worker/FIFO Telemetry。
@@ -250,6 +252,49 @@ A/B/C 只是重复结构家族，不自动等于 Intro/Verse/Chorus/Drop。
 
 详细 Masking/Stereo/Temporal Pair 工具仍是 Recent-window；历史 Section Shortlist 不会自动让它们变成 Historical Range Analyzer。
 
+## Coverage-aware Dynamics Distribution
+
+P6a 新增一个高层工具：
+
+```text
+audio_dynamics_distribution(
+  track,
+  transport_epoch=None,
+  start_seconds=None,
+  end_seconds=None,
+  map_id=None,
+  section_id=None,
+  compare_section_id=None,
+  minimum_range_coverage=...,
+  minimum_bin_coverage=...
+)
+```
+
+支持 Selected Retained Pass Span、显式 DAW-time Range、Cached Section Map Section，并可通过 `compare_section_id` 做 Section-to-section 描述性对比。
+
+Coverage Policy：
+
+```text
+每个 1 秒 Bin 的最小 Coverage Floor
++
+Accepted Bin 按 Covered Seconds 加权
+```
+
+返回结果会明确给出 Accepted / Rejected / Missing Bin 数量；Missing Coverage 永远不会被补成 Silence 或 0。
+
+当前可输出 RMS、LUFS-S、Crest、Observed Sample-Peak Maxima、Observed True-Peak Maxima 的 P10/P25/P50/P75/P90、IQR、P90-P10 Spread 等描述性统计。RMS 还会单独给出 Covered-seconds Power-domain Mean，避免把 dB Percentile 和能量平均混为一谈。
+
+重要边界：
+
+- `lufs_s_interpercentile_range_lu` 只是 `P90(LUFS-S) - P10(LUFS-S)`，**不是 EBU Loudness Range**；
+- P6a 不实现标准 EBU LRA；
+- Retained `lufs_i_latest` 是 Pass-cumulative，因此不能冒充 Arbitrary-range Integrated LUFS；
+- 没有 Scope-compatible Integrated Loudness 时，不输出 Arbitrary-range PLR；
+- Section Delta 只是描述证据，不是 Quality Score 或处理建议；
+- MCP Core 不内置固定 Genre/Mastering LUFS、Crest、LRA、PLR Target。
+
+详细语义见 `skills/ai-analyzer-flstudio/references/dynamics-evidence.md`。
+
 ## Closed-loop Verification
 
 现在有两条验证路径。
@@ -351,6 +396,7 @@ aianalyzer://guide/song-memory
 aianalyzer://guide/section-structure
 aianalyzer://guide/track-story
 aianalyzer://guide/section-relationships
+aianalyzer://guide/dynamics-evidence
 aianalyzer://guide/masking-evidence
 aianalyzer://guide/stereo-evidence
 aianalyzer://guide/tonal-evidence
@@ -365,7 +411,7 @@ CI 会强制所有 MCP Tool 和 Guide Resource 都有非空 Description，并验
 
 ## MCP 工具
 
-MCP **1.2 当前共 42 个工具**。
+MCP **1.2 在 P6a 分支共 43 个工具**。
 
 高层工具包括：
 
@@ -381,6 +427,7 @@ audio_section_map(...)
 audio_section_profile(...)
 audio_track_story(...)
 audio_section_relationships(...)
+audio_dynamics_distribution(...)
 audio_begin_range_verification(...)
 audio_complete_range_verification(...)
 audio_range_verification_status(...)
@@ -388,7 +435,7 @@ audio_range_verification_status(...)
 
 新的 Agent/MCP Session 开始时，以及用户可能切换/重开工程时，优先检查 `audio_project_identity_status()`，再决定历史状态能不能继续使用。
 
-不要机械调用全部 42 个工具。先高层理解，再按问题下钻。
+不要机械调用全部 43 个工具。先高层理解，再按问题下钻。
 
 ## 用户安装
 
@@ -431,16 +478,16 @@ macOS Apple Silicon：解压后运行 `Install.command`。当前 macOS 包为 ad
 mcp/server.py
 ```
 
-当前版本关系：
+P6a 分支版本关系：
 
 ```text
 Product version             1.2.0
 MCP version                 1.2
 OSC analysis protocol       1.2
 Analyzer control protocol   本机 revision 1
-MCP tools                   42
+MCP tools                   43
 Self-description schema     1
-Guide resources             13
+Guide resources             14
 ```
 
 Runtime Modules：
@@ -464,6 +511,7 @@ mcp/section_relationship_tools.py
 mcp/verification_tools.py
 mcp/range_tools.py
 mcp/range_verification_tools.py
+mcp/dynamics_tools.py
 ```
 
 仓库 CI-only Regression：
@@ -472,6 +520,7 @@ mcp/range_verification_tools.py
 mcp/ci_regression.py
 mcp/relationship_regression.py
 mcp/range_verification_regression.py
+mcp/dynamics_regression.py
 ```
 
 这些 Regression 文件不会进入面向普通用户的 Release Runtime。
@@ -480,13 +529,19 @@ mcp/range_verification_regression.py
 
 Analysis Address：`/aianalyzer/frame`。
 
-OSC **1.2** 继续 Append-only。Track Story、Section Relationships、Transport-range Verification、Project Identity Disclosure 和 MCP Self-Description 都没有修改既有 `0..149` 索引。
+OSC **1.2** 继续 Append-only。Track Story、Section Relationships、Transport-range Verification、Project Identity Disclosure、MCP Self-Description 和 P6a Retained Dynamics Distribution 都没有修改既有 `0..149` 索引。
 
 Analyzer 自有 Analysis Profile Control 使用独立的本机 Loopback Control Protocol，Revision 1。
 
 ## Skill
 
 LLM-facing Skill/reference 内容继续保持英文。完整 Skill/Reference Markdown 仍是长篇使用方法的 canonical source，同时通过 `aianalyzer://guide/*` MCP Resources 按需暴露；不要在 `server.py` 里再维护一份重复全文。
+
+P6a 新增长篇 Reference：
+
+```text
+skills/ai-analyzer-flstudio/references/dynamics-evidence.md
+```
 
 ## License
 

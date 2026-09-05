@@ -58,7 +58,7 @@ It exposes:
 
 ```text
 Server instructions
-42 Tool descriptions
+43 Tool descriptions
 MCP Resources under aianalyzer://guide/*
 ```
 
@@ -68,7 +68,7 @@ The packaged `skill/` directory remains the canonical Markdown source for those 
 
 ## What the Agent can do
 
-MCP 1.2 exposes **42 tools** for measurement and evidence workflows, including:
+MCP 1.2 exposes **43 tools** on the P6a branch for measurement and evidence workflows, including:
 
 ```text
 project/runtime identity-scope disclosure
@@ -76,6 +76,7 @@ Song Memory
 explainable Section Map
 Track Story
 Section-aware Mix Relationships
+coverage-aware retained Dynamics Distribution
 Analysis Profile control
 recent-window verification
 transport-anchored same-range verification
@@ -90,6 +91,14 @@ audio_project_identity_status()
 Current limitation: Analyzer runtime UUIDs identify live plugin instances only. They are not saved as persistent project/track IDs, and reopening the **same** project creates new runtime UUIDs. The MCP also does not yet have a stable FL Studio Project ID, so retained Song Memory, Section Maps, snapshots, relationships and verification sessions are not guaranteed to be isolated across project switches while MCP keeps running.
 
 Until exact project identity is integrated, **restart Analyzer MCP after changing or reopening projects when strict state isolation is required**. A new runtime UUID alone does not prove that a different project was opened.
+
+For retained dynamics across a selected pass, explicit DAW-time range, or cached section, the Agent can use:
+
+```text
+audio_dynamics_distribution(...)
+```
+
+P6a reports coverage-weighted RMS / LUFS-S / Crest / observed Sample-Peak / observed True-Peak distributions. Missing bins stay missing. `lufs_s_interpercentile_range_lu` is descriptive P90-P10 LUFS-S spread, **not EBU Loudness Range**. Standardized EBU LRA, arbitrary-range Integrated LUFS and arbitrary-range PLR remain unavailable rather than being fabricated from incompatible retained state.
 
 When verifying a real DAW/plugin change over a known musical passage, the Agent can use:
 
@@ -146,7 +155,7 @@ Analysis Profiles (`Eco`, `Balanced`, `Mix`, `Full`) affect Analyzer computation
 
 ```text
 Server instructions
-42 个 Tool description
+43 个 Tool description
 MCP Resources: aianalyzer://guide/*
 ```
 
@@ -154,7 +163,7 @@ MCP Resources: aianalyzer://guide/*
 
 如果客户端支持 MCP Resources，可以先读 `aianalyzer://guide/index`，再按任务读取需要的详细 Guide。Release 中的 `skill/` 仍然保留，因为它是这些 Guide Resources 的 canonical Markdown 内容源，同时也可以被支持 Skill 的客户端直接导入。
 
-当前 MCP 1.2 共 **42 个工具**，包括 Project/Runtime Identity Scope、Song Memory、Section Map、Track Story、Section-aware Relationships、Analysis Profile Control，以及 Recent-window / Transport-anchored Same-range 两种验证路径。
+当前 MCP 1.2 在 P6a 分支共 **43 个工具**，包括 Project/Runtime Identity Scope、Song Memory、Section Map、Track Story、Section-aware Relationships、Coverage-aware Dynamics Distribution、Analysis Profile Control，以及 Recent-window / Transport-anchored Same-range 两种验证路径。
 
 新会话开始时，或者用户可能切换/重新打开了 FL Studio 工程时，Agent 应先调用：
 
@@ -165,6 +174,14 @@ audio_project_identity_status()
 当前 `runtime_id` 只是一次 Live Plugin Instance 的 UUID，不是永久工程/轨道身份；即使重新打开**同一个工程** UUID 也会变化。MCP 当前也没有可信 Stable Project ID，因此 MCP 一直运行时，上一个工程的 Song Memory、Section Map、Snapshot、Relationship、Verification 等状态还不能保证与新工程完全隔离。
 
 在后续接入精确 Project Identity 之前，如果需要严格隔离，**切换或重新打开工程后重启 Analyzer MCP**。新的 Runtime UUID 本身不能证明工程已经切换。
+
+要查看 Retained Dynamics，可以调用：
+
+```text
+audio_dynamics_distribution(...)
+```
+
+P6a 会按 Coverage 过滤/加权 1 秒 Retained Bin，输出 RMS、LUFS-S、Crest、Observed Sample Peak、Observed True Peak 的描述性分布。Missing Bin 不会补成 0 或静音；`lufs_s_interpercentile_range_lu` 也不是标准 EBU LRA。任意范围 Integrated LUFS / PLR 目前明确不可用，不会伪造。
 
 对于已知的歌曲时间范围，优先使用：
 
