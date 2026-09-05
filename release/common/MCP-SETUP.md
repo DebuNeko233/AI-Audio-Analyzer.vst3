@@ -80,8 +80,8 @@ The MCP exposes:
 
 ```text
 Server instructions
-43 Tool descriptions
-MCP Resources under aianalyzer://guide/*
+44 Tool descriptions
+15 MCP Resources under aianalyzer://guide/*
 ```
 
 The packaged `skill` folder remains important because its `SKILL.md` and `references/*.md` are the canonical long-form guide content used by those MCP Resources.
@@ -100,13 +100,19 @@ For P6a dynamics semantics, the relevant Resource is:
 aianalyzer://guide/dynamics-evidence
 ```
 
+For P7a direct mono-fold semantics, the relevant Resource is:
+
+```text
+aianalyzer://guide/mono-compatibility
+```
+
 If the client does not expose MCP Resources, importing the packaged `skill` folder into that Agent/Assistant is the preferred way to provide the same long-form professional guidance.
 
 If the physical `skill` directory is missing, Server instructions and Tool descriptions still provide the minimum self-description, but detailed guide Resources are unavailable.
 
 ### 4. Verify the tool surface and identity scope
 
-AI Audio Analyzer MCP 1.2 exposes **43 tools** on the P6a branch.
+AI Audio Analyzer MCP 1.2 exposes **44 tools** on the stacked P7a branch.
 
 First call at a new session or after a possible DAW project switch/reopen:
 
@@ -155,6 +161,22 @@ audio_dynamics_distribution(...)
 Use it for a selected retained transport-pass span, explicit DAW-time range or cached Section Map section. It reports accepted/rejected/missing one-second bins and coverage-weighted descriptive distributions for RMS, LUFS-S, Crest, observed Sample Peak and observed True Peak.
 
 Do not interpret `lufs_s_interpercentile_range_lu` as EBU Loudness Range. P6a explicitly leaves standardized EBU LRA, arbitrary-range Integrated LUFS and arbitrary-range PLR unavailable.
+
+Recent direct mono-fold compatibility evidence is available through:
+
+```text
+audio_mono_compatibility(track, seconds=5.0)
+```
+
+P7a reuses the Analyzer's existing Mid/Side evidence to report mono-fold RMS change and energy-aware 32 band-center fold-down loss. It adds no new realtime VST3 DSP or OSC fields.
+
+Keep these limitations explicit:
+
+- `inspection_priority` is an energy-aware shortlist aid, not a quality score, audibility probability, pass/fail result, or processing instruction;
+- correlation, Side/Mid, negative-cross and direct fold-down energy remain separate evidence dimensions;
+- `floor_censored=true` means the Mid measurement reached the Analyzer's `-120 dB` floor, so cancellation depth below that floor is not known precisely;
+- current P7a is a recent receive-time window only, not arbitrary historical/Section 32-band evidence;
+- current P7a does not directly measure mono-fold Sample Peak or True Peak and must not infer them from stereo metrics.
 
 For a real DAW change over a known passage, prefer transport-anchored same-range verification:
 
@@ -270,8 +292,8 @@ AI Audio Analyzer MCP 本身具备 Self-Describing API。即使没有把 `skill`
 
 ```text
 Server instructions
-43 个 Tool description
-MCP Resources: aianalyzer://guide/*
+44 个 Tool description
+15 个 MCP Resources: aianalyzer://guide/*
 ```
 
 理解 MCP 的基本调用顺序和关键限制。
@@ -293,13 +315,19 @@ aianalyzer://guide/index
 aianalyzer://guide/dynamics-evidence
 ```
 
+P7a Mono-fold 的详细 Guide 是：
+
+```text
+aianalyzer://guide/mono-compatibility
+```
+
 如果客户端不支持 MCP Resources，则建议把 Release 里的 `skill` 文件夹导入给同一个 Agent，以获得完整的长篇专业说明。
 
 如果物理 `skill` 目录缺失，Server instructions 与 Tool descriptions 仍可以提供最低限度的自解释能力，但详细 Guide Resources 不可用。
 
 ### 4. 检查工具和工程身份范围
 
-当前 AI Audio Analyzer MCP 1.2 在 P6a 分支共 **43 个工具**。
+当前 AI Audio Analyzer MCP 1.2 在 Stacked P7a 分支共 **44 个工具**。
 
 新会话开始时，或用户可能切换/重新打开了工程时，先调用：
 
@@ -346,6 +374,22 @@ audio_dynamics_distribution(...)
 ```
 
 可以分析 Selected Retained Pass、显式 DAW-time Range 或 Cached Section，并按 Coverage 过滤/加权 1 秒 Bin。Missing Bin 不会补 0；`lufs_s_interpercentile_range_lu` 也不是标准 EBU LRA。P6a 目前明确不提供 Arbitrary-range Integrated LUFS / PLR。
+
+Recent Mono-fold Compatibility 使用：
+
+```text
+audio_mono_compatibility(track, seconds=5.0)
+```
+
+P7a 直接复用现有 Mid/Side 证据，输出 Mono-fold RMS 变化和 Energy-aware 32 Band-center Loss Evidence，不增加新的 Realtime VST3 DSP/OSC 字段。
+
+必须保持这些边界：
+
+- `inspection_priority` 只是检查优先级，不是质量分数、Audibility Probability、Pass/Fail 或处理建议；
+- Correlation、Side/Mid、Negative-cross 和 Direct Fold-down Energy 是独立证据；
+- `floor_censored=true` 表示 Mid 已触及 Analyzer `-120 dB` 测量地板，低于这个地板的抵消深度不能精确断言；
+- P7a 当前只看 Recent Receive-time Window，不是任意 Historical/Section 32-band Evidence；
+- P7a 当前不直接测量 Mono-fold Sample Peak / True Peak，也不能从 Stereo 指标推算它们。
 
 如果要验证一个已知歌曲时间范围上的真实 DAW/插件修改，优先使用：
 
