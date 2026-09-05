@@ -76,13 +76,35 @@ Manual macOS example:
 
 Import the packaged `skill` folder into the same Agent/Assistant that has `ai-audio-analyzer` enabled.
 
-The MCP provides tools. The Skill teaches the model how to use deterministic bindings, Analysis Profiles, Song Memory, Section Map, Track Story, Section-aware Relationships, data-quality evidence, and both verification modes safely.
+The MCP provides tools. The Skill teaches the model how to use project/runtime identity disclosure, deterministic bindings, Analysis Profiles, Song Memory, Section Map, Track Story, Section-aware Relationships, data-quality evidence, and both verification modes safely.
 
-### 4. Verify the tool surface
+### 4. Verify the tool surface and identity scope
 
-AI Audio Analyzer MCP 1.2 exposes **41 tools**.
+AI Audio Analyzer MCP 1.2 exposes **42 tools**.
 
-Useful first call:
+First call at a new session or after a possible DAW project switch/reopen:
+
+```text
+audio_project_identity_status()
+```
+
+Current expected identity scope:
+
+```text
+stable_project_id                       null
+project_identity_confidence             UNRESOLVED
+runtime_id scope                        live_plugin_instance
+runtime_id persistent                   false
+same-project reopen UUID stable         false
+binding scope                           mcp_session
+cross-project retained-state isolation  not guaranteed
+```
+
+Important: reopening the same FL Studio project recreates Analyzer runtime UUIDs. A new UUID therefore does not prove that a different project was opened. If Analyzer MCP keeps running while the user switches/reopens projects, old Song Memory, Section Maps, snapshots, relationships or verification sessions may still exist in MCP RAM and are not yet partitioned by a stable Project ID.
+
+Until exact DAW project identity is integrated, restart Analyzer MCP after changing/reopening projects when strict state isolation is required.
+
+Then inspect current-session readiness:
 
 ```text
 audio_project_status()
@@ -114,6 +136,8 @@ audio_begin_verification(...)
 audio_complete_verification(...)
 audio_verification_status(...)
 ```
+
+Neither verification path establishes persistent project identity. Do not continue an old verification across a suspected project switch/reopen without authoritative external identity or a clean MCP restart.
 
 The Analyzer does not perform the sound-changing DAW write. All EQ, compression, gain, pan, routing, synth, automation and project changes remain the responsibility of the actual DAW-control MCP.
 
@@ -208,13 +232,35 @@ macOS:
 
 把 Release 里的 `skill` 文件夹导入给同一个已启用 `ai-audio-analyzer` MCP 的 Agent。
 
-Skill 会告诉 LLM 怎样使用确定性 Binding、Analysis Profile、Song Memory、Section Map、Track Story、Section-aware Relationships、数据质量字段和两种 Verification 模式。
+Skill 会告诉 LLM 怎样使用 Project/Runtime Identity Scope、确定性 Binding、Analysis Profile、Song Memory、Section Map、Track Story、Section-aware Relationships、数据质量字段和两种 Verification 模式。
 
-### 4. 检查工具是否可见
+### 4. 检查工具和工程身份范围
 
-当前 AI Audio Analyzer MCP 1.2 共 **41 个工具**。
+当前 AI Audio Analyzer MCP 1.2 共 **42 个工具**。
 
-建议先调用：
+新会话开始时，或用户可能切换/重新打开了工程时，先调用：
+
+```text
+audio_project_identity_status()
+```
+
+当前会明确告诉调用方：
+
+```text
+stable_project_id                       null
+project_identity_confidence             UNRESOLVED
+runtime_id scope                        live_plugin_instance
+runtime_id persistent                   false
+same-project reopen UUID stable         false
+binding scope                           mcp_session
+cross-project retained-state isolation  not guaranteed
+```
+
+重新打开**同一个 FL Studio 工程**也会重新生成 Analyzer Runtime UUID，所以新的 UUID 不能证明“工程已经变了”。如果 MCP 一直运行，上一个工程的 Song Memory、Section Map、Snapshot、Relationship、Verification 等状态也可能继续存在于 MCP RAM 中，目前还没有 Stable Project ID 自动分区。
+
+在后续接入可信 Project Identity 之前，如果需要严格隔离，切换或重新打开工程后请重启 Analyzer MCP。
+
+然后再检查当前 Session：
 
 ```text
 audio_project_status()
@@ -240,6 +286,8 @@ audio_complete_range_verification(...)
 ```
 
 如果不方便指定明确的 Retained DAW-time Range，旧的 Recent-window Verification 仍可使用。
+
+两种 Verification 都不能证明 Persistent Project Identity；怀疑已经切换/重开工程时，不要把旧 Verification Session 直接续用到新状态。
 
 Analyzer MCP 不执行 EQ、Compression、Gain、Pan、Routing、Synth、Automation 或工程修改。这些操作仍属于真正的 DAW-control MCP。
 
