@@ -8,6 +8,7 @@ the shared MCP server defined by `analyzer_core.py`.
 Current layers:
 - core: signal validity, runtime identity, FL Mixer binding, base measurements
 - project_tools: project overview and Snapshot A/B
+- project_identity_tools: explicit project/runtime identity scope disclosure
 - temporal_tools: temporal frame tail and temporal comparisons
 - masking_tools: masking-evidence tools
 - stereo_tools: Mid/Side, Side-spectrum, and stereo evidence
@@ -49,6 +50,7 @@ def __getattr__(name: str) -> Any:
 
 # Import order matters because every protocol layer wraps the previous parser.
 import project_tools as project  # noqa: E402,F401
+import project_identity_tools as project_identity  # noqa: E402
 import temporal_tools as temporal  # noqa: E402
 
 core._on_frame = temporal.on_frame_v06
@@ -94,6 +96,7 @@ EXPECTED_TOOLS = {
     "audio_detect_masking",
     "audio_master_status",
     "audio_project_status",
+    "audio_project_identity_status",
     "audio_mix_overview",
     "audio_capture_snapshot",
     "audio_list_snapshots",
@@ -165,6 +168,7 @@ def self_test() -> None:
         )
 
     _self_test_song_coverage()
+    identity_result = project_identity._self_test()
     control_result = control._self_test()
     structure_result = structure._self_test()
     story_result = story._self_test()
@@ -182,6 +186,7 @@ def self_test() -> None:
                 "tool_count": len(names),
                 "expected_tools": len(EXPECTED_TOOLS),
                 "song_memory_sparse_coverage": "ok",
+                "project_identity_scope": identity_result,
                 "analyzer_profile_control": control_result,
                 "song_structure_synthetic": structure_result,
                 "track_story_synthetic": story_result,
