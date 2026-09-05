@@ -120,9 +120,8 @@ def main() -> None:
         with verification._range_verification_lock:
             verification._range_verifications.clear()
 
-        # Track A has an older complete pass and a newer sparse pass. Coverage
-        # must win before recency. Track B deliberately uses a different local
-        # epoch number for the same musical passage.
+        # A has an older complete pass and newer sparse pass. Coverage must win
+        # before recency. B deliberately uses a different local epoch number.
         _seed_pass("runtime-a", 3, 2, 5, first_received_at=now - 20.0, slots_per_bin=10, rms_db=-18.0)
         _seed_pass("runtime-a", 4, 2, 5, first_received_at=now - 10.0, slots_per_bin=2, rms_db=-17.0)
         _seed_pass("runtime-b", 9, 2, 5, first_received_at=now - 19.0, slots_per_bin=10, rms_db=-20.0)
@@ -147,8 +146,7 @@ def main() -> None:
         verification_id = begin["verification_id"]
         receive_fence = float(begin["receive_fence"])
 
-        # Before replay, the post-fence resolver must not silently reuse the
-        # frozen pre-change Song Memory bins.
+        # Pre-change Song Memory cannot silently be selected as After.
         stale_after = ranges.resolve_track_range(
             "runtime-a",
             2.25,
@@ -174,18 +172,57 @@ def main() -> None:
         assert result["closed_loop_complete"] is True
         assert comparison["comparability"]["stale_after_targets"] == []
         assert comparison["comparability"]["retained_feature_mismatch_targets"] == []
-        assert comparison["comparability"]["live_feature_mask_mismatch_targets"] == []
+        assert comparison["comparability"]["no_common_feature_targets"] == []
         assert comparison["comparability"]["dropped_block_regression_targets"] == []
+
         targets = {item["identity"]: item for item in comparison["targets"]}
         assert targets["mixer:1/slot:1"]["before"]["selected_transport_epoch"] == 3
         assert targets["mixer:1/slot:1"]["after"]["selected_transport_epoch"] == 11
         assert targets["mixer:2/slot:1"]["before"]["selected_transport_epoch"] == 9
         assert targets["mixer:2/slot:1"]["after"]["selected_transport_epoch"] == 17
         assert targets["mixer:1/slot:1"]["delta"]["rms_db"] == 2.0
+        assert "core" in targets["mixer:1/slot:1"]["comparable_feature_families"]
+
+        # Content-dependent evidence availability must not be mistaken for proof
+        # that the historical Analysis Profile changed. It is a per-dimension
+        # audit warning; common retained families remain comparable.
+        session = verification._range_verifications[verification_id]
+        before_state = copy.deepcopy(session["before_state"])
+        after_state = copy.deepcopy(session["after_state"])
+        after_state["tracks"]["mixer:1/slot:1"]["feature_availability"]["semantic"] = False
+        availability_change = verification._comparison(
+            before_state,
+            after_state,
+            ["mixer:1/slot:1", "mixer:2/slot:1"],
+            baseline_ready=True,
+            receive_fence=receive_fence,
+        )
+        assert availability_change["controlled_comparison"] is True
+        assert "mixer:1/slot:1" in availability_change["comparability"]["retained_feature_mismatch_targets"]
+        changed_target = next(
+            item for item in availability_change["targets"]
+            if item["identity"] == "mixer:1/slot:1"
+        )
+        assert "semantic" not in changed_target["comparable_feature_families"]
+        assert "core" in changed_target["comparable_feature_families"]
+
+        # A new dropped-block regression remains a hard data-integrity blocker.
+        dropped_state = copy.deepcopy(after_state)
+        dropped_state["tracks"]["mixer:1/slot:1"]["range_provenance"]["data_quality"]["dropped_blocks_cumulative"] = 5
+        dropped_change = verification._comparison(
+            before_state,
+            dropped_state,
+            ["mixer:1/slot:1"],
+            baseline_ready=True,
+            receive_fence=receive_fence,
+        )
+        assert dropped_change["controlled_comparison"] is False
+        assert "mixer:1/slot:1" in dropped_change["comparability"]["dropped_block_regression_targets"]
 
         print(
             "transport-range verification regression: ok "
-            "(fractional normalization, coverage-first pass selection, cross-instance epochs, post-fence replay, retained-feature compatibility, readback gate)"
+            "(fractional normalization, coverage-first pass selection, cross-instance epochs, "
+            "post-fence replay, field-level retained-feature comparability, drop guard, readback gate)"
         )
     finally:
         with core._lock:
