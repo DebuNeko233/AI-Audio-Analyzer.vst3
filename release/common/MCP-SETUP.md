@@ -72,11 +72,31 @@ Manual macOS example:
 }
 ```
 
-### 3. Add the Skill to the same Agent
+### 3. Skill import is optional
 
-Import the packaged `skill` folder into the same Agent/Assistant that has `ai-audio-analyzer` enabled.
+AI Audio Analyzer MCP is self-describing. A client does **not** have to import the packaged Skill in order to understand the basic server contract.
 
-The MCP provides tools. The Skill teaches the model how to use project/runtime identity disclosure, deterministic bindings, Analysis Profiles, Song Memory, Section Map, Track Story, Section-aware Relationships, data-quality evidence, and both verification modes safely.
+The MCP exposes:
+
+```text
+Server instructions
+42 Tool descriptions
+MCP Resources under aianalyzer://guide/*
+```
+
+The packaged `skill` folder remains important because its `SKILL.md` and `references/*.md` are the canonical long-form guide content used by those MCP Resources.
+
+If the client supports MCP Resources, it can read:
+
+```text
+aianalyzer://guide/index
+```
+
+and then load only the relevant guide for the current task. Do not load every guide mechanically.
+
+If the client does not expose MCP Resources, importing the packaged `skill` folder into that Agent/Assistant is the preferred way to provide the same long-form professional guidance.
+
+If the physical `skill` directory is missing, Server instructions and Tool descriptions still provide the minimum self-description, but detailed guide Resources are unavailable.
 
 ### 4. Verify the tool surface and identity scope
 
@@ -228,11 +248,34 @@ macOS:
 }
 ```
 
-### 3. 给同一个 Agent 导入 Skill
+### 3. Skill 导入现在是可选增强
 
-把 Release 里的 `skill` 文件夹导入给同一个已启用 `ai-audio-analyzer` MCP 的 Agent。
+AI Audio Analyzer MCP 本身具备 Self-Describing API。即使没有把 `skill` 手动导入客户端，调用方仍可以通过：
 
-Skill 会告诉 LLM 怎样使用 Project/Runtime Identity Scope、确定性 Binding、Analysis Profile、Song Memory、Section Map、Track Story、Section-aware Relationships、数据质量字段和两种 Verification 模式。
+```text
+Server instructions
+42 个 Tool description
+MCP Resources: aianalyzer://guide/*
+```
+
+理解 MCP 的基本调用顺序和关键限制。
+
+Release 里的 `skill` 文件夹仍然会保留，因为它有两个用途：
+
+1. 给支持 Skill 的客户端做可选导入；
+2. 作为 MCP Guide Resources 的 canonical Markdown 内容源。
+
+如果客户端支持 MCP Resources，可以先读：
+
+```text
+aianalyzer://guide/index
+```
+
+再按当前任务只读取需要的 Guide，不要一次性加载全部 Guide。
+
+如果客户端不支持 MCP Resources，则建议把 Release 里的 `skill` 文件夹导入给同一个 Agent，以获得完整的长篇专业说明。
+
+如果物理 `skill` 目录缺失，Server instructions 与 Tool descriptions 仍可以提供最低限度的自解释能力，但详细 Guide Resources 不可用。
 
 ### 4. 检查工具和工程身份范围
 

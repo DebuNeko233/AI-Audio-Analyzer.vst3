@@ -18,7 +18,7 @@ Intel/x86_64 macOS is not included.
 ```text
 AI Audio Analyzer.vst3
 mcp/                         standalone one-file MCP executable
-skill/                       Cherry Studio / LLM Skill
+skill/                       canonical long-form guides + optional client Skill
 START-HERE.md
 MCP-SETUP.md
 INSTALL.en.md
@@ -40,7 +40,7 @@ The user Release deliberately contains no MCP Python source, repository regressi
 6. Wait for **Installation completed successfully**.
 7. Restart FL Studio and rescan VST3 plugins if needed.
 8. Follow `MCP-SETUP.md` to enable the generated MCP configuration for the intended Agent.
-9. Import the installed `skill` folder for the same Agent.
+9. Optional: import the installed `skill` folder if the client supports Skills or does not expose MCP Resources.
 
 User-side Analyzer files are installed under:
 
@@ -57,7 +57,8 @@ User-side Analyzer files are installed under:
 5. If macOS blocks it, right-click `Install.command` and choose **Open**.
 6. Wait for installation success.
 7. Restart FL Studio and rescan plugins if needed.
-8. Follow `MCP-SETUP.md` and import the installed `skill` folder for the same Agent.
+8. Follow `MCP-SETUP.md` to add Analyzer MCP to the Agent.
+9. Optional: import the installed `skill` folder if the client benefits from client-side Skill loading.
 
 VST3 location:
 
@@ -80,6 +81,24 @@ The installer generates `cherry-studio-mcp.json` with the real absolute path to 
 Prefer that generated file over typing paths manually. Full JSON examples are in `MCP-SETUP.md`.
 
 AI Audio Analyzer MCP 1.2 currently exposes **42 tools**.
+
+## MCP Self-Describing API
+
+The MCP remains understandable even if the client does not import the packaged Skill.
+
+It exposes:
+
+```text
+Server instructions
+42 Tool descriptions
+MCP Resources under aianalyzer://guide/*
+```
+
+The `skill/` directory remains the canonical long-form Markdown source for MCP Resources and can also be imported directly by Skill-capable clients.
+
+If the client supports MCP Resources, read `aianalyzer://guide/index` and then only the guide relevant to the current task. If the client does not expose Resources, importing the installed `skill` folder is the preferred way to provide the same detailed guidance.
+
+If the physical `skill` directory is missing, Server instructions and Tool descriptions still provide the minimum operating contract, but detailed guide Resources are unavailable.
 
 At a new session, and whenever the user may have switched or reopened the DAW project, first inspect:
 
@@ -199,7 +218,10 @@ This is the only Analyzer MCP write capability. All sound/project writes and act
 ## Suggested first workflow
 
 ```text
-audio_project_identity_status()
+connect Analyzer MCP
+-> use Server instructions / Tool descriptions as the minimum contract
+-> when detailed semantics are needed, read the relevant aianalyzer://guide/* Resource if supported
+-> audio_project_identity_status()
 -> if project was switched/reopened and strict isolation is required, restart Analyzer MCP
 -> audio_project_status()
 -> bind unbound Analyzer instances through Identify when needed
@@ -215,7 +237,7 @@ audio_project_identity_status()
 
 If the plugin is not visible, restart FL Studio, rescan VST3 plugins, and confirm the VST3 exists in the normal platform plugin directory.
 
-If the Agent cannot see MCP tools, confirm installation, use generated `cherry-studio-mcp.json`, enable the MCP server for the same Agent that receives the Skill, and refresh/restart the Agent session.
+If the Agent cannot see MCP tools, confirm installation, use generated `cherry-studio-mcp.json`, enable the MCP server for the intended Agent, and refresh/restart the Agent session. Importing the Skill is not required for the tools themselves to appear.
 
 If Analyzer Profile control times out, verify the VST3 and MCP runtime came from the same current Release. No ACK means no confirmed profile write.
 

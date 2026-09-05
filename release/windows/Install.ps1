@@ -66,7 +66,7 @@ if (-not $SkipPlugin) {
     }
 }
 
-Write-Step 'Installing Analyzer MCP and Cherry Studio Skill'
+Write-Step 'Installing Analyzer MCP and guide resources'
 New-Item -ItemType Directory -Path $InstallRoot -Force | Out-Null
 
 foreach ($name in @('mcp', 'skill')) {
@@ -83,24 +83,30 @@ foreach ($doc in @('START-HERE.md', 'MCP-SETUP.md', 'INSTALL.en.md', 'INSTALL.zh
 }
 
 $McpExe = Join-Path $InstallRoot 'mcp\ai-audio-analyzer-mcp.exe'
+$SkillRoot = Join-Path $InstallRoot 'skill'
 if (-not (Test-Path $McpExe)) {
     throw "Analyzer MCP executable not found: $McpExe"
 }
+if (-not (Test-Path (Join-Path $SkillRoot 'SKILL.md'))) {
+    throw "Analyzer MCP canonical guide files not found: $SkillRoot"
+}
 
-Write-Step 'Checking Analyzer MCP'
+Write-Step 'Checking Analyzer MCP and guide resources'
 $oldSelfTest = $env:AI_ANALYZER_SELF_TEST
+$oldRequireGuides = $env:AI_ANALYZER_REQUIRE_GUIDES
+$oldSkillDir = $env:AI_ANALYZER_SKILL_DIR
 try {
     $env:AI_ANALYZER_SELF_TEST = '1'
+    $env:AI_ANALYZER_REQUIRE_GUIDES = '1'
+    $env:AI_ANALYZER_SKILL_DIR = $SkillRoot
     & $McpExe
     if ($LASTEXITCODE -ne 0) {
-        throw "Analyzer MCP self-test failed with exit code $LASTEXITCODE."
+        throw "Analyzer MCP self-description/guide self-test failed with exit code $LASTEXITCODE."
     }
 } finally {
-    if ($null -eq $oldSelfTest) {
-        Remove-Item Env:AI_ANALYZER_SELF_TEST -ErrorAction SilentlyContinue
-    } else {
-        $env:AI_ANALYZER_SELF_TEST = $oldSelfTest
-    }
+    if ($null -eq $oldSelfTest) { Remove-Item Env:AI_ANALYZER_SELF_TEST -ErrorAction SilentlyContinue } else { $env:AI_ANALYZER_SELF_TEST = $oldSelfTest }
+    if ($null -eq $oldRequireGuides) { Remove-Item Env:AI_ANALYZER_REQUIRE_GUIDES -ErrorAction SilentlyContinue } else { $env:AI_ANALYZER_REQUIRE_GUIDES = $oldRequireGuides }
+    if ($null -eq $oldSkillDir) { Remove-Item Env:AI_ANALYZER_SKILL_DIR -ErrorAction SilentlyContinue } else { $env:AI_ANALYZER_SKILL_DIR = $oldSkillDir }
 }
 
 Write-Step 'Creating Cherry Studio MCP configuration'
@@ -128,9 +134,9 @@ Write-Host 'Next steps:'
 Write-Host '1. Restart FL Studio and rescan VST3 plugins.'
 Write-Host '2. Add the generated MCP configuration to the Agent/Assistant that will use Analyzer:'
 Write-Host "   $ConfigPath"
-Write-Host '3. Follow the Agent/MCP setup guide (includes JSON examples):'
+Write-Host '3. Follow the Agent/MCP setup guide (includes self-description and optional Skill import):'
 Write-Host "   $McpSetupPath"
-Write-Host '4. Import the installed Skill folder for the same Agent:'
-Write-Host "   $(Join-Path $InstallRoot 'skill')"
+Write-Host '4. Optional: import the installed Skill folder if your client supports Skills or does not expose MCP Resources:'
+Write-Host "   $SkillRoot"
 Write-Host ''
 Write-Host 'You do not need Python, pip, a terminal, or any programming setup.' -ForegroundColor Green

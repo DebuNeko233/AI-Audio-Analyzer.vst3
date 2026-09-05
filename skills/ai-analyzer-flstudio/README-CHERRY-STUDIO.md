@@ -33,6 +33,35 @@ OSC analysis protocol remains append-only **1.2**, indexes `0..149` unchanged. A
 
 MCP 1.2 exposes **42 tools**.
 
+## MCP self-description and Skill relationship
+
+The MCP server is designed to remain understandable even when the client has **not imported this Skill**.
+
+The protocol-facing layers are:
+
+```text
+Server instructions
+-> short global startup order and hard semantic/control rules
+
+Tool descriptions
+-> purpose and critical limitation for every one of the 42 tools
+
+MCP Resources
+-> on-demand long-form guides under aianalyzer://guide/*
+```
+
+The packaged/repository `SKILL.md` and `references/*.md` remain the **canonical long-form content source**. MCP Resources read those same files on demand; they are not a second hand-maintained copy.
+
+Therefore:
+
+- importing this Skill into Cherry Studio is an optional client-side enhancement, not a prerequisite for basic correct MCP use;
+- a client that supports MCP Resources can read `aianalyzer://guide/index` and then only the guide relevant to the current task;
+- do not load every guide mechanically;
+- if the client does not expose MCP Resources, importing this Skill remains the preferred way to provide the full long-form guidance;
+- if the physical packaged `skill` directory is missing, Server instructions and Tool descriptions still provide the minimum self-description, but detailed guide Resources are unavailable.
+
+The normal Release still includes `skill/` because it serves both optional client-side Skill import and the canonical Markdown source for MCP guide Resources.
+
 ## Recommended initialization
 
 First inspect current identity guarantees:
@@ -234,7 +263,7 @@ Historical feature availability comes from retained evidence, not whatever Analy
 ## Suggested Agent instruction
 
 ```text
-Use the ai-analyzer-flstudio Skill only as a technical MCP usage and evidence-semantics reference.
+Use AI Audio Analyzer MCP's own Server instructions and Tool descriptions as the minimum operating contract. When detailed semantics are needed, read the relevant aianalyzer://guide/* MCP Resource if the client exposes Resources; importing the ai-analyzer-flstudio Skill is an optional client-side way to provide the same long-form guidance.
 At the start of a session and whenever the user may have switched or reopened a DAW project, call audio_project_identity_status before assuming any retained-state continuity. runtime_id is a live plugin-instance identifier only, reopening the same project recreates runtime UUIDs, and a new UUID does not prove the project changed. Until exact external project identity is available, do not reuse old project-level retained state across a switch/reopen; restart Analyzer MCP when strict isolation is required.
 Then call audio_project_status and establish deterministic Identify bindings when needed.
 For whole-song or historical work, use audio_song_status and then audio_section_map when enough Song Memory exists. Use Track Story for one track across sections, Section Profile for many tracks inside one section, and Section Relationships only as a bounded inspection shortlist.

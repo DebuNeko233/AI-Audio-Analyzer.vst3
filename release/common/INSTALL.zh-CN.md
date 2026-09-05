@@ -18,7 +18,7 @@ macOS Apple Silicon arm64
 ```text
 AI Audio Analyzer.vst3
 mcp/                         已打包好的单文件 MCP Runtime
-skill/                       Cherry Studio / LLM Skill
+skill/                       canonical 长篇 Guide + 可选客户端 Skill
 START-HERE.md
 MCP-SETUP.md
 INSTALL.en.md
@@ -40,7 +40,7 @@ LICENSE
 6. 等待显示 **Installation completed successfully**；
 7. 重启 FL Studio，需要时重新扫描 VST3；
 8. 按 `MCP-SETUP.md` 把生成的 MCP 配置启用给目标 Agent；
-9. 把安装后的 `skill` 文件夹导入给同一个 Agent。
+9. 可选：如果客户端支持 Skill，或者不支持 MCP Resources，再导入安装后的 `skill` 文件夹。
 
 用户侧 Analyzer 文件位于：
 
@@ -56,7 +56,8 @@ LICENSE
 4. 如果 macOS 阻止运行，右键 `Install.command` → **打开**；
 5. 等待安装成功；
 6. 重启 FL Studio，需要时重新扫描插件；
-7. 按 `MCP-SETUP.md` 配置 MCP，并导入同一个 `skill` 文件夹。
+7. 按 `MCP-SETUP.md` 配置 MCP；
+8. 可选：按客户端能力决定是否导入同一个 `skill` 文件夹。
 
 VST3 安装到：
 
@@ -79,6 +80,34 @@ MCP / Skill 安装到：
 优先直接使用这个文件，不要手动猜路径。完整 JSON 示例见 `MCP-SETUP.md`。
 
 当前 AI Audio Analyzer MCP 1.2 共 **42 个工具**。
+
+## MCP Self-Describing API
+
+即使客户端没有手动导入 packaged Skill，Analyzer MCP 仍然可以让调用方理解基本使用方法。
+
+它会通过：
+
+```text
+Server instructions
+42 个 Tool description
+MCP Resources: aianalyzer://guide/*
+```
+
+暴露基本调用顺序、工具用途和关键语义限制。
+
+`skill/` 仍然会跟随 Release 安装，因为其中的 `SKILL.md` 与 `references/*.md` 是 MCP Resources 的 canonical 长篇 Markdown 内容源，同时也能被支持 Skill 的客户端直接导入。
+
+如果客户端支持 MCP Resources，可以先读取：
+
+```text
+aianalyzer://guide/index
+```
+
+然后只读取当前任务需要的 Guide，不要机械加载全部内容。
+
+如果客户端不支持 MCP Resources，则建议把安装后的 `skill` 文件夹导入给同一个 Agent，以获得同一份完整长篇专业说明。
+
+如果物理 `skill` 目录缺失，Server instructions 和 Tool descriptions 仍提供最低限度自解释能力，但详细 Guide Resources 不可用。
 
 新会话开始时，或者用户可能切换/重新打开了工程时，建议第一个调用：
 
@@ -198,7 +227,10 @@ telemetry_confirmed   新测量帧已经报告目标 Profile
 ## 推荐第一次使用
 
 ```text
-audio_project_identity_status()
+连接 Analyzer MCP
+-> 用 Server instructions / Tool descriptions 作为最低使用契约
+-> 需要详细语义时，若客户端支持 Resources，按需读取对应 aianalyzer://guide/*
+-> audio_project_identity_status()
 -> 若工程已切换/重开且要求严格隔离，先重启 Analyzer MCP
 -> audio_project_status()
 -> 必要时通过 Identify 绑定未映射实例
@@ -214,7 +246,7 @@ audio_project_identity_status()
 
 安装后看不到插件：完全重启 FL Studio、重新扫描 VST3，并确认插件已经复制到标准目录。
 
-Agent 看不到 MCP 工具：确认安装成功，优先使用生成的 `cherry-studio-mcp.json`，确认 MCP Server 已启用给同一个 Agent，并刷新/重启 Agent 会话。
+Agent 看不到 MCP 工具：确认安装成功，优先使用生成的 `cherry-studio-mcp.json`，确认 MCP Server 已启用给目标 Agent，并刷新/重启 Agent 会话。是否导入 Skill 不影响 MCP Tool 本身是否出现。
 
 Analyzer Profile Control 超时：确认 VST3 和 MCP Runtime 来自同一套当前 Release。没有 ACK 就不能当成成功写入。
 

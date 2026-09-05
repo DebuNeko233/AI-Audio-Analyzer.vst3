@@ -172,6 +172,7 @@ jobs:
           python -m py_compile \
             mcp/server.py \
             mcp/analyzer_core.py \
+            mcp/self_description.py \
             mcp/project_tools.py \
             mcp/project_identity_tools.py \
             mcp/temporal_tools.py \
@@ -203,6 +204,7 @@ jobs:
           mkdir -p dist/mcp dist/skill
           cp mcp/server.py dist/mcp/
           cp mcp/analyzer_core.py dist/mcp/
+          cp mcp/self_description.py dist/mcp/
           cp mcp/project_tools.py dist/mcp/
           cp mcp/project_identity_tools.py dist/mcp/
           cp mcp/temporal_tools.py dist/mcp/
@@ -221,9 +223,11 @@ jobs:
           cp mcp/requirements.txt dist/mcp/
           cp mcp/cherry-studio.example.json dist/mcp/
           cp -R skills/ai-analyzer-flstudio/. dist/skill/
+          test -s dist/mcp/self_description.py
           test ! -e dist/mcp/ci_regression.py
           test ! -e dist/mcp/relationship_regression.py
           test ! -e dist/mcp/range_verification_regression.py
+          AI_ANALYZER_SKILL_DIR="$PWD/dist/skill" AI_ANALYZER_REQUIRE_GUIDES=1 AI_ANALYZER_SELF_TEST=1 python dist/mcp/server.py
           find dist -maxdepth 3 -type f -print | sort
 
       - uses: actions/upload-artifact@v4

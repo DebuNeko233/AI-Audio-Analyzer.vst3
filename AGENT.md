@@ -136,6 +136,7 @@ control boundaries
 roadmap state
 packaging lists
 Release claims
+self-description/resource contracts
 ```
 
 All LLM-facing Skill/reference content stays **English-only**.
@@ -144,17 +145,27 @@ The plugin GUI may be bilingual. Stable technical identifiers remain language-in
 
 ---
 
-## 5. Current metadata
+## 5. Current branch metadata
+
+Current metadata for the Project Identity Disclosure + MCP Self-Describing API stack:
 
 ```text
 Product version             1.2.0
 MCP_VERSION                 1.2
 OSC analysis protocol       1.2
 Analyzer control revision   1
-MCP tool count              41
+MCP tool count              42
+MCP guide resources         13
 ```
 
-P4a added derived MCP reasoning/verification only. It did not justify a Product/MCP/OSC version bump by itself.
+History:
+
+- P4a merged via PR #29 with 41 tools.
+- Project Identity Disclosure adds `audio_project_identity_status()` and raises the tool count to 42; it is tracked in PR #31 and is not merged until explicitly authorized.
+- MCP Self-Describing API is tracked in PR #32 and adds Server instructions, complete Tool descriptions, and 13 Skill-backed Guide Resources without adding another Tool.
+- These MCP-side changes do not justify a Product/OSC/control-protocol version bump by themselves.
+
+Do not present open PR work as merged main capability until the corresponding PR is explicitly merged.
 
 ---
 
@@ -262,6 +273,41 @@ For historical range comparisons, use measurement families actually represented 
 
 Content-dependent retained availability differences are audit context, not proof that the historical Analysis Profile changed. Interpret only dimensions/families represented in both passes; no common retained measurement family is a hard comparability blocker.
 
+### Project/runtime identity is explicit and currently unresolved
+
+Current machine-readable identity contract is exposed by:
+
+```text
+audio_project_identity_status()
+```
+
+Current semantics:
+
+```text
+stable_project_id                       null
+project_identity_confidence             UNRESOLVED
+project_switch_detection                not_available
+runtime_id.scope                        live_plugin_instance
+runtime_id.persistent                   false
+runtime_id.serialized_with_project      false
+runtime_id.stable_when_same_project_is_reopened  false
+binding.scope                           mcp_session
+binding.persistent                      false
+retained_state.scope                    mcp_session
+retained_state.automatically_partitioned_by_stable_project_id  false
+retained_state.cross_project_isolation_guaranteed              false
+```
+
+Critical rules:
+
+- reopening the same DAW project recreates Analyzer runtime UUIDs;
+- a new runtime UUID therefore does not prove that the project changed;
+- current Mixer/Slot binding is deterministic current-session location, not persistent track identity;
+- while MCP keeps running, retained Song Memory, Section Maps, snapshots, relationships and verification sessions can outlive a DAW project switch/reopen;
+- until P3 provides authoritative project identity, do not silently reuse retained project-level state across a suspected switch/reopen;
+- when strict isolation is required before stable identity exists, restart Analyzer MCP and rebuild current-session bindings/evidence;
+- never manufacture a project ID from runtime UUID, BPM, track count, names, Mixer indexes, topology fingerprints, transport epochs, or audio fingerprints unless a future explicit identity contract defines that method.
+
 ### Heuristics stay labelled as heuristics
 
 Examples include spectral overlap, temporal overlap, ERB masking evidence, negative-cross evidence, tonal ranking, harmonic alignment, section novelty, recurrence similarity, Track Story deltas, relationship `shortlist_priority`, and range pass selection.
@@ -315,7 +361,7 @@ Current tail:
 149  schema marker = "1.2"
 ```
 
-P1/P2/P4a add no OSC fields and no realtime DSP work.
+P1/P2/P4a, project-identity disclosure and MCP self-description add no OSC fields and no realtime DSP work.
 
 ---
 
@@ -367,6 +413,8 @@ scope                    running MCP session
 ```
 
 Supporting tracks align by overlapping DAW-time coverage, not equal epoch IDs.
+
+Song Memory is not yet partitioned by a stable DAW Project ID. A running MCP can retain old-project evidence after the DAW switches/reopens a project. Use the project identity contract before assuming continuity.
 
 Transport coordinates are for whole-song/section/range reasoning, not sample-accurate editing.
 
@@ -451,6 +499,8 @@ P4a invariants:
 
 Neither means After is artistically better.
 
+A verification session does not establish persistent project identity and must not silently cross a suspected project switch/reopen.
+
 ---
 
 ## 15. High-level API strategy
@@ -468,6 +518,7 @@ Do not force the LLM to call dozens of tiny APIs mechanically.
 Current high-level building blocks include:
 
 ```text
+audio_project_identity_status()
 audio_project_status()
 audio_song_status()
 audio_song_overview()
@@ -496,7 +547,9 @@ Current runtime modules include:
 ```text
 mcp/server.py
 mcp/analyzer_core.py
+mcp/self_description.py
 mcp/project_tools.py
+mcp/project_identity_tools.py
 mcp/temporal_tools.py
 mcp/masking_tools.py
 mcp/stereo_tools.py
@@ -524,11 +577,61 @@ CI-only regressions must not be shipped in beginner Release runtime/source folde
 
 ---
 
-## 17. Skill boundary
+## 17. MCP Self-Describing API and Skill boundary
 
-Skill explains professional usage, strategy, evidence interpretation, tool calling order, limitations, and verification discipline.
+The MCP must be safe and understandable even when the client has **not imported an external Skill**.
 
-MCP provides measurements, state, retained evidence, safe APIs, and Analyzer-owned Profile control.
+Protocol-facing self-description has three layers:
+
+```text
+Server instructions
+-> short global startup order + cross-cutting hard rules
+
+Tool descriptions
+-> every MCP Tool has a non-empty purpose/usage description discoverable through tools/list
+
+MCP Resources
+-> long-form guides under aianalyzer://guide/*, read only when needed
+```
+
+Current Guide Resource contract:
+
+```text
+aianalyzer://guide/index
+aianalyzer://guide/core
+aianalyzer://guide/analyzer-mcp
+aianalyzer://guide/parameters
+aianalyzer://guide/performance-evidence
+aianalyzer://guide/song-memory
+aianalyzer://guide/section-structure
+aianalyzer://guide/track-story
+aianalyzer://guide/section-relationships
+aianalyzer://guide/masking-evidence
+aianalyzer://guide/stereo-evidence
+aianalyzer://guide/tonal-evidence
+aianalyzer://guide/verification-evidence
+```
+
+The external/repository Skill remains the **canonical long-form knowledge source**:
+
+```text
+skills/ai-analyzer-flstudio/SKILL.md
+skills/ai-analyzer-flstudio/references/*.md
+```
+
+MCP Resources read those same Markdown files. Do not maintain a second copied long-form guide inside Python constants.
+
+Relationship rules:
+
+- client-side Skill import is optional for basic correct MCP use;
+- clients with MCP Resource support should read `aianalyzer://guide/index` and only the relevant guide for the current task;
+- clients without Resource support may import the packaged Skill to receive the same long-form guidance;
+- Server instructions and Tool descriptions form the minimum fallback if guide files are unavailable;
+- complete beginner Releases must still include `skill/` and must fail package validation if canonical guide files cannot be found;
+- do not load all guides mechanically;
+- Skill explains professional usage, strategy, evidence interpretation, tool calling order, limitations, and verification discipline; it does not become a mandatory mixing recipe.
+
+MCP provides measurements, state, retained evidence, safe APIs, identity-scope disclosure, self-description, and Analyzer-owned Profile control.
 
 The real DAW-control layer owns sound/project writes.
 
@@ -556,6 +659,27 @@ AI_ANALYZER_SELF_TEST=1 python mcp/server.py
 mcp/ci_regression.py
 feature-specific regression when present
 exact tool registry count
+```
+
+For Project Identity Disclosure verify:
+
+```text
+audio_project_identity_status() registry presence
+UNRESOLVED stable project identity contract
+same-project reopen runtime UUID instability disclosed
+cross-project retained-state isolation not overclaimed
+strict-isolation action disclosed
+```
+
+For MCP Self-Describing API additionally verify:
+
+```text
+all 42 tools have non-empty descriptions
+Server instructions are non-empty and retain required hard rules
+exact 13 Guide Resource registry
+all Guide Resources have non-empty descriptions
+canonical Skill/reference files resolve in source/development package
+AI_ANALYZER_REQUIRE_GUIDES=1 passes in complete packaged/final Release layout
 ```
 
 P2 additionally requires `mcp/relationship_regression.py`.
@@ -591,7 +715,9 @@ Requirements:
 - no PyInstaller `_internal`;
 - no developer source config examples;
 - MCP runtime built with PyInstaller `-F` / onefile;
-- package includes VST3, one-file MCP runtime, Skill, setup/install docs, VERSION, LICENSE, installer scripts.
+- package includes VST3, one-file MCP runtime, canonical `skill/` guides, setup/install docs, VERSION, LICENSE, installer scripts;
+- importing the Skill into the client is optional for basic MCP use;
+- complete user packages must pass strict Guide Resource lookup using the installed sibling `skill/` directory.
 
 Canonical runtime build:
 
@@ -618,7 +744,7 @@ macOS:
 
 ## 20. Implemented evolution / history
 
-Merged/current milestones include:
+Merged milestones include:
 
 - loudness / True Peak / stereo correlation;
 - signal validity and runtime UUID identity;
@@ -640,6 +766,11 @@ Merged/current milestones include:
 - **P1 Track Story merged via PR #19**;
 - **P2 Section-aware Mix Relationships merged via PR #20**;
 - **P4a retained-range resolver + same-range verification merged via PR #29** (`c833487c6efbd98206d3f454e0875d4698b1f6af`).
+
+Current open infrastructure work:
+
+- **PR #31 Project Identity Disclosure** — machine-readable explicit identity limitations and strict-isolation guidance; not merged until explicitly authorized.
+- **PR #32 MCP Self-Describing API** — Server instructions, complete Tool descriptions, Skill-backed Guide Resources and packaging gates; not merged until explicitly authorized.
 
 ---
 
@@ -714,7 +845,7 @@ mcp/range_verification_regression.py
 
 Completion evidence:
 
-- 41-tool registry synchronized;
+- 41-tool registry synchronized at the #29 merge point;
 - same-range regression green;
 - Release runtime validation includes new runtime modules;
 - public docs/Skill/Release docs synchronized;
@@ -738,6 +869,8 @@ Status: **BLOCKED** until P3 provides trustworthy identity.
 Persist candidates: project/track mappings, section maps, Track Stories, relationship summaries, analysis digests, verification/change history, coverage/schema metadata.
 
 Runtime UUID and local epoch must never become permanent project IDs.
+
+Project Identity Disclosure is a safety contract only; it does not implement persistent identity or persistence.
 
 ### P6 - Dynamics / mastering distributions
 
@@ -803,24 +936,29 @@ Keep these explicit in code/docs/Skill:
 
 - transport time/PPQ are approximate, not sample-accurate;
 - historical tempo-map reconstruction is not implemented;
-- Song Memory is MCP RAM/session-scoped;
-- section maps / Track Stories / relationships / range verifications are session-scoped;
+- stable DAW project identity is currently unresolved;
+- automatic project-switch detection is not implemented;
+- runtime UUID is live plugin-instance identity and changes when the same project is reopened;
+- current Mixer/Slot binding is MCP-session scoped, not persistent track identity;
+- Song Memory is MCP RAM/session-scoped and not partitioned by stable Project ID;
+- section maps / Track Stories / relationships / range verifications are session-scoped and can outlive a DAW project switch while MCP keeps running;
+- strict cross-project isolation currently requires an explicit clean MCP session when authoritative identity is unavailable;
 - section detector works at one-second retained-summary scale;
 - A/B/C families are neutral recurrence labels;
 - exact FL Studio marker/Playlist integration is not implemented;
-- runtime UUID is session identity, not project identity;
 - epoch IDs are instance-local;
 - estimated analysis lag excludes OSC/MCP/LLM/DAW-control latency;
 - no exact routing graph until P3;
 - detailed masking/stereo/temporal pair tools remain recent-window based;
 - same-range P4a uses one-second retained bins, not sample-accurate boundaries;
 - arbitrary-range LUFS-I is not implemented;
+- MCP guide Resources require the canonical packaged/repository Skill files for full long-form content; Server instructions + Tool descriptions are the fallback if those files are absent;
 - Mixing Transaction / rollback is not implemented;
 - Reference Engine is not implemented;
 - numeric optimizer / automix service is not implemented;
 - offline fast scan is not implemented.
 
-Never present a roadmap item as current capability.
+Never present a roadmap item or an open PR as merged current-main capability.
 
 ---
 
