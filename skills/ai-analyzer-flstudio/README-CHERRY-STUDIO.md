@@ -7,7 +7,7 @@ This Skill targets:
 - AI Audio Analyzer MCP 1.2;
 - optional FL Studio control MCP: https://github.com/rosasynthesiz/flstudio-mcp
 
-Its purpose is to help an LLM call Analyzer MCP correctly, understand current project/runtime identity limits, interpret measurement validity, manage deterministic Analyzer bindings, choose only the required Analysis Profile, use transport-aware Song Memory, explainable song structure, Track Story, bounded section-aware relationships, coverage-aware retained dynamics distributions, and auditable Before/After verification around externally controlled DAW changes.
+Its purpose is to help an LLM call Analyzer MCP correctly, understand current project/runtime identity limits, interpret measurement validity, manage deterministic Analyzer bindings, choose only the required Analysis Profile, use transport-aware Song Memory, explainable song structure, Track Story, bounded section-aware relationships, coverage-aware retained dynamics distributions, direct energy-aware mono-fold compatibility evidence, and auditable Before/After verification around externally controlled DAW changes.
 
 It does **not** prescribe a mixing style, LUFS target, EQ/compression/sidechain/stereo recipe, semantic section label, track role, key/harmony edit, or mastering chain.
 
@@ -25,6 +25,7 @@ Explainable section boundaries / neutral A-B-C recurrence families
 Track Story across sections/families
 Bounded Section-aware Mix Relationships
 Coverage-aware retained Dynamics Distribution
+Direct recent-window Mono-fold RMS / energy-aware compatibility evidence
 Temporal / Masking / Mid-Side / Stereo / Tonal evidence
 Recent-window verification
 Transport-anchored same-range verification
@@ -32,7 +33,7 @@ Transport-anchored same-range verification
 
 OSC analysis protocol remains append-only **1.2**, indexes `0..149` unchanged. Analyzer-owned Profile control remains separate local revision 1.
 
-MCP 1.2 exposes **43 tools** on the P6a branch.
+MCP 1.2 exposes **44 tools** and **15 Guide Resources** on the stacked P7a branch.
 
 ## MCP self-description and Skill relationship
 
@@ -45,7 +46,7 @@ Server instructions
 -> short global startup order and hard semantic/control rules
 
 Tool descriptions
--> purpose and critical limitation for every one of the 43 tools
+-> purpose and critical limitation for every one of the 44 tools
 
 MCP Resources
 -> on-demand long-form guides under aianalyzer://guide/*
@@ -58,6 +59,7 @@ Therefore:
 - importing this Skill into Cherry Studio is an optional client-side enhancement, not a prerequisite for basic correct MCP use;
 - a client that supports MCP Resources can read `aianalyzer://guide/index` and then only the guide relevant to the current task;
 - P6a dynamics details are available from `aianalyzer://guide/dynamics-evidence`;
+- P7a direct mono-fold details are available from `aianalyzer://guide/mono-compatibility`;
 - do not load every guide mechanically;
 - if the client does not expose MCP Resources, importing this Skill remains the preferred way to provide the full long-form guidance;
 - if the physical packaged `skill` directory is missing, Server instructions and Tool descriptions still provide the minimum self-description, but detailed guide Resources are unavailable.
@@ -130,6 +132,7 @@ audio_track_story(...)           one track across sections
 audio_section_profile(...)       many tracks inside one section
 audio_section_relationships(...) bounded pair shortlist
 audio_dynamics_distribution(...) retained pass/range/section dynamics
+audio_mono_compatibility(...)    recent direct mono-fold RMS / band-center energy evidence
 audio_song_timeline(...)         raw DAW-time history only when needed
 ```
 
@@ -142,7 +145,7 @@ audio_song_timeline(...)         raw DAW-time history only when needed
 3 Full      Mix + Semantic
 ```
 
-Use the minimum profile that provides required evidence.
+Use the minimum profile that provides required evidence. P7a mono-fold energy evidence requires the existing stereo/spectrum family, so `Balanced` or above is sufficient.
 
 ```text
 audio_set_analysis_profile(...)
@@ -171,6 +174,7 @@ All EQ, compression, gain, pan, routing, synth, automation, arrangement and othe
 - Track Story does not infer Bass/Vocal/Drums roles or one overall quality score;
 - relationship `shortlist_priority` is inspection priority, not masking/mix-problem probability or processing advice;
 - detailed masking/stereo/temporal pair tools remain recent-window based;
+- P7a mono compatibility is also recent-window based and must not be relabelled as historical/Section 32-band evidence;
 - Song Memory is MCP-session state and is not yet partitioned by a stable Project ID.
 
 Exact DAW/project metadata wins for exact markers, labels, routing, plugin state and symbolic information when available.
@@ -209,6 +213,56 @@ Keep these boundaries explicit:
 - do not impose a fixed genre LUFS/LRA/PLR/Crest target.
 
 See `references/dynamics-evidence.md`.
+
+## Direct energy-aware mono-fold compatibility
+
+Use:
+
+```text
+audio_mono_compatibility(track, seconds=5.0)
+```
+
+The Analyzer already defines:
+
+```text
+M = 0.5 * (L + R)
+S = 0.5 * (L - R)
+(L_power + R_power)/2 = M_power + S_power
+```
+
+so P7a adds no realtime DSP or OSC fields. Existing Mid RMS is the RMS of the standard `(L+R)/2` mono fold.
+
+The current tool reports direct recent-window full-band RMS fold-down evidence and energy-aware 32 band-center evidence. It keeps direct fold-down energy separate from existing L/R correlation, Side/Mid, negative-cross and low-band stereo descriptors.
+
+Key fields include:
+
+```text
+mono_fold_rms_db
+mono_fold_rms_delta_db
+mono_fold_delta_db per band center
+energy_loss_fraction
+relative_band_energy
+inspection_priority
+floor_censored
+```
+
+`inspection_priority` is only a shortlist aid. It is not a quality score, audibility probability, phase-problem probability, pass/fail threshold, or processing instruction.
+
+If Mid reaches the Analyzer's `-120 dB` measurement floor, `floor_censored=true`; do not claim exact cancellation depth below the measurement floor.
+
+Current P7a deliberately does **not** provide:
+
+```text
+arbitrary historical/Section 32-band mono-fold evidence
+mono-fold Sample Peak
+mono-fold True Peak
+```
+
+Do not infer mono peak/True Peak from stereo Peak, True Peak, RMS, correlation or Side/Mid. Direct peak/true-peak fold-down belongs to optional P7b.
+
+Do not impose fixed rules such as `correlation < 0 = bad`, `all lows must be mono`, or `mono_fold_delta < X = fail`.
+
+See `references/mono-compatibility.md`.
 
 ## Verification
 
@@ -286,6 +340,7 @@ active_ratio
 analysis_features
 coverage_ratio
 accepted / rejected / missing distribution bins
+P7a recent window / floor_censored when mono evidence is used
 data_age_seconds
 estimated_analysis_lag_ms
 dropped_blocks
@@ -306,6 +361,7 @@ Use AI Audio Analyzer MCP's own Server instructions and Tool descriptions as the
 At the start of a session and whenever the user may have switched or reopened a DAW project, call audio_project_identity_status before assuming any retained-state continuity. runtime_id is a live plugin-instance identifier only, reopening the same project recreates runtime UUIDs, and a new UUID does not prove the project changed. Until exact external project identity is available, do not reuse old project-level retained state across a switch/reopen; restart Analyzer MCP when strict isolation is required.
 Then call audio_project_status and establish deterministic Identify bindings when needed.
 For whole-song or historical work, use audio_song_status and then audio_section_map when enough Song Memory exists. Use Track Story for one track across sections, Section Profile for many tracks inside one section, and Section Relationships only as a bounded inspection shortlist. Use audio_dynamics_distribution only when retained dynamics distributions are needed; treat its LUFS-S interpercentile spread as descriptive evidence, not EBU LRA, and do not fabricate arbitrary-range Integrated LUFS or PLR.
+Use audio_mono_compatibility only when recent direct mono-fold translation evidence is needed. Keep its fold-down energy separate from correlation/Side-Mid/negative-cross evidence; inspection_priority is not a quality score. Do not present recent P7a evidence as an arbitrary historical Section analysis, and do not infer mono-fold Sample Peak or True Peak because P7a does not measure them directly.
 Treat A/B/C as neutral recurrence labels, missing coverage as missing evidence, and transport_epoch as instance-local.
 When verifying a real DAW change over a known passage, prefer audio_begin_range_verification / audio_complete_range_verification and replay the returned effective_range after the external write/readback. Do not reuse pre-change retained evidence as After, do not fabricate arbitrary-range LUFS-I, and do not treat controlled_comparison as artistic success or persistent project identity.
 Use recent-window verification only when explicit retained DAW-time anchoring is impractical.
