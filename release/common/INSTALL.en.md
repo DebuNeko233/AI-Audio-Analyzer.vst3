@@ -80,7 +80,7 @@ The installer generates `cherry-studio-mcp.json` with the real absolute path to 
 
 Prefer that generated file over typing paths manually. Full JSON examples are in `MCP-SETUP.md`.
 
-AI Audio Analyzer MCP 1.2 exposes **43 tools** on the P6a branch.
+AI Audio Analyzer MCP 1.2 exposes **44 tools** on the stacked P7a branch.
 
 ## MCP Self-Describing API
 
@@ -90,13 +90,13 @@ It exposes:
 
 ```text
 Server instructions
-43 Tool descriptions
-MCP Resources under aianalyzer://guide/*
+44 Tool descriptions
+15 MCP Resources under aianalyzer://guide/*
 ```
 
 The `skill/` directory remains the canonical long-form Markdown source for MCP Resources and can also be imported directly by Skill-capable clients.
 
-If the client supports MCP Resources, read `aianalyzer://guide/index` and then only the guide relevant to the current task. P6a dynamics details are available at `aianalyzer://guide/dynamics-evidence`. If the client does not expose Resources, importing the installed `skill` folder is the preferred way to provide the same detailed guidance.
+If the client supports MCP Resources, read `aianalyzer://guide/index` and then only the guide relevant to the current task. P6a dynamics details are available at `aianalyzer://guide/dynamics-evidence`; P7a mono-fold details are available at `aianalyzer://guide/mono-compatibility`. If the client does not expose Resources, importing the installed `skill` folder is the preferred way to provide the same detailed guidance.
 
 If the physical `skill` directory is missing, Server instructions and Tool descriptions still provide the minimum operating contract, but detailed guide Resources are unavailable.
 
@@ -139,13 +139,14 @@ audio_section_profile(...)
 audio_track_story(...)
 audio_section_relationships(...)
 audio_dynamics_distribution(...)
+audio_mono_compatibility(...)
 ```
 
 Song Memory retains bounded one-second DAW-time evidence. Playback starts, seeks and loop jumps create separate instance-local playback epochs. Song Memory is MCP-session state and is not yet partitioned by stable Project ID.
 
 A/B/C families are neutral recurrence labels, not automatic Verse/Chorus/Drop names. Track Story does not infer Bass/Vocal/Drums roles or prescribe processing. Relationship `shortlist_priority` is an inspection heuristic, not masking/mix-problem probability or quality score.
 
-Detailed masking/stereo/temporal pair tools remain recent-window based.
+Detailed masking/stereo/temporal pair tools remain recent-window based. P7a mono compatibility is also recent-window based and must not be presented as arbitrary historical/Section 32-band evidence.
 
 ## Coverage-aware dynamics distributions
 
@@ -166,6 +167,27 @@ Important boundaries:
 - arbitrary-range Integrated LUFS is unavailable because retained `lufs_i_latest` is pass-cumulative;
 - arbitrary-range PLR is unavailable without scope-compatible peak and integrated-loudness evidence;
 - section-to-section deltas are descriptive only and are not a quality score or processing recommendation.
+
+## Direct mono-fold compatibility
+
+Use:
+
+```text
+audio_mono_compatibility(track, seconds=5.0)
+```
+
+P7a reuses the Analyzer's existing Mid/Side evidence. Existing Mid RMS is the ordinary `(L+R)/2` mono-fold RMS, and the existing Mid/Side band-center powers allow direct sampled fold-down energy comparison without new realtime DSP or OSC fields.
+
+Important boundaries:
+
+- current scope is a recent receive-time window, not arbitrary historical/Section 32-band analysis;
+- `inspection_priority` is an energy-aware shortlist aid only, not a quality score, audibility probability, pass/fail result, or processing instruction;
+- correlation, Side/Mid, negative-cross and direct mono-fold energy remain separate evidence dimensions;
+- `floor_censored=true` means Mid reached the Analyzer `-120 dB` measurement floor, so cancellation below that floor is not known precisely;
+- unmeasurable Mid+Side band-center energy remains unavailable rather than becoming an artificial extreme cancellation result;
+- P7a does not directly measure mono-fold Sample Peak or True Peak;
+- mono peak/True Peak must not be inferred from stereo Peak, True Peak, RMS, correlation or Side/Mid;
+- direct peak/True-Peak fold-down belongs to optional P7b.
 
 ## Same-range Before/After verification
 
@@ -251,6 +273,7 @@ connect Analyzer MCP
 -> audio_section_map()
 -> Track Story / Section Profile / Section Relationships as needed
 -> audio_dynamics_distribution() when retained dynamics evidence is needed
+-> audio_mono_compatibility() when recent direct mono translation evidence is needed
 -> use transport-range verification for a known Before/After passage
 -> use specialized Temporal / Masking / Stereo / Tonal evidence only when required
 ```
