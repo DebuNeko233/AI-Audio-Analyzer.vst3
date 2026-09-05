@@ -38,6 +38,33 @@ def identity_status() -> dict[str, Any]:
             "automatically_partitioned_by_stable_project_id": False,
             "cross_project_isolation_guaranteed": False,
             "may_outlive_a_project_switch_while_mcp_keeps_running": True,
+            "categories_at_risk": [
+                "live_instance_registry_and_history",
+                "session_bindings",
+                "song_memory",
+                "section_maps",
+                "snapshots",
+                "section_relationship_state",
+                "recent_window_verifications",
+                "range_verifications",
+            ],
+        },
+        "recheck_on": [
+            "new_agent_or_mcp_session",
+            "suspected_daw_project_switch",
+            "same_daw_project_reopen",
+            "plugin_instance_recreation",
+            "before_reusing_retained_project_level_state",
+        ],
+        "strict_isolation_action": {
+            "required_when": "project continuity cannot be established and strict cross-project isolation is required",
+            "action": "restart_analyzer_mcp",
+            "then": [
+                "call_audio_project_identity_status",
+                "call_audio_project_status",
+                "rediscover_identify_bindings",
+                "capture_new_project_evidence",
+            ],
         },
         "caller_requirements": [
             "Do not use runtime_id as a persistent project or track identifier.",
@@ -61,15 +88,20 @@ def _self_test() -> dict[str, Any]:
     status = identity_status()
     assert status["stable_project_id"] is None
     assert status["project_identity_confidence"] == "UNRESOLVED"
+    assert status["project_switch_detection"] == "not_available"
     assert status["runtime_id"]["scope"] == "live_plugin_instance"
     assert status["runtime_id"]["persistent"] is False
     assert status["runtime_id"]["stable_when_same_project_is_reopened"] is False
     assert status["binding"]["scope"] == "mcp_session"
     assert status["retained_state"]["cross_project_isolation_guaranteed"] is False
     assert status["retained_state"]["may_outlive_a_project_switch_while_mcp_keeps_running"] is True
+    assert "song_memory" in status["retained_state"]["categories_at_risk"]
+    assert "same_daw_project_reopen" in status["recheck_on"]
+    assert status["strict_isolation_action"]["action"] == "restart_analyzer_mcp"
     return {
         "stable_project_id": None,
         "project_identity_confidence": "UNRESOLVED",
         "runtime_id_scope": "live_plugin_instance",
         "cross_project_isolation_guaranteed": False,
+        "strict_isolation_action": "restart_analyzer_mcp",
     }
