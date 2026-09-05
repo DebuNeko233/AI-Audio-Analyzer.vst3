@@ -89,6 +89,7 @@ def main() -> None:
         result = mono.audio_mono_compatibility("mono-identical", 5.0)
         assert result["available"] is True, result
         _assert_close(result["full_band"]["mono_fold_rms_delta_db"], 0.0)
+        assert result["full_band"]["floor_censored"] is False
         assert all(
             band["mono_fold_delta_db"] is None
             or abs(float(band["mono_fold_delta_db"])) <= 0.02
@@ -115,17 +116,34 @@ def main() -> None:
             if band["available"]:
                 _assert_close(band["mono_fold_delta_db"], -3.0103)
 
-        # Hard anti-phase: sampled Mid energy is below the Analyzer floor while
-        # Side remains strong. Band evidence must show strong loss, never a
-        # fabricated positive/zero result.
-        anti = mono._band_evidence(mono.FLOOR_DB, -9.0, 1000.0)
-        assert anti["available"] is True
-        assert anti["mono_fold_delta_db"] == mono.FLOOR_DB
-        assert anti["energy_loss_fraction"] == 1.0
+        # Hard anti-phase: Mid reaches the Analyzer floor while Side remains
+        # strong. The tool must report strong floor-censored loss, not a fake
+        # zero/positive result or an infinitely precise cancellation depth.
+        anti_frame = _frame(
+            "mono-antiphase",
+            "Anti Phase",
+            rms_db=-9.0,
+            mid_rms_db=mono.FLOOR_DB,
+            side_rms_db=-9.0,
+            mid_bands=[mono.FLOOR_DB] * core.NUM_BANDS,
+            side_bands=[-9.0] * core.NUM_BANDS,
+            correlation=-1.0,
+            negative_cross=1.0,
+        )
+        _install("mono-antiphase", anti_frame)
+        anti_result = mono.audio_mono_compatibility("mono-antiphase", 5.0)
+        assert anti_result["available"] is True
+        assert anti_result["full_band"]["floor_censored"] is True
+        _assert_close(anti_result["full_band"]["mono_fold_rms_delta_db"], -111.0)
+        anti_band = anti_result["frequency"]["bands"][0]
+        assert anti_band["floor_censored"] is True
+        _assert_close(anti_band["mono_fold_delta_db"], -111.0)
+        assert anti_band["energy_loss_fraction"] == 1.0
 
         # Unequal correlated stereo has finite Side energy and a finite loss.
         unequal = mono._band_evidence(-10.0, -20.0, 500.0)
         assert unequal["available"] is True
+        assert unequal["floor_censored"] is False
         assert -1.0 < float(unequal["mono_fold_delta_db"]) < 0.0
 
         # Energy weighting: a near-silent band with total cancellation cannot
@@ -137,7 +155,7 @@ def main() -> None:
         assert float(strong["inspection_priority"]) > float(silent_loss["inspection_priority"])
 
         # Completely unmeasurable Mid+Side energy remains unavailable rather
-        # than becoming an artificial -120 dB compatibility problem.
+        # than becoming an artificial compatibility problem.
         silent = mono._band_evidence(mono.FLOOR_DB, mono.FLOOR_DB, 16000.0)
         assert silent["available"] is False
         assert silent["mono_fold_delta_db"] is None
@@ -163,7 +181,7 @@ def main() -> None:
 
         print(
             "P7a mono compatibility regression: ok "
-            "(identical, left-only, anti-phase, unequal stereo, M/S power identity, "
+            "(identical, left-only, anti-phase floor censoring, unequal stereo, M/S power identity, "
             "silent unavailable, energy-aware shortlist, no quality score, peak/historical boundaries)"
         )
     finally:
