@@ -8,15 +8,15 @@ User-facing Release packages are created by:
 
 The normal `build` workflow is for development validation/artifacts, not final user distribution.
 
-Current product target:
+Current P6a branch target:
 
 ```text
 AI Audio Analyzer 1.2.0
 MCP 1.2
 OSC analysis protocol 1.2
 Analyzer control protocol local revision 1
-42 MCP tools
-13 MCP guide resources
+43 MCP tools
+14 MCP guide resources
 ```
 
 ## Release audience
@@ -79,6 +79,7 @@ section_relationship_tools.py
 verification_tools.py
 range_tools.py
 range_verification_tools.py
+dynamics_tools.py
 ```
 
 Repository-only regressions include:
@@ -87,6 +88,7 @@ Repository-only regressions include:
 mcp/ci_regression.py
 mcp/relationship_regression.py
 mcp/range_verification_regression.py
+mcp/dynamics_regression.py
 ```
 
 Regression/test Python files must never be shipped to ordinary users.
@@ -100,7 +102,7 @@ Required protocol-facing layers:
 ```text
 Server instructions
 non-empty description for every MCP Tool
-13 discoverable aianalyzer://guide/* Resources
+14 discoverable aianalyzer://guide/* Resources
 ```
 
 The packaged/repository `skills/ai-analyzer-flstudio/SKILL.md` and `references/*.md` remain the canonical long-form content source. MCP Resources read those same files on demand instead of maintaining a second long-form copy in Python.
@@ -174,10 +176,10 @@ Before publication verify at least:
 
 ```text
 source MCP py_compile/self-test
-MCP 1.2 exact 42-tool registry
-non-empty Tool descriptions for all 42 tools
+MCP 1.2 exact 43-tool registry
+non-empty Tool descriptions for all 43 tools
 non-empty Server instructions
-exact 13-guide Resource registry + descriptions
+exact 14-guide Resource registry + descriptions
 source/repository guide lookup
 packaged/final-Release guide lookup with AI_ANALYZER_REQUIRE_GUIDES=1
 project/runtime identity disclosure regression
@@ -189,9 +191,14 @@ Track Story regression
 Section Relationship regression
 recent-window verification regressions
 transport-range verification regression
+P6a dynamics distribution regression
 range normalization / coverage-first pass selection
 post-baseline After freshness fence
 cross-instance different-epoch same-range comparison
+coverage-weighted P6a percentile determinism
+low-coverage-bin rejection / missing-is-not-silence
+LUFS-S-unavailable handling
+standardized LRA / arbitrary-range Integrated LUFS / PLR remain unavailable in P6a
 adaptive Full/Eco validity regressions
 PyInstaller -F one-file build
 packaged runtime native self-test
@@ -276,6 +283,31 @@ User-facing claims must preserve:
 - relationship `shortlist_priority` is an inspection heuristic, not masking/mix-problem probability or quality;
 - detailed masking/stereo/temporal pair tools remain recent-window based.
 
+## P6a dynamics-distribution note
+
+MCP 1.2 P6a adds:
+
+```text
+audio_dynamics_distribution(...)
+aianalyzer://guide/dynamics-evidence
+```
+
+It is MCP-side and reuses retained one-second Song Memory plus the existing transport-range resolver. No realtime VST3 DSP field or OSC schema change is required.
+
+User-facing claims must preserve:
+
+- supported scopes are selected retained pass span, explicit DAW-time range, and cached Section Map section;
+- accepted bins must pass a per-bin coverage floor and are weighted by observed covered seconds;
+- missing bins remain missing, never silence/zero;
+- RMS / LUFS-S / Crest / observed per-bin Sample Peak / observed per-bin True Peak distributions are descriptive retained-observation statistics;
+- dB percentiles and arithmetic dB means are not the same as power-domain means;
+- `lufs_s_interpercentile_range_lu` is descriptive P90-P10 LUFS-S spread, not EBU Loudness Range;
+- standardized EBU LRA is unavailable in P6a;
+- arbitrary-range Integrated LUFS is unavailable because retained `lufs_i_latest` is pass-cumulative;
+- arbitrary-range PLR is unavailable without scope-compatible peak and integrated-loudness evidence;
+- section-to-section deltas are descriptive only;
+- no fixed LUFS/LRA/PLR/Crest target or universal mastering quality score is provided.
+
 ## Closed-loop verification note
 
 MCP 1.2 contains **two** verification paths.
@@ -329,7 +361,7 @@ identity        live runtime UUID
 ACK             explicit request-scoped acknowledgement
 ```
 
-OSC analysis frame remains append-only 1.2 with existing indexes `0..149` unchanged by Track Story, relationships, range verification, identity disclosure, or MCP self-description.
+OSC analysis frame remains append-only 1.2 with existing indexes `0..149` unchanged by Track Story, relationships, range verification, identity disclosure, MCP self-description, or P6a retained dynamics distributions.
 
 ## Draft / prerelease semantics
 
