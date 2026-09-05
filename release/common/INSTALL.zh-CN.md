@@ -78,13 +78,33 @@ MCP / Skill 安装到：
 
 优先直接使用这个文件，不要手动猜路径。完整 JSON 示例见 `MCP-SETUP.md`。
 
-建议第一个 Agent 调用：
+当前 AI Audio Analyzer MCP 1.2 共 **42 个工具**。
+
+新会话开始时，或者用户可能切换/重新打开了工程时，建议第一个调用：
+
+```text
+audio_project_identity_status()
+```
+
+当前身份范围：
+
+```text
+stable_project_id                       null
+project_identity_confidence             UNRESOLVED
+runtime_id scope                        live_plugin_instance
+same-project reopen UUID stable         false
+cross-project retained-state isolation  not guaranteed
+```
+
+Analyzer Runtime UUID 不是永久 Project/Track ID。即使重新打开的是**同一个 FL Studio 工程**，Runtime UUID 也会重新生成，所以“出现新 UUID”不能证明“工程已经切换”。
+
+如果 Analyzer MCP 在切换/重开工程时一直运行，上一个工程的 Song Memory、Section Map、Snapshot、Relationship、Verification 等状态可能仍留在 RAM，目前还没有 Stable Project ID 自动分区。在后续接入可信 Project Identity 之前，如果要求严格隔离，切换或重新打开工程后应重启 Analyzer MCP。
+
+然后再检查当前 Session：
 
 ```text
 audio_project_status()
 ```
-
-当前 AI Audio Analyzer MCP 1.2 共 **41 个工具**。
 
 ## 整曲与 Section 工作流
 
@@ -100,7 +120,7 @@ audio_track_story(...)
 audio_section_relationships(...)
 ```
 
-Song Memory 保存有界的 1 秒 DAW 时间轴证据。重新播放、Seek、Loop 跳回会建立新的实例局部 Playback Epoch。
+Song Memory 保存有界的 1 秒 DAW 时间轴证据。重新播放、Seek、Loop 跳回会建立新的实例局部 Playback Epoch。Song Memory 当前属于 MCP Session State，还没有按 Stable Project ID 自动隔离。
 
 A/B/C 是中性的重复结构家族，不是自动 Verse/Chorus/Drop。Track Story 不会自动判断 Bass/Vocal/Drums，也不会自动要求处理。Relationship 的 `shortlist_priority` 只是检查优先级，不是 Masking/Mix Problem 概率或质量分数。
 
@@ -129,7 +149,7 @@ Same-range 规则：
 - 如果选中 After 的 Dropped-block Evidence 更高，则不通过 Controlled Comparison；
 - 不会用 Pass-cumulative `lufs_i_latest` 伪造 Arbitrary-range LUFS-I。
 
-`controlled_comparison=true` 只表示技术可比性通过；`closed_loop_complete=true` 还要求调用方提供实际 Host Readback。两者都不表示 After 在艺术上更好。
+`controlled_comparison=true` 只表示技术可比性通过；`closed_loop_complete=true` 还要求调用方提供实际 Host Readback。两者都不表示 After 在艺术上更好，也不能证明 Persistent Project Identity。
 
 如果不方便指定明确的 Retained DAW-time Range，旧 Recent-window Verification 仍可使用：
 
@@ -138,6 +158,8 @@ audio_begin_verification(...)
 audio_complete_verification(...)
 audio_verification_status(...)
 ```
+
+怀疑已经切换/重开工程时，两种 Verification 都不能直接跨工程续用，除非有可信外部 Project Identity 或已经建立干净的新 MCP Session。
 
 ## Analysis Profile
 
@@ -176,7 +198,9 @@ telemetry_confirmed   新测量帧已经报告目标 Profile
 ## 推荐第一次使用
 
 ```text
-audio_project_status()
+audio_project_identity_status()
+-> 若工程已切换/重开且要求严格隔离，先重启 Analyzer MCP
+-> audio_project_status()
 -> 必要时通过 Identify 绑定未映射实例
 -> 整曲任务调用 audio_song_status()
 -> 采集足够目标 Pass
