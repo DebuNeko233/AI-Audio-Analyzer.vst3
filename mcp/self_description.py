@@ -20,7 +20,7 @@ GUIDE_URI_PREFIX = "aianalyzer://guide/"
 
 SERVER_DESCRIPTION = (
     "Realtime and retained audio measurement, Song Memory, structure, relationship, "
-    "dynamics, mono-compatibility, comparison and verification evidence for AI-assisted mixing. "
+    "dynamics, mono-compatibility, reference comparison and verification evidence for AI-assisted mixing. "
     "Analyzer-owned writes are limited to its own Analysis Profile; sound/project changes belong "
     "to an external DAW-control MCP."
 )
@@ -34,8 +34,9 @@ Recommended start:
 3. For whole-song work, call audio_song_status() and prefer Section Map / Track Story / Section Relationships before raw timeline queries.
 4. Use audio_dynamics_distribution() for retained pass/range/section dynamics distributions; it is descriptive evidence, not standardized LRA/PLR.
 5. Use audio_mono_compatibility() when direct recent-window mono-fold RMS/energy evidence is needed; keep it separate from correlation/Side-Mid/negative-cross proxies.
-6. Drill into temporal, masking, stereo or tonal evidence only when the task needs it. Do not call every tool mechanically.
-7. For a known musical passage around an external DAW/plugin change, prefer transport-anchored same-range verification.
+6. Use audio_capture_reference(), audio_list_references() and audio_compare_reference() for frozen session reference context. Reference differences are descriptive context, never an automatic EQ/master-match recipe.
+7. Drill into temporal, masking, stereo or tonal evidence only when the task needs it. Do not call every tool mechanically.
+8. For a known musical passage around an external DAW/plugin change, prefer transport-anchored same-range verification.
 
 Hard rules:
 - runtime_id identifies one live plugin instance; it is not persistent project or track identity and changes when the same project is reopened.
@@ -47,6 +48,8 @@ Hard rules:
 - LUFS-S interpercentile spread is descriptive distribution evidence, not EBU Loudness Range. Do not relabel it as LRA or derive arbitrary-range PLR from pass-cumulative LUFS-I.
 - Mono-fold inspection_priority is an energy-weighted shortlist aid only. Do not convert mono-fold delta, correlation, Side/Mid or negative-cross evidence into a universal stereo-quality/fail score.
 - P7a mono compatibility is recent-window evidence. Arbitrary historical/Section 32-band mono-fold evidence and direct mono-fold sample/true peak are unavailable until dedicated retained/detail or P7b measurement support exists.
+- P8a references are frozen recent-window evidence scoped to the current MCP session. They do not prove whole-song coverage, do not persist across MCP restart, and do not silently equate section labels or musical roles across unrelated songs.
+- RMS level-normalized reference comparison is only a comparison view; it does not modify either source and does not imply that matching the reference is artistically correct.
 - controlled_comparison means technical comparability only; closed_loop_complete additionally requires caller-supplied actual host readback. Neither means the result sounds better.
 - AI Audio Analyzer may modify only its own Analysis Profile. EQ, compression, gain, pan, routing, synth, automation and project/plugin writes belong to the external DAW-control layer.
 
@@ -104,6 +107,11 @@ GUIDE_MANIFEST: dict[str, tuple[str, str, str]] = {
         "aianalyzer://guide/mono-compatibility",
         "references/mono-compatibility.md",
         "Direct recent-window mono-fold RMS and energy-aware band evidence, limitations and interpretation boundaries.",
+    ),
+    "reference-comparison": (
+        "aianalyzer://guide/reference-comparison",
+        "references/reference-comparison.md",
+        "Frozen session reference capture, absolute and RMS-level-normalized comparison semantics and interpretation boundaries.",
     ),
     "masking-evidence": (
         "aianalyzer://guide/masking-evidence",
