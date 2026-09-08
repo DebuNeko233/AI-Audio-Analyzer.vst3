@@ -80,7 +80,7 @@ The MCP exposes:
 
 ```text
 Server instructions
-42 Tool descriptions
+43 Tool descriptions
 MCP Resources under aianalyzer://guide/*
 ```
 
@@ -94,13 +94,19 @@ aianalyzer://guide/index
 
 and then load only the relevant guide for the current task. Do not load every guide mechanically.
 
+For P6a dynamics semantics, the relevant Resource is:
+
+```text
+aianalyzer://guide/dynamics-evidence
+```
+
 If the client does not expose MCP Resources, importing the packaged `skill` folder into that Agent/Assistant is the preferred way to provide the same long-form professional guidance.
 
 If the physical `skill` directory is missing, Server instructions and Tool descriptions still provide the minimum self-description, but detailed guide Resources are unavailable.
 
 ### 4. Verify the tool surface and identity scope
 
-AI Audio Analyzer MCP 1.2 exposes **42 tools**.
+AI Audio Analyzer MCP 1.2 exposes **43 tools** on the P6a branch.
 
 First call at a new session or after a possible DAW project switch/reopen:
 
@@ -139,6 +145,16 @@ audio_track_story(...)
 audio_section_profile(...)
 audio_section_relationships(...)
 ```
+
+Coverage-aware retained dynamics are available through:
+
+```text
+audio_dynamics_distribution(...)
+```
+
+Use it for a selected retained transport-pass span, explicit DAW-time range or cached Section Map section. It reports accepted/rejected/missing one-second bins and coverage-weighted descriptive distributions for RMS, LUFS-S, Crest, observed Sample Peak and observed True Peak.
+
+Do not interpret `lufs_s_interpercentile_range_lu` as EBU Loudness Range. P6a explicitly leaves standardized EBU LRA, arbitrary-range Integrated LUFS and arbitrary-range PLR unavailable.
 
 For a real DAW change over a known passage, prefer transport-anchored same-range verification:
 
@@ -254,7 +270,7 @@ AI Audio Analyzer MCP 本身具备 Self-Describing API。即使没有把 `skill`
 
 ```text
 Server instructions
-42 个 Tool description
+43 个 Tool description
 MCP Resources: aianalyzer://guide/*
 ```
 
@@ -271,7 +287,11 @@ Release 里的 `skill` 文件夹仍然会保留，因为它有两个用途：
 aianalyzer://guide/index
 ```
 
-再按当前任务只读取需要的 Guide，不要一次性加载全部 Guide。
+再按当前任务只读取需要的 Guide，不要一次性加载全部 Guide。P6a Dynamics 的详细 Guide 是：
+
+```text
+aianalyzer://guide/dynamics-evidence
+```
 
 如果客户端不支持 MCP Resources，则建议把 Release 里的 `skill` 文件夹导入给同一个 Agent，以获得完整的长篇专业说明。
 
@@ -279,7 +299,7 @@ aianalyzer://guide/index
 
 ### 4. 检查工具和工程身份范围
 
-当前 AI Audio Analyzer MCP 1.2 共 **42 个工具**。
+当前 AI Audio Analyzer MCP 1.2 在 P6a 分支共 **43 个工具**。
 
 新会话开始时，或用户可能切换/重新打开了工程时，先调用：
 
@@ -318,6 +338,14 @@ audio_track_story(...)
 audio_section_profile(...)
 audio_section_relationships(...)
 ```
+
+Retained Dynamics 使用：
+
+```text
+audio_dynamics_distribution(...)
+```
+
+可以分析 Selected Retained Pass、显式 DAW-time Range 或 Cached Section，并按 Coverage 过滤/加权 1 秒 Bin。Missing Bin 不会补 0；`lufs_s_interpercentile_range_lu` 也不是标准 EBU LRA。P6a 目前明确不提供 Arbitrary-range Integrated LUFS / PLR。
 
 如果要验证一个已知歌曲时间范围上的真实 DAW/插件修改，优先使用：
 

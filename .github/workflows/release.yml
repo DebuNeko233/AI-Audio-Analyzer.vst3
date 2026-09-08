@@ -45,6 +45,7 @@ jobs:
           test -s release/common/INSTALL.zh-CN.md
           test -s skills/ai-analyzer-flstudio/SKILL.md
           test -s skills/ai-analyzer-flstudio/references/analyzer-mcp.md
+          test -s skills/ai-analyzer-flstudio/references/dynamics-evidence.md
           test -s LICENSE
           python -m py_compile \
             mcp/server.py \
@@ -64,7 +65,8 @@ jobs:
             mcp/section_relationship_tools.py \
             mcp/verification_tools.py \
             mcp/range_tools.py \
-            mcp/range_verification_tools.py
+            mcp/range_verification_tools.py \
+            mcp/dynamics_tools.py
 
   mcp-runtime:
     name: MCP runtime (${{ matrix.label }})
@@ -417,7 +419,7 @@ jobs:
           - No Python, source code, package manager, or programming setup is required.
           - MCP-SETUP.md explains how to add the generated MCP server configuration to an MCP-capable Agent/client.
           - Project code is released under the MIT License and each package includes LICENSE.
-          - MCP 1.2 exposes 42 tools. OSC analysis protocol remains append-only 1.2; Analyzer profile control remains separate local revision 1.
+          - MCP 1.2 exposes 43 tools. OSC analysis protocol remains append-only 1.2; Analyzer profile control remains separate local revision 1.
           - MCP is self-describing: server instructions provide the minimum startup/safety contract, all tools expose descriptions, and `aianalyzer://guide/*` Resources expose the packaged Skill/reference Markdown on demand without duplicating the long-form content in the server handshake.
           - The packaged `skill/` remains the canonical long-form guide source and can still be imported directly by clients that support Skills.
           - audio_project_identity_status explicitly reports that stable project identity is currently UNRESOLVED, runtime UUIDs are live-instance/session identity, reopening the same project recreates UUIDs, and cross-project retained-state isolation is not yet guaranteed while MCP keeps running.
@@ -425,6 +427,9 @@ jobs:
           - Adaptive Analysis provides Eco, Balanced, Mix and Full measurement-performance profiles. Analyzer-owned profile tools affect measurement computation only and do not change audio.
           - Song Memory retains one-second DAW-time evidence with explicit coverage and instance-local playback epochs.
           - audio_section_map provides explainable section novelty and neutral recurrence families; audio_track_story summarizes one Analyzer across sections; audio_section_relationships returns a bounded cross-track inspection shortlist.
+          - audio_dynamics_distribution provides coverage-weighted retained RMS, LUFS-S, crest, sample-peak and True-Peak distributions for a selected pass span, explicit DAW-time range or cached section. Low-coverage bins are rejected and accepted observations are weighted by covered seconds; missing coverage is never inserted as silence.
+          - LUFS-S interpercentile spread is descriptive evidence, not EBU Loudness Range. P6a intentionally leaves standardized EBU LRA, arbitrary-range integrated LUFS and PLR unavailable instead of fabricating them from pass-cumulative retained state.
+          - Dynamics/section deltas are descriptive context only; Analyzer does not emit a universal mastering quality score or fixed loudness/dynamics target.
           - A/B/C families are not automatic Verse/Chorus/Drop labels. Track Story does not infer Bass/Vocal/Drums roles. Relationship shortlist priority is not a masking/mix-problem probability or processing command.
           - For a known musical passage, audio_begin_range_verification / audio_complete_range_verification provide transport-anchored same-range Before/After measurement. Requested fractional boundaries are normalized to retained one-second bins, pass selection is coverage-first, and After must come from a clean pass observed after the baseline fence.
           - Same-range verification does not require equal epoch numbers across Analyzer instances and does not fake arbitrary-range LUFS-I from pass-cumulative retained state.

@@ -1,6 +1,6 @@
 # AI Audio Analyzer MCP Reference
 
-This reference describes the MCP tool surface, self-description layers, project/runtime identity scope, selector rules, Analysis Profile control/readback, Song Memory, structure, Track Story, section relationships, verification modes, validity and control boundaries.
+This reference describes the MCP tool surface, self-description layers, project/runtime identity scope, selector rules, Analysis Profile control/readback, Song Memory, structure, Track Story, section relationships, retained dynamics distributions, verification modes, validity and control boundaries.
 
 Related references:
 
@@ -11,6 +11,7 @@ song-memory.md
 section-structure.md
 track-story.md
 section-relationships.md
+dynamics-evidence.md
 masking-evidence.md
 stereo-evidence.md
 tonal-evidence.md
@@ -19,7 +20,7 @@ verification-evidence.md
 
 ## Tool registry
 
-MCP 1.2 exposes **42 tools**:
+MCP 1.2 exposes **43 tools** on the P6a branch:
 
 ```text
 audio_bridge_status()
@@ -64,9 +65,10 @@ audio_verification_status(verification_id="")
 audio_begin_range_verification(label, start_seconds, end_seconds, target_selectors=None, minimum_coverage=0.8)
 audio_complete_range_verification(verification_id, change_summary="", host_readback="")
 audio_range_verification_status(verification_id="")
+audio_dynamics_distribution(track, transport_epoch=None, start_seconds=None, end_seconds=None, map_id=None, section_id=None, compare_section_id=None, minimum_range_coverage=0.8, minimum_bin_coverage=0.5)
 ```
 
-Do not call all 42 tools by default.
+Do not call all 43 tools by default.
 
 ## Self-describing API layers
 
@@ -97,7 +99,7 @@ schema_version = 1
 guide URI prefix = aianalyzer://guide/
 ```
 
-Static guide resources:
+Static guide resources on the P6a branch:
 
 ```text
 aianalyzer://guide/index
@@ -109,6 +111,7 @@ aianalyzer://guide/song-memory
 aianalyzer://guide/section-structure
 aianalyzer://guide/track-story
 aianalyzer://guide/section-relationships
+aianalyzer://guide/dynamics-evidence
 aianalyzer://guide/masking-evidence
 aianalyzer://guide/stereo-evidence
 aianalyzer://guide/tonal-evidence
@@ -124,7 +127,7 @@ CI/self-test invariants:
 - exact guide Resource URI registry;
 - every registered Tool has a non-empty description;
 - every registered Guide Resource has a non-empty description;
-- Server instructions contain the required identity, coverage, verification and control-boundary rules;
+- Server instructions contain the required identity, coverage, dynamics, verification and control-boundary rules;
 - official assembled packages can locate the canonical Skill/reference files.
 
 No MCP Prompt is required for this initial self-description layer. Prompts should only be added later for a concrete user-invoked workflow that cannot be expressed cleanly by Server instructions, Tool descriptions and Resources.
@@ -147,6 +150,9 @@ structure / arrangement context
 -> audio_track_story() for one track across sections
 -> audio_section_profile() for many tracks inside one section
 -> audio_section_relationships() for a bounded pair shortlist
+
+retained dynamics when needed
+-> audio_dynamics_distribution() for selected pass span / explicit range / cached section
 
 raw historical timeline only when needed
 -> audio_song_timeline()
@@ -339,6 +345,55 @@ Returns a bounded pair shortlist across sections/families.
 
 Detailed masking/stereo/temporal pair tools remain recent-window based.
 
+## Coverage-aware retained dynamics distributions
+
+### `audio_dynamics_distribution()`
+
+This P6a tool is MCP-side and reuses one-second Song Memory plus the common transport-range resolver. It adds no realtime DSP and no OSC fields.
+
+Supported scopes:
+
+```text
+selected retained transport-pass span
+explicit DAW-time range
+cached Section Map section
+optional compare_section_id for section-to-section deltas
+```
+
+Coverage policy:
+
+```text
+minimum per-bin coverage floor
++
+covered-seconds weighting for accepted bins
+```
+
+The result exposes coverage/provenance such as effective range, selected instance-local epoch, range coverage, accepted bin count, rejected low-coverage bin count, missing bin count and weighting policy. Missing bins are never inserted as silence or zero.
+
+Descriptive distributions currently include:
+
+```text
+RMS dBFS
+LUFS-S
+Crest dB
+observed per-bin Sample Peak maxima
+observed per-bin True Peak maxima
+```
+
+Where available they report min/max, P10/P25/P50/P75/P90, IQR, P90-P10 spread and a covered-seconds weighted arithmetic mean. RMS additionally exposes a separately named covered-seconds power-domain mean.
+
+Important boundaries:
+
+- `lufs_s_interpercentile_range_lu` is P90(LUFS-S) - P10(LUFS-S), not standardized EBU LRA;
+- standardized EBU LRA is explicitly unavailable in P6a;
+- arbitrary-range Integrated LUFS is explicitly unavailable because current retained `lufs_i_latest` is pass-cumulative;
+- arbitrary-range PLR is explicitly unavailable without scope-compatible peak and integrated loudness;
+- observed per-bin peak distributions are not a reconstructed sample stream;
+- section deltas are descriptive only and do not create a dynamics/mastering quality score;
+- no fixed LUFS/LRA/PLR/crest target belongs in Analyzer MCP core logic.
+
+Detailed semantics: `dynamics-evidence.md`.
+
 ## Recent-window verification
 
 ```text
@@ -399,7 +454,7 @@ Detailed semantics: `verification-evidence.md`.
 
 ## Control boundary
 
-Analyzer MCP owns measurement, retained memory, project/runtime identity-scope disclosure, derived structure/relationships/range resolution, comparison, verification conditions, deterministic binding evidence, and Analyzer Analysis Profile control only.
+Analyzer MCP owns measurement, retained memory, project/runtime identity-scope disclosure, derived structure/relationships/range resolution, coverage-aware retained dynamics distributions, comparison, verification conditions, deterministic binding evidence, and Analyzer Analysis Profile control only.
 
 The external DAW-control layer owns exact project state, future authoritative stable project identity, and all non-Analyzer writes/readback.
 
@@ -407,6 +462,6 @@ Never invent project identity, write success, readback values, semantic section 
 
 ## OSC compatibility
 
-OSC analysis protocol remains append-only **1.2** with existing indexes `0..149` unchanged by Track Story, relationships, range verification, identity-scope disclosure, or MCP self-description.
+OSC analysis protocol remains append-only **1.2** with existing indexes `0..149` unchanged by Track Story, relationships, range verification, identity-scope disclosure, MCP self-description, or P6a retained dynamics distributions.
 
 Analyzer-owned Profile control remains a separate loopback-only control protocol, revision 1.

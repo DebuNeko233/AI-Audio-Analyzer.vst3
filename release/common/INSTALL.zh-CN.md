@@ -79,7 +79,7 @@ MCP / Skill 安装到：
 
 优先直接使用这个文件，不要手动猜路径。完整 JSON 示例见 `MCP-SETUP.md`。
 
-当前 AI Audio Analyzer MCP 1.2 共 **42 个工具**。
+当前 AI Audio Analyzer MCP 1.2 在 P6a 分支共 **43 个工具**。
 
 ## MCP Self-Describing API
 
@@ -89,7 +89,7 @@ MCP / Skill 安装到：
 
 ```text
 Server instructions
-42 个 Tool description
+43 个 Tool description
 MCP Resources: aianalyzer://guide/*
 ```
 
@@ -103,7 +103,11 @@ MCP Resources: aianalyzer://guide/*
 aianalyzer://guide/index
 ```
 
-然后只读取当前任务需要的 Guide，不要机械加载全部内容。
+然后只读取当前任务需要的 Guide，不要机械加载全部内容。P6a Dynamics 的详细 Guide 是：
+
+```text
+aianalyzer://guide/dynamics-evidence
+```
 
 如果客户端不支持 MCP Resources，则建议把安装后的 `skill` 文件夹导入给同一个 Agent，以获得同一份完整长篇专业说明。
 
@@ -147,6 +151,7 @@ audio_section_map(...)
 audio_section_profile(...)
 audio_track_story(...)
 audio_section_relationships(...)
+audio_dynamics_distribution(...)
 ```
 
 Song Memory 保存有界的 1 秒 DAW 时间轴证据。重新播放、Seek、Loop 跳回会建立新的实例局部 Playback Epoch。Song Memory 当前属于 MCP Session State，还没有按 Stable Project ID 自动隔离。
@@ -154,6 +159,26 @@ Song Memory 保存有界的 1 秒 DAW 时间轴证据。重新播放、Seek、Lo
 A/B/C 是中性的重复结构家族，不是自动 Verse/Chorus/Drop。Track Story 不会自动判断 Bass/Vocal/Drums，也不会自动要求处理。Relationship 的 `shortlist_priority` 只是检查优先级，不是 Masking/Mix Problem 概率或质量分数。
 
 详细 Masking/Stereo/Temporal Pair 工具仍是 Recent-window。
+
+## Coverage-aware Dynamics Distribution
+
+使用：
+
+```text
+audio_dynamics_distribution(...)
+```
+
+可以分析 Selected Retained Transport Pass、显式 DAW-time Range 或 Cached Section。P6a 对 1 秒 Retained Bin 设置最小 Coverage Floor，并按 Accepted Bin 的 Covered Seconds 加权。
+
+当前输出 RMS、LUFS-S、Crest、Observed per-bin Sample Peak Maxima、Observed per-bin True Peak Maxima 的描述性分布。Missing Bin 永远保持 Missing，不会补成 Silence 或 0。
+
+重要边界：
+
+- `lufs_s_interpercentile_range_lu` 只是 LUFS-S 的 P90-P10 Spread，不是标准 EBU Loudness Range；
+- P6a 不实现标准 EBU LRA；
+- Retained `lufs_i_latest` 是 Pass-cumulative，因此不能当作 Arbitrary-range Integrated LUFS；
+- 没有 Scope-compatible Integrated Loudness 时不输出 Arbitrary-range PLR；
+- Section-to-section Delta 只是描述证据，不是 Quality Score 或处理建议。
 
 ## Same-range Before/After 验证
 
@@ -238,6 +263,7 @@ telemetry_confirmed   新测量帧已经报告目标 Profile
 -> 采集足够目标 Pass
 -> audio_section_map()
 -> 根据问题调用 Track Story / Section Profile / Section Relationships
+-> 需要 Retained Dynamics 时调用 audio_dynamics_distribution()
 -> 已知 Before/After 歌曲范围时使用 Transport-range Verification
 -> 只有真正需要时再调用 Temporal / Masking / Stereo / Tonal 深度证据
 ```

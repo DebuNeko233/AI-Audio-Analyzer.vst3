@@ -20,7 +20,7 @@ GUIDE_URI_PREFIX = "aianalyzer://guide/"
 
 SERVER_DESCRIPTION = (
     "Realtime and retained audio measurement, Song Memory, structure, relationship, "
-    "comparison and verification evidence for AI-assisted mixing. Analyzer-owned "
+    "dynamics, comparison and verification evidence for AI-assisted mixing. Analyzer-owned "
     "writes are limited to its own Analysis Profile; sound/project changes belong "
     "to an external DAW-control MCP."
 )
@@ -32,8 +32,9 @@ Recommended start:
 1. Call audio_project_identity_status(). Current stable project identity may be unresolved.
 2. Call audio_project_status(). Establish deterministic Identify bindings when needed.
 3. For whole-song work, call audio_song_status() and prefer Section Map / Track Story / Section Relationships before raw timeline queries.
-4. Drill into temporal, masking, stereo or tonal evidence only when the task needs it. Do not call every tool mechanically.
-5. For a known musical passage around an external DAW/plugin change, prefer transport-anchored same-range verification.
+4. Use audio_dynamics_distribution() for retained pass/range/section dynamics distributions; it is descriptive evidence, not standardized LRA/PLR.
+5. Drill into temporal, masking, stereo or tonal evidence only when the task needs it. Do not call every tool mechanically.
+6. For a known musical passage around an external DAW/plugin change, prefer transport-anchored same-range verification.
 
 Hard rules:
 - runtime_id identifies one live plugin instance; it is not persistent project or track identity and changes when the same project is reopened.
@@ -42,6 +43,7 @@ Hard rules:
 - null means unavailable, not zero. Missing retained coverage is not silence. Low activity does not prove mute state.
 - A/B/C section families are neutral recurrence labels, not automatic Intro/Verse/Chorus/Drop labels.
 - Relationship shortlist_priority is inspection priority only, not masking probability, problem probability, quality score or a processing command.
+- LUFS-S interpercentile spread is descriptive distribution evidence, not EBU Loudness Range. Do not relabel it as LRA or derive arbitrary-range PLR from pass-cumulative LUFS-I.
 - controlled_comparison means technical comparability only; closed_loop_complete additionally requires caller-supplied actual host readback. Neither means the result sounds better.
 - AI Audio Analyzer may modify only its own Analysis Profile. EQ, compression, gain, pan, routing, synth, automation and project/plugin writes belong to the external DAW-control layer.
 
@@ -90,6 +92,11 @@ GUIDE_MANIFEST: dict[str, tuple[str, str, str]] = {
         "references/section-relationships.md",
         "Bounded section-aware relationship shortlist semantics and limitations.",
     ),
+    "dynamics-evidence": (
+        "aianalyzer://guide/dynamics-evidence",
+        "references/dynamics-evidence.md",
+        "Coverage-weighted retained dynamics distributions, section comparison and standardized-loudness boundaries.",
+    ),
     "masking-evidence": (
         "aianalyzer://guide/masking-evidence",
         "references/masking-evidence.md",
@@ -125,11 +132,8 @@ def _candidate_skill_roots() -> list[Path]:
     module_dir = Path(__file__).resolve().parent
     roots.extend(
         [
-            # Source repository layout: mcp/ beside skills/ai-analyzer-flstudio/.
             module_dir.parent / "skills" / "ai-analyzer-flstudio",
-            # Development component layout: dist/mcp/ beside dist/skill/.
             module_dir.parent / "skill",
-            # Beginner Release install: <app>/mcp/executable beside <app>/skill/.
             Path(sys.executable).resolve().parent.parent / "skill",
             Path.cwd() / "skill",
             Path.cwd() / "skills" / "ai-analyzer-flstudio",
