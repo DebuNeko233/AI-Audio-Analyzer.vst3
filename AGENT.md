@@ -45,7 +45,7 @@ Do not duplicate a full FL Studio control implementation inside Analyzer MCP.
 
 ---
 
-## 2. Three-layer intelligence boundary
+## 2. Intelligence and control boundaries
 
 ### Semantic layer - LLM / Agent
 
@@ -64,13 +64,10 @@ what happened in the audio
 where it happened in DAW time
 what evidence was retained
 whether two measurements are technically comparable
+how a chosen target differs from a frozen reference profile
 ```
 
 Prefer explicit coverage/uncertainty over subjective automatic judgments.
-
----
-
-## 3. Hard control boundary
 
 Analyzer MCP is **not** a general DAW-control MCP.
 
@@ -83,26 +80,13 @@ Eco / Balanced / Mix / Full
 
 That exception is allowed because it changes Analyzer measurement computation only and does not alter the audio signal.
 
-Analyzer MCP must not use it as precedent to write:
-
-```text
-EQ
-compression
-gain
-pan
-routing
-synth parameters
-automation
-arrangement/project state
-other plugins
-other artistic/technical DAW parameters
-```
+Analyzer MCP must not use it as precedent to write EQ, compression, gain, pan, routing, synth parameters, automation, arrangement/project state, other plugins, or other artistic/technical DAW parameters.
 
 Those writes, exact project inspection, marker/Playlist metadata, plugin-state readback, transactions, rollback, and project mutation belong to the real DAW-control layer.
 
 ---
 
-## 4. Repository-wide change rule
+## 3. Repository-wide change rule
 
 For **every code, workflow, protocol, MCP, packaging or behavior change**, inspect and update as appropriate:
 
@@ -145,34 +129,48 @@ The plugin GUI may be bilingual. Stable technical identifiers remain language-in
 
 ---
 
-## 5. Current branch metadata
+## 4. Current branch metadata and merge history
 
-Current metadata on the stacked P7a branch:
+Current metadata on the **P8a PR #35 branch**:
 
 ```text
 Product version             1.2.0
 MCP_VERSION                 1.2
 OSC analysis protocol       1.2
 Analyzer control revision   1
-MCP tool count              44
-MCP guide resources         15
+MCP tool count              47
+MCP guide resources         16
 ```
 
-History / dependency state:
+Current `main` before P8a merge remains:
 
-- P4a merged via PR #29 with 41 tools.
-- Project Identity Disclosure merged via PR #31 and raised the tool count to 42.
-- MCP Self-Describing API merged via PR #32 and added Server instructions, complete Tool descriptions, and 13 Skill-backed Guide Resources without adding another Tool.
-- P6a Dynamics Distribution is active on PR #33; it adds `audio_dynamics_distribution()` and `aianalyzer://guide/dynamics-evidence`, raising that branch to 43 tools / 14 Guide Resources.
-- P7a Mono-fold Compatibility is active on draft PR #34, stacked from the exact current #33 head `f6bb18085e6e505df84b48ef8a422724670cddbd`; it adds `audio_mono_compatibility()` and `aianalyzer://guide/mono-compatibility`, raising the stacked branch to 44 tools / 15 Guide Resources.
-- PR #34 targets `main` only so the existing pull-request CI triggers; it must not be merged while #33 remains unmerged. After #33 merges, reconcile/rebase #34 if needed and verify its effective P7a-only diff before merge.
-- These MCP-side changes do not justify a Product/OSC/control-protocol version bump by themselves.
+```text
+44 tools
+15 Guide Resources
+main head at P8a branch point: a4924b80986d01f622784ec7db6087240f7c34ca
+```
 
-Do not present PR #33 or PR #34 as merged main capability until each is explicitly merged.
+Merged milestones relevant to the current architecture:
+
+- P1 Track Story merged via PR #19.
+- P2 Section-aware Mix Relationships merged via PR #20.
+- P4a retained-range resolver + same-range verification merged via PR #29 (`c833487c6efbd98206d3f454e0875d4698b1f6af`).
+- Project Identity Disclosure merged via PR #31 (`70e95f83f2e938cb2bf619c7ffb1e0aabd4b9b9b`).
+- MCP Self-Describing API merged via PR #32 (`2bcc868413f33737481fcc1704eb641d7042e75e`).
+- P6a Coverage-aware Dynamics Distribution merged via PR #33 (`56b9e0cbfa0a350976beccd594f4d887196f4436`).
+- P7a Energy-aware Mono-fold Compatibility merged via PR #34 (`a4924b80986d01f622784ec7db6087240f7c34ca`).
+
+Current open implementation work:
+
+- **PR #35 P8a Session-scoped Reference Engine** — three MCP tools plus one guide Resource. It is not merged main capability until explicitly merged.
+
+P6a and P7a are **already merged main capability**. Do not describe #33/#34 as open, stacked, draft, or unmerged.
+
+These MCP-side P6a/P7a/P8a changes do not justify a Product/OSC/control-protocol version bump by themselves.
 
 ---
 
-## 6. VST3 realtime architecture
+## 5. VST3 realtime architecture
 
 - JUCE 8.0.8, C++20, CMake.
 - Visible product: `AI Audio Analyzer`.
@@ -192,7 +190,7 @@ Historical host-visible parameter order must remain:
 
 Realtime callback may contain cheap host reads, atomics and FIFO push only.
 
-Do not put locks, allocation, network parsing, file I/O, FFT, loudness processing, semantic analysis, song structure, relationship analysis, MCP work, Python/model inference, or optimizer orchestration in the audio callback.
+Do not put locks, allocation, network parsing, file I/O, FFT, loudness processing, semantic analysis, song structure, relationship analysis, MCP work, Python/model inference, reference comparison, or optimizer orchestration in the audio callback.
 
 Current scheduling invariants:
 
@@ -207,7 +205,7 @@ LUFS-S / LUFS-I polling     about every 100 ms
 
 ---
 
-## 7. Adaptive Analysis Profiles
+## 6. Adaptive Analysis Profiles
 
 ```text
 0 Eco       Core
@@ -226,15 +224,9 @@ Use the lowest profile that provides the evidence required for the current task.
 
 ---
 
-## 8. Analyzer-owned local control protocol
+## 7. Analyzer-owned local control protocol
 
-Control revision remains:
-
-```text
-1
-```
-
-It is separate from OSC analysis-frame protocol 1.2.
+Control revision remains `1`, separate from OSC analysis protocol 1.2.
 
 Security/scope invariants:
 
@@ -258,7 +250,7 @@ ACK proves the target VST3 applied the request. Telemetry confirmation requires 
 
 ---
 
-## 9. Measurement / interpretation invariants
+## 8. Measurement / interpretation invariants
 
 ### `null` is not zero
 
@@ -266,19 +258,17 @@ Unavailable evidence remains unavailable.
 
 ### Missing coverage is not silence
 
-Never convert missing/sparse Song Memory into inactivity, mute state, a structure boundary, or relationship disappearance.
+Never convert missing/sparse Song Memory into inactivity, mute state, a structure boundary, relationship disappearance, or a zero-valued reference feature.
 
 ### Feature availability is authoritative
 
 Disabled/unavailable feature families must not be interpreted merely because compatibility packet positions exist.
 
-For historical range comparisons, use measurement families actually represented in the selected retained Before/After evidence. Do not substitute the current live Profile for historical availability.
-
-Content-dependent retained availability differences are audit context, not proof that the historical Analysis Profile changed. Interpret only dimensions/families represented in both passes; no common retained measurement family is a hard comparability blocker.
+For historical range comparisons, use measurement families actually represented in selected retained evidence. Do not substitute the current live Profile for historical availability.
 
 ### Project/runtime identity is explicit and currently unresolved
 
-Current machine-readable identity contract is exposed by:
+Use:
 
 ```text
 audio_project_identity_status()
@@ -306,20 +296,20 @@ Critical rules:
 - reopening the same DAW project recreates Analyzer runtime UUIDs;
 - a new runtime UUID therefore does not prove that the project changed;
 - current Mixer/Slot binding is deterministic current-session location, not persistent track identity;
-- while MCP keeps running, retained Song Memory, Section Maps, snapshots, relationships and verification sessions can outlive a DAW project switch/reopen;
+- retained Song Memory, Section Maps, snapshots, relationships, reference profiles and verification sessions can outlive a DAW project switch/reopen while MCP keeps running;
 - until P3 provides authoritative project identity, do not silently reuse retained project-level state across a suspected switch/reopen;
 - when strict isolation is required before stable identity exists, restart Analyzer MCP and rebuild current-session bindings/evidence;
 - never manufacture a project ID from runtime UUID, BPM, track count, names, Mixer indexes, topology fingerprints, transport epochs, or audio fingerprints unless a future explicit identity contract defines that method.
 
-### P6a dynamics-distribution terminology stays descriptive
+### P6a dynamics distributions stay descriptive
 
 P6a uses retained one-second Song Memory, a minimum per-bin coverage floor, and covered-seconds weighting for accepted observations.
 
 Keep these distinctions explicit:
 
 - weighted RMS/LUFS-S/crest/peak percentiles are descriptive retained-observation statistics;
-- dB percentiles are not power-domain means; if both are exposed they must remain separate fields;
-- `lufs_s_interpercentile_range_lu` means P90(LUFS-S) - P10(LUFS-S) over accepted retained bins and must never be relabelled as standardized EBU LRA;
+- dB percentiles are not power-domain means;
+- `lufs_s_interpercentile_range_lu` is P90(LUFS-S) - P10(LUFS-S), never standardized EBU LRA;
 - arbitrary-range Integrated LUFS is unavailable while retained `lufs_i_latest` remains pass-cumulative;
 - arbitrary-range PLR is unavailable without scope-compatible peak and integrated-loudness evidence;
 - missing bins are missing, not zero/silence;
@@ -329,7 +319,7 @@ Keep these distinctions explicit:
 
 ### P7a mono-fold evidence is direct energy evidence, not a quality score
 
-Current Worker math is already:
+Current Worker math:
 
 ```text
 M = 0.5 * (L + R)
@@ -337,7 +327,7 @@ S = 0.5 * (L - R)
 (L_power + R_power)/2 = M_power + S_power
 ```
 
-P7a therefore derives direct recent-window mono-fold evidence without new realtime DSP or OSC fields:
+P7a derives direct recent-window mono-fold evidence without new realtime DSP or OSC fields:
 
 ```text
 mono_fold_rms_db       = Mid RMS
@@ -355,26 +345,40 @@ mono_fold_band_delta_db       = 10*log10(mid_power / (mid_power + side_power))
 
 Keep these boundaries explicit:
 
-- current 32-band results are band-center sampled energy evidence, not perfect integrated-band transfer functions;
-- `inspection_priority` is relative sampled energy multiplied by fold-down energy-loss fraction and is only an inspection shortlist aid;
-- do not interpret `inspection_priority` as audibility probability, phase-problem probability, quality score, pass/fail result, or processing instruction;
+- band-center sampled evidence is not a perfect integrated-band transfer function;
+- `inspection_priority` is only an inspection shortlist aid;
 - correlation, Side/Mid, negative-cross and direct mono-fold loss remain independent evidence dimensions;
-- when Mid reaches the Analyzer `-120 dB` measurement floor, report the relative delta as floor-censored and do not claim a precise cancellation depth below that floor;
-- completely unmeasurable Mid+Side band-center energy stays unavailable rather than becoming artificial cancellation;
-- current P7a scope is recent receive-time evidence only because Song Memory does not retain full historical 32-band Mid/Side detail;
-- direct mono-fold Sample Peak and True Peak are unavailable in P7a and must not be inferred from stereo Peak, True Peak, RMS or correlation;
+- Mid at the Analyzer `-120 dB` floor is floor-censored; do not claim cancellation precision below the floor;
+- completely unmeasurable Mid+Side energy stays unavailable;
+- current P7a scope is recent receive-time only because Song Memory does not retain full historical 32-band Mid/Side detail;
+- direct mono-fold Sample Peak and True Peak are unavailable in P7a and must not be inferred from stereo metrics;
 - optional P7b owns any future direct mono-fold peak/true-peak worker/protocol extension;
 - no fixed rule such as `correlation < 0 = bad`, `all lows must be mono`, or `mono_fold_delta < X = fail` belongs in MCP core logic.
 
+### P8a reference comparison is context, not matching
+
+P8a currently freezes compact recent-window measurement profiles in MCP session memory.
+
+Rules:
+
+- reference profiles are frozen at capture time;
+- no source audio is stored;
+- references are not persistent across MCP restart;
+- recent-window capture is not a whole-song claim;
+- current P8a does not silently claim arbitrary historical Section 32-band reference evidence;
+- absolute comparison direction is `target - reference`;
+- RMS-level-normalized spectral comparison explicitly removes one broad level offset for a shape view only;
+- level normalization does not modify either source;
+- a reference difference is not automatically a defect;
+- never convert reference deltas directly into inverse EQ, master-match, widening, compression, loudness, or other processing commands;
+- P8a never silently assumes A/B/C or user section names are semantically equivalent across unrelated songs;
+- no universal reference similarity/quality score is emitted.
+
 ### Heuristics stay labelled as heuristics
 
-Examples include spectral overlap, temporal overlap, ERB masking evidence, negative-cross evidence, tonal ranking, harmonic alignment, section novelty, recurrence similarity, Track Story deltas, relationship `shortlist_priority`, range pass selection, retained weighted distribution summaries, and mono-fold `inspection_priority`.
+Examples include spectral overlap, temporal overlap, ERB masking evidence, negative-cross evidence, tonal ranking, harmonic alignment, section novelty, recurrence similarity, Track Story deltas, relationship `shortlist_priority`, range pass selection, retained weighted distributions, mono-fold `inspection_priority`, and future reference matching helpers.
 
 They are not calibrated probabilities unless a future validated model explicitly establishes that.
-
-### Do not collapse independent evidence into one score
-
-Keep stereo dimensions, mono-fold evidence, Track Story dimensions, relationship evidence, dynamics distributions, and performance telemetry separate.
 
 ### Exact project data wins for exact symbolic facts
 
@@ -382,7 +386,7 @@ If external DAW/MIDI/project tooling exposes exact track names, routing, markers
 
 ---
 
-## 10. OSC analysis protocol 1.2
+## 9. OSC analysis protocol 1.2
 
 Analysis address:
 
@@ -419,13 +423,13 @@ Current tail:
 149  schema marker = "1.2"
 ```
 
-P1/P2/P4a, project-identity disclosure, MCP self-description, P6a retained distributions and P7a derived mono-fold energy evidence add no OSC fields and no realtime DSP work.
+P1/P2/P4a, project-identity disclosure, MCP self-description, P6a retained distributions, P7a derived mono-fold evidence, and P8a session reference comparison add no OSC fields and no realtime DSP work.
 
 ---
 
-## 11. Current measurement/perception capabilities
+## 10. Current measurement/perception capabilities
 
-Current evidence includes:
+Current merged measurement evidence includes:
 
 ```text
 signal validity
@@ -445,14 +449,16 @@ instance-local transport epochs
 estimated analysis lag
 dropped blocks
 worker/FIFO telemetry
-recent-window direct mono-fold RMS / band-center energy compatibility derived from existing Mid/Side evidence
+recent-window direct mono-fold RMS / band-center energy compatibility
 ```
+
+P8a branch additionally exposes frozen session reference comparison over existing evidence; it does not add a new DSP measurement family.
 
 Do not infer track role such as Kick/Bass/Vocal solely from these measurements.
 
 ---
 
-## 12. Transport-aware Song Memory
+## 11. Transport-aware Song Memory
 
 A `transport_epoch` is one **instance-local continuous playback pass**.
 
@@ -473,13 +479,13 @@ scope                    running MCP session
 
 Supporting tracks align by overlapping DAW-time coverage, not equal epoch IDs.
 
-Song Memory is not yet partitioned by a stable DAW Project ID. A running MCP can retain old-project evidence after the DAW switches/reopens a project. Use the project identity contract before assuming continuity.
+Song Memory is not yet partitioned by a stable DAW Project ID. A running MCP can retain old-project evidence after the DAW switches/reopens a project.
 
 Transport coordinates are for whole-song/section/range reasoning, not sample-accurate editing.
 
 ---
 
-## 13. Structure, Track Story and relationships
+## 12. Structure, Track Story and relationships
 
 Current tools:
 
@@ -500,11 +506,11 @@ Detailed masking/stereo/temporal pair tools and P7a mono compatibility remain re
 
 ---
 
-## 14. Verification boundary
+## 13. Verification boundary
 
-Two verification modes now coexist.
+Two verification modes coexist.
 
-### 14.1 Recent-window verification
+### Recent-window verification
 
 ```text
 audio_begin_verification(...)
@@ -512,9 +518,9 @@ audio_complete_verification(...)
 audio_verification_status(...)
 ```
 
-This older path captures comparable recent windows. Its active-ratio guard remains a passage-comparability heuristic, not a quality threshold.
+This path captures comparable recent windows. Its active-ratio guard remains a passage-comparability heuristic, not a quality threshold.
 
-### 14.2 Transport-anchored same-range verification - P4a
+### Transport-anchored same-range verification - P4a
 
 ```text
 audio_begin_range_verification(label, start_seconds, end_seconds, ...)
@@ -543,9 +549,7 @@ P4a invariants:
 - equal numeric epochs across tracks are never required;
 - After cannot silently reuse pre-change Song Memory;
 - missing coverage is not silence;
-- historical feature interpretation is per dimension using retained evidence common to Before and After;
-- content-dependent retained feature mismatch is an audit warning, not automatic proof of Profile mismatch;
-- no common retained measurement family blocks controlled comparison;
+- historical feature interpretation uses retained evidence common to Before and After;
 - higher selected After dropped-block evidence blocks a controlled comparison;
 - `active_ratio` is descriptive in same-range mode, not a proxy for passage identity;
 - range LUFS-I delta is intentionally unavailable because retained `lufs_i_latest` is pass-cumulative, not range-integrated;
@@ -558,23 +562,21 @@ P4a invariants:
 
 Neither means After is artistically better.
 
-A verification session does not establish persistent project identity and must not silently cross a suspected project switch/reopen.
-
 ---
 
-## 15. High-level API strategy
+## 14. High-level API strategy
 
 Prefer:
 
 ```text
-high-level project/song/section/range summary
+high-level project/song/section/range/reference summary
 -> identify relevant target
 -> drill into specialized evidence only where needed
 ```
 
 Do not force the LLM to call dozens of tiny APIs mechanically.
 
-Current high-level building blocks include:
+Current P8a branch high-level building blocks include:
 
 ```text
 audio_project_identity_status()
@@ -587,13 +589,16 @@ audio_track_story()
 audio_section_relationships()
 audio_dynamics_distribution()
 audio_mono_compatibility()
+audio_capture_reference()
+audio_list_references()
+audio_compare_reference()
 audio_begin_range_verification()
 audio_complete_range_verification()
 ```
 
 ---
 
-## 16. MCP source layout
+## 15. MCP source layout
 
 Stable source/PyInstaller entrypoint:
 
@@ -603,7 +608,7 @@ mcp/server.py
 
 Do not create version-numbered startup files or reintroduce a parallel `bridge/` source tree.
 
-Current runtime modules include:
+Current P8a branch runtime modules include:
 
 ```text
 mcp/server.py
@@ -626,6 +631,7 @@ mcp/range_tools.py
 mcp/range_verification_tools.py
 mcp/dynamics_tools.py
 mcp/mono_compatibility_tools.py
+mcp/reference_tools.py
 ```
 
 Repository/CI-only regressions include:
@@ -636,13 +642,14 @@ mcp/relationship_regression.py
 mcp/range_verification_regression.py
 mcp/dynamics_regression.py
 mcp/mono_compatibility_regression.py
+mcp/reference_regression.py
 ```
 
 CI-only regressions must not be shipped in beginner Release runtime/source folders.
 
 ---
 
-## 17. MCP Self-Describing API and Skill boundary
+## 16. MCP Self-Describing API and Skill boundary
 
 The MCP must be safe and understandable even when the client has **not imported an external Skill**.
 
@@ -659,7 +666,7 @@ MCP Resources
 -> long-form guides under aianalyzer://guide/*, read only when needed
 ```
 
-Current stacked P7a branch Guide Resource contract:
+Current P8a branch Guide Resource contract:
 
 ```text
 aianalyzer://guide/index
@@ -673,6 +680,7 @@ aianalyzer://guide/track-story
 aianalyzer://guide/section-relationships
 aianalyzer://guide/dynamics-evidence
 aianalyzer://guide/mono-compatibility
+aianalyzer://guide/reference-comparison
 aianalyzer://guide/masking-evidence
 aianalyzer://guide/stereo-evidence
 aianalyzer://guide/tonal-evidence
@@ -688,25 +696,17 @@ skills/ai-analyzer-flstudio/references/*.md
 
 MCP Resources read those same Markdown files. Do not maintain a second copied long-form guide inside Python constants.
 
-Relationship rules:
+Rules:
 
 - client-side Skill import is optional for basic correct MCP use;
-- clients with MCP Resource support should read `aianalyzer://guide/index` and only the relevant guide for the current task;
-- clients without Resource support may import the packaged Skill to receive the same long-form guidance;
-- Server instructions and Tool descriptions form the minimum fallback if guide files are unavailable;
-- complete beginner Releases must still include `skill/` and must fail package validation if canonical guide files cannot be found;
-- do not load all guides mechanically;
-- Skill explains professional usage, strategy, evidence interpretation, tool calling order, limitations, and verification discipline; it does not become a mandatory mixing recipe.
-
-MCP provides measurements, state, retained evidence, safe APIs, identity-scope disclosure, self-description, and Analyzer-owned Profile control.
-
-The real DAW-control layer owns sound/project writes.
-
-Do not encode one mandatory genre/style recipe into Analyzer MCP or its core Skill.
+- read only relevant Resource guides on demand;
+- Server instructions + Tool descriptions are the minimum fallback;
+- complete beginner Releases must include `skill/` and fail package validation if canonical guide files cannot be found;
+- Skill explains professional usage, strategy, evidence interpretation, tool order, limitations and verification discipline; it does not become a mandatory mixing recipe.
 
 ---
 
-## 18. CI and merge rules
+## 17. CI and merge rules
 
 Never merge a PR while the latest relevant head has pending or failing CI.
 
@@ -728,72 +728,55 @@ feature-specific regression when present
 exact tool registry count
 ```
 
-For Project Identity Disclosure verify:
-
-```text
-audio_project_identity_status() registry presence
-UNRESOLVED stable project identity contract
-same-project reopen runtime UUID instability disclosed
-cross-project retained-state isolation not overclaimed
-strict-isolation action disclosed
-```
-
 For MCP Self-Describing API additionally verify:
 
 ```text
-all current tools have non-empty descriptions
+all tools have non-empty descriptions
 Server instructions are non-empty and retain required hard rules
-exact current Guide Resource registry
+exact Guide Resource registry
 all Guide Resources have non-empty descriptions
 canonical Skill/reference files resolve in source/development package
 AI_ANALYZER_REQUIRE_GUIDES=1 passes in complete packaged/final Release layout
 ```
 
-Current stacked P7a branch expectations are 44 tools and 15 Guide Resources.
+Current P8a branch expectations are:
+
+```text
+47 tools
+16 Guide Resources
+```
 
 P2 additionally requires `mcp/relationship_regression.py`.
 
 P4a additionally requires `mcp/range_verification_regression.py`.
 
-P6a additionally requires `mcp/dynamics_regression.py` and must prove:
+P6a additionally requires `mcp/dynamics_regression.py` and must prove deterministic coverage-weighted statistics, missing != silence, descriptive LUFS-S spread != LRA, range-integrated LUFS/PLR unavailable, and section deltas descriptive only.
+
+P7a additionally requires `mcp/mono_compatibility_regression.py` and must prove correlated/one-sided/anti-phase math, measurement-floor censoring, energy-aware shortlist behavior, historical limits, and no fake peak/TP or quality score.
+
+P8a additionally requires `mcp/reference_regression.py` and must prove:
 
 ```text
-coverage-weighted percentiles are deterministic
-low-coverage bins cannot dominate distributions
-missing bins are not inserted as zero/silence
-LUFS-S absence remains unavailable
-range/section selection is transport-anchored
-LUFS-S spread is not exported as standardized LRA
-arbitrary-range integrated LUFS/PLR remain unavailable
-section deltas are descriptive only
+identical profiles -> near-zero descriptive deltas
+pure gain offset remains in absolute view but disappears from RMS-normalized spectral shape
+spectral-shape differences survive level normalization
+missing feature families remain unavailable/null
+reference profiles are frozen/session-scoped
+no cross-song/section equivalence is assumed
+no automatic EQ/master-match or quality score is emitted
 ```
 
-P7a additionally requires `mcp/mono_compatibility_regression.py` and must prove:
-
-```text
-identical L/R -> near-zero mono-fold RMS/energy delta
-left-only/right-only math -> about -3.0103 dB
-hard anti-phase -> strong floor-censored loss, never fake precision below -120 dB
-unequal correlated stereo remains finite/mathematically correct
-Mid/Side band-center power identity is respected
-unmeasurable bands stay unavailable instead of artificial cancellation
-near-silent cancelled bands cannot dominate energy-aware inspection shortlist
-no universal quality/pass-fail score is emitted
-historical/Section 32-band P7a remains unavailable until retained detail exists
-mono-fold Sample Peak / True Peak remain unavailable until direct P7b measurement exists
-```
+Development/package validation must include `mcp/reference_tools.py` and exclude `mcp/reference_regression.py`.
 
 Path-aware synchronize runs may legitimately skip expensive jobs on later docs-only commits. Record the last implementation head with full relevant green CI and the final docs-only head with its own green path-aware CI.
 
 When merging, use an exact expected PR head SHA guard.
 
-Do not merge unless the user explicitly asks to merge.
-
-For stacked PR #34 specifically, do not merge while dependency PR #33 is unmerged even if #34 CI is green.
+**Do not merge unless the user explicitly asks to merge.**
 
 ---
 
-## 19. Release packaging rules
+## 18. Release packaging rules
 
 GitHub Release is beginner-first.
 
@@ -839,43 +822,11 @@ macOS:
 ~/Library/Application Support/AI Audio Analyzer/mcp/ai-audio-analyzer-mcp
 ```
 
----
-
-## 20. Implemented evolution / history
-
-Merged milestones include:
-
-- loudness / True Peak / stereo correlation;
-- signal validity and runtime UUID identity;
-- Identify mapping to FL Mixer Track/Slot;
-- project overview and Snapshot A/B;
-- temporal evidence;
-- ERB-style masking evidence;
-- deeper Mid/Side / Side-spectrum / negative-cross evidence;
-- chroma / tonal-center / harmonic evidence;
-- recent-window controlled Before/After verification around external writes/readback;
-- adaptive Eco/Balanced/Mix/Full measurement profiles;
-- worker/FIFO/lag/drop telemetry;
-- transport-aware continuous playback epochs;
-- bounded DAW-time Song Memory;
-- explainable section novelty and neutral recurrence families;
-- section-level project profiles;
-- bilingual plugin GUI and transport/health visibility;
-- Analyzer-owned loopback Analysis Profile control with explicit ACK;
-- **P1 Track Story merged via PR #19**;
-- **P2 Section-aware Mix Relationships merged via PR #20**;
-- **P4a retained-range resolver + same-range verification merged via PR #29** (`c833487c6efbd98206d3f454e0875d4698b1f6af`);
-- **Project Identity Disclosure merged via PR #31** (`70e95f83f2e938cb2bf619c7ffb1e0aabd4b9b9b`);
-- **MCP Self-Describing API merged via PR #32** (`2bcc868413f33737481fcc1704eb641d7042e75e`).
-
-Current open implementation work:
-
-- **PR #33 P6a Coverage-aware Dynamics Distribution** — MCP-side retained RMS/LUFS-S/crest/peak/True-Peak distributions, coverage weighting, section comparison and explicit standardized-loudness boundaries. Not merged until explicitly authorized.
-- **Draft PR #34 P7a Energy-aware Mono-fold Compatibility** — stacked on #33; MCP-side recent-window direct mono-fold RMS and 32-band Mid/Side energy evidence, energy-aware shortlist, floor-censored cancellation semantics, and explicit historical/peak limitations. Do not merge while #33 is unmerged and do not merge #34 without explicit authorization.
+P8a adds no user-facing executable and no new installer path. Its Python module is imported by the stable `server.py` entrypoint and therefore must be included in the one-file MCP runtime.
 
 ---
 
-## 21. Ordered P1-P10 roadmap
+## 19. Ordered P1-P10 roadmap
 
 `AGENT.md` is the roadmap source of truth. Do not rely only on conversation memory.
 
@@ -891,46 +842,30 @@ DONE         implemented, documented, regression-covered, and merged to main
 
 ### P1 - Track Story across sections
 
-Status: **DONE**.
-
-Merged PR: **#19**.
+Status: **DONE**. Merged PR #19.
 
 ### P2 - Section-aware Mix Relationships
 
-Status: **DONE**.
-
-Merged PR: **#20**.
+Status: **DONE**. Merged PR #20.
 
 ### P3 - Exact DAW context integration
 
 Status: **BLOCKED** on companion DAW-control capability/contract details.
 
-Target exact context includes project identity, stable track IDs/names, routing/sends, plugin chain/slot identity, Playlist markers/labels, clips/patterns where available, MIDI/symbolic data where available, and actual plugin parameter readback.
+Exact project metadata wins over audio inference for exact symbolic claims. Stable project identity remains unresolved in the current companion contract, so P5 automatic persistent attachment remains blocked.
 
-Exact project metadata wins over audio inference for exact symbolic claims.
+### P4 - Transport-anchored range infrastructure
 
-### P4 - Transport-anchored same-range verification
-
-Status: **ACTIVE** — P4a is DONE; P4b is QUEUED.
+Status: **ACTIVE** — P4a DONE; P4b QUEUED immediately after P8a.
 
 #### P4a - common retained-range resolver + same-range Before/After verification
 
-Status: **DONE**.
-
-Merged PR: **#29**.
+Status: **DONE**. Merged PR #29.
 
 Merge commit:
 
 ```text
 c833487c6efbd98206d3f454e0875d4698b1f6af
-```
-
-Final exact PR head and CI gate:
-
-```text
-head      18c2dfbcaf750747d6a8e9863e211d7e20b39a43
-build     #329 / run 33944568983
-result    success
 ```
 
 Implemented:
@@ -944,44 +879,50 @@ audio_range_verification_status()
 mcp/range_verification_regression.py
 ```
 
-Completion evidence:
+#### P4b - deeper historical retained evidence
 
-- 41-tool registry synchronized at the #29 merge point;
-- same-range regression green;
-- Release runtime validation includes new runtime modules;
-- public docs/Skill/Release docs synchronized;
-- exact-head CI green;
-- merged with expected-head guard.
+Status: **QUEUED — highest-value follow-up after P8a**.
 
-#### P4b - deeper historical range reuse
+Primary goal: reduce LLM operation/perception latency by allowing direct queries of past sections without forced replay.
 
-Status: **QUEUED**.
+Design direction:
 
-Potential next work:
+```text
+reuse common P4 range resolver
+retain bounded 32-band Mid detail per canonical bin
+retain bounded Side/Mid detail required by historical stereo/P7 evidence
+retain only the temporal summaries necessary for supported historical temporal interaction
+feature mask + validity + coverage per retained bin
+no raw audio by default
+```
 
-- reuse common Range Resolver for historical section-specific evidence;
-- expose range-scoped deeper metrics only where current retained schema can support them honestly;
-- do not fake sample accuracy or range-integrated metrics that are not actually retained.
+Before implementation, estimate worst-case RAM per track/project. Preserve one-second retained resolution and explicit coverage; do not fake subsecond/sample-accurate history.
+
+P4b should unlock historical Section follow-up for masking/stereo/mono/temporal evidence and become the basis for historical reference ranges.
 
 ### P5 - Persistent project memory + stable external identity
 
 Status: **BLOCKED** until P3 provides trustworthy identity.
 
-Persist candidates: project/track mappings, section maps, Track Stories, relationship summaries, analysis digests, verification/change history, coverage/schema metadata.
+Persist candidates: project/track mappings, section maps, Track Stories, relationship summaries, reference profiles, analysis digests, verification/change history, coverage/schema metadata.
 
 Runtime UUID and local epoch must never become permanent project IDs.
 
-Project Identity Disclosure is a safety contract only; it does not implement persistent identity or persistence.
-
 ### P6 - Dynamics / mastering distributions
 
-Status: **ACTIVE** — P6a is implemented on PR #33; P6b is QUEUED.
+Status: **P6a DONE; P6b LATER/QUEUED behind P8a/P4b**.
 
 #### P6a - coverage-aware retained distributions
 
-Status: **IMPLEMENTED ON PR #33 / NOT DONE UNTIL MERGED**.
+Status: **DONE**.
 
-Current P6a branch surface:
+Merged PR #33, merge commit:
+
+```text
+56b9e0cbfa0a350976beccd594f4d887196f4436
+```
+
+Current surface:
 
 ```text
 audio_dynamics_distribution(...)
@@ -990,54 +931,29 @@ mcp/dynamics_regression.py
 aianalyzer://guide/dynamics-evidence
 ```
 
-Supported scopes:
-
-```text
-selected retained transport-pass span
-explicit DAW-time range
-cached Section Map section
-optional section-to-section comparison
-```
-
-Coverage/statistics policy:
-
-```text
-minimum per-bin coverage floor
-+
-covered-seconds weighting for accepted bins
-```
-
-Current descriptive distributions include RMS, LUFS-S, crest, observed sample-peak maxima and observed True-Peak maxima with min/max, P10/P25/P50/P75/P90, IQR and P90-P10 spread where available. RMS also exposes a separately labelled covered-seconds power-domain mean.
-
-P6a deliberately leaves these standardized/scope-incompatible metrics unavailable:
-
-```text
-EBU LRA
-arbitrary-range Integrated LUFS
-arbitrary-range PLR
-```
-
-`lufs_s_interpercentile_range_lu` is descriptive only and must never be presented as EBU LRA.
-
-No VST3 DSP, OSC 1.2 index, or Analyzer control protocol change is required for P6a.
+P6a deliberately leaves EBU LRA, arbitrary-range Integrated LUFS, and arbitrary-range PLR unavailable.
 
 #### P6b - authoritative standardized loudness metrics
 
-Status: **QUEUED**.
+Status: **LATER / QUEUED**.
 
-Audit current libebur128 state/modes before implementation. Potential future metrics include authoritative EBU-style LRA and pass-scope integrated loudness / peak relations only when measurement scope and reset semantics are compatible. Benchmark added worker state before enabling it broadly.
-
-Do not claim whole-song values from incomplete coverage.
+Audit current `libebur128` state/modes before implementation. Benchmark added worker state before enabling it broadly. Do not claim whole-song values from incomplete coverage.
 
 ### P7 - Energy-aware mono-fold / stereo compatibility
 
-Status: **ACTIVE** — P7a is implemented on draft PR #34; P7b is QUEUED/OPTIONAL.
+Status: **P7a DONE; P7b QUEUED / OPTIONAL and not next**.
 
 #### P7a - direct recent-window mono-fold energy evidence
 
-Status: **IMPLEMENTED ON DRAFT PR #34 / STACKED ON #33 / NOT DONE UNTIL MERGED**.
+Status: **DONE**.
 
-Current stacked branch surface:
+Merged PR #34, merge commit:
+
+```text
+a4924b80986d01f622784ec7db6087240f7c34ca
+```
+
+Current surface:
 
 ```text
 audio_mono_compatibility(track, seconds=5.0)
@@ -1046,42 +962,7 @@ mcp/mono_compatibility_regression.py
 aianalyzer://guide/mono-compatibility
 ```
 
-P7a intentionally reuses the existing Analyzer math:
-
-```text
-M = 0.5 * (L + R)
-S = 0.5 * (L - R)
-(L_power + R_power)/2 = M_power + S_power
-```
-
-and adds no VST3 DSP/GUI/OSC fields.
-
-Current evidence:
-
-```text
-full-band stereo RMS
-full-band mono-fold RMS (= Mid RMS)
-mono-fold RMS energy delta
-32 band-center Mid/Side sampled energy evidence
-stereo-equivalent sampled energy
-band-center mono-fold delta
-energy-loss fraction
-relative sampled energy
-energy-aware inspection shortlist
-20-120 / 120-500 / 500-2k / 2-5k / 5-20k grouped summaries
-existing correlation / Side-Mid / negative-cross context kept separate
-```
-
-Measurement-floor rule:
-
-```text
-Mid at -120 dB floor
--> floor_censored = true
--> report a conservative floor-limited relative delta
--> do not claim precise cancellation depth below the measurement floor
-```
-
-Current P7a limits:
+Current limitations remain deliberate:
 
 ```text
 historical arbitrary DAW-range 32-band mono fold      unavailable
@@ -1090,56 +971,85 @@ mono-fold Sample Peak                                 unavailable
 mono-fold True Peak                                   unavailable
 ```
 
-Historical/Section support waits for deliberately retained Mid/Side detail that reuses the common P4 range resolver. Direct peak/true-peak fold-down waits for P7b.
+Historical/Section support waits for P4b. Direct peak/true-peak fold-down waits for optional P7b.
 
 #### P7b - optional direct mono-fold peak / True-Peak measurement
 
-Status: **QUEUED / OPTIONAL**.
+Status: **QUEUED / OPTIONAL; lower priority than P8a/P4b/P10**.
 
-If implemented, audit performance and add only real direct measurements such as:
+If implemented, add only real direct measurements such as `mono_fold_peak_dbfs` and `mono_fold_true_peak_dbtp`. Any real new OSC fields must append after index 149 and justify a protocol bump.
+
+### P8 - Structured reference-track comparison
+
+Status: **ACTIVE**.
+
+#### P8a - session-scoped frozen reference profiles
+
+Status: **IMPLEMENTED ON PR #35 / NOT DONE UNTIL MERGED**.
+
+Current branch surface:
 
 ```text
-mono_fold_peak_dbfs
-mono_fold_true_peak_dbtp
+audio_capture_reference(track, label="", seconds=10.0)
+audio_list_references()
+audio_compare_reference(reference_id, target, seconds=None)
+mcp/reference_tools.py
+mcp/reference_regression.py
+aianalyzer://guide/reference-comparison
 ```
 
-Any real new OSC fields must append after index 149 and justify a protocol bump. Do not infer mono true peak from stereo true peak, RMS or correlation.
+P8a semantics:
 
-### P8 - Reference-track comparison
+```text
+frozen current-session reference profile
+recent receive-time window only
+no source audio stored
+absolute target-minus-reference evidence
+explicit RMS-level-normalized spectral-shape view
+independent energy / spectrum / stereo / P7 mono evidence
+no automatic matching recipe
+no quality score
+no cross-song section-label assumption
+```
 
-Status: **LATER**.
+Current deliberate limitations:
 
-Must be level-aware, section-aware, coverage-aware and descriptive rather than an automatic copy/match recipe.
+```text
+persistent reference library                  unavailable
+historical arbitrary Section 32-band capture  unavailable
+whole-song completeness claim                 unavailable
+external file fast scan                       unavailable
+```
+
+P4b should add historical depth; P5 should own persistence after strong identity; P10 should become the preferred external-file reference producer.
 
 ### P9 - Stronger tonal representation
 
 Status: **LATER**.
 
-Candidates: HPCP, CQT/log-frequency representation, tuning offset estimation, multi-pitch/chord evidence only if justified.
+Candidates: tuning-aware HPCP/log-frequency evidence, bounded register-aware representation, then only later chord/multi-pitch evidence if justified. Exact MIDI/project symbolic data remains authoritative when available.
 
-Exact MIDI/project symbolic data remains authoritative when available.
+### P10 - Offline faster-than-realtime scan
 
-### P10 - Offline fast scan
+Status: **LATER, high value after P4b/P8 schemas stabilize**.
 
-Status: **LATER / BLOCKED** on render/input workflow design.
+Preferred architecture is a shared C++ analysis core feeding both live Worker and a standalone local scanner. Do not create a drifting unrelated Python DSP stack. File decoding/render orchestration must never enter the realtime callback.
 
-Potential paths: external offline analyzer executable/library, DAW render handoff from companion control MCP, compatible reuse of Song/Section/Relationship/Range schemas.
-
-Never put render orchestration or file decoding into the realtime callback.
+P10 should eventually become the preferred external reference-file producer for P8 and should support complete-file provenance and faster-than-realtime analysis without changing logical DSP timing.
 
 ---
 
-## 22. Future system layers
+## 20. Future system layers
 
 ### Mixing Transaction / rollback
 
-Not implemented. Transaction state belongs with the layer that can actually restore DAW/plugin parameters.
+Not implemented. Transaction state belongs with the layer that can actually restore DAW/plugin parameters. Analyzer may verify a transaction but must not become a hidden project writer.
 
-Analyzer may verify a transaction but must not become a hidden project writer.
+### Reference Engine beyond P8a
 
-### Reference Engine
+P8a is active on PR #35. Future layers include historical range/Section reference capture after P4b, persistent project/reference memory after P3/P5, and external-file reference production after P10.
 
-Not implemented. Future comparison should operate on structured spectral/dynamics/stereo/loudness/mono-compatibility/section evidence and must not become naive inverse EQ matching.
+Reference comparison must remain structured context and must never become naive inverse-EQ/master matching.
 
 ### Numeric optimizer / learned automix
 
@@ -1147,18 +1057,18 @@ Not implemented. Stabilize perception-control-verification first. Future optimiz
 
 ---
 
-## 23. Current genuine limitations
+## 21. Current genuine limitations
 
 Keep these explicit in code/docs/Skill:
 
 - transport time/PPQ are approximate, not sample-accurate;
 - historical tempo-map reconstruction is not implemented;
-- stable DAW project identity is currently unresolved;
+- stable DAW project identity is unresolved;
 - automatic project-switch detection is not implemented;
 - runtime UUID is live plugin-instance identity and changes when the same project is reopened;
 - current Mixer/Slot binding is MCP-session scoped, not persistent track identity;
 - Song Memory is MCP RAM/session-scoped and not partitioned by stable Project ID;
-- section maps / Track Stories / relationships / range verifications are session-scoped and can outlive a DAW project switch while MCP keeps running;
+- section maps / Track Stories / relationships / references / range verifications are session-scoped and can outlive a DAW project switch while MCP keeps running;
 - strict cross-project isolation currently requires an explicit clean MCP session when authoritative identity is unavailable;
 - section detector works at one-second retained-summary scale;
 - A/B/C families are neutral recurrence labels;
@@ -1167,17 +1077,18 @@ Keep these explicit in code/docs/Skill:
 - estimated analysis lag excludes OSC/MCP/LLM/DAW-control latency;
 - no exact routing graph until P3;
 - detailed masking/stereo/temporal pair tools remain recent-window based;
-- P7a mono compatibility is also recent-window based; arbitrary historical/Section 32-band Mid/Side fold-down evidence is not retained yet;
-- P7a does not directly measure mono-fold Sample Peak or True Peak; do not infer them from stereo metrics;
-- floor-censored mono-fold loss cannot claim exact cancellation depth below the Analyzer -120 dB measurement floor;
+- P7a mono compatibility is recent-window based; arbitrary historical/Section 32-band Mid/Side fold-down evidence is not retained yet;
+- P7a does not directly measure mono-fold Sample Peak or True Peak;
+- floor-censored mono-fold loss cannot claim exact cancellation depth below -120 dB;
 - same-range P4a uses one-second retained bins, not sample-accurate boundaries;
 - arbitrary-range LUFS-I is not implemented;
 - P6a distributions are one-second retained-observation statistics, not reconstructed raw-audio distributions;
 - standardized EBU LRA is not implemented in P6a;
 - arbitrary-range Integrated LUFS and PLR are not implemented in P6a;
-- MCP guide Resources require the canonical packaged/repository Skill files for full long-form content; Server instructions + Tool descriptions are the fallback if those files are absent;
+- P8a references are recent-window, frozen, MCP-session-only profiles; they are not persistent or whole-song reference truth;
+- P8a does not yet provide historical arbitrary Section 32-band reference capture or external-file scanning;
+- MCP guide Resources require canonical packaged/repository Skill files for full long-form content; Server instructions + Tool descriptions are the fallback if those files are absent;
 - Mixing Transaction / rollback is not implemented;
-- Reference Engine is not implemented;
 - numeric optimizer / automix service is not implemented;
 - offline fast scan is not implemented.
 
@@ -1185,7 +1096,7 @@ Never present a roadmap item or an open PR as merged current-main capability.
 
 ---
 
-## 24. Final product principle
+## 22. Final product principle
 
 The system should support a professional engineering loop:
 
@@ -1200,11 +1111,13 @@ multi-track relationship understanding
 +
 stereo / mono-translation evidence
 +
+structured reference context
++
 DAW/VST control
 +
 Before/After same-range verification
 +
-future rollback / persistent Mix State / reference / optimization
+future historical deep recall / rollback / persistent Mix State / offline scan / optimization
 ```
 
 Priority remains:
@@ -1216,6 +1129,16 @@ LLM
 -> real operation
 -> re-perception
 -> verification
+```
+
+The current roadmap priority is:
+
+```text
+P8a session reference comparison
+-> P4b historical retained detail
+-> historical deep pair/mono/reference follow-up
+-> P10 offline fast scan
+-> later P6b / optional P7b / P9 as justified
 ```
 
 Stabilize that loop first. Future neural models, differentiable DSP, encoders, or specialized audio LLMs should plug into this architecture as optional modules rather than forcing a redesign of the Analyzer core.
