@@ -23,6 +23,7 @@ Current layers:
 - range_verification_tools: transport-anchored same-range Before/After verification
 - dynamics_tools: coverage-aware retained dynamics/mastering distributions
 - mono_compatibility_tools: direct recent-window mono-fold RMS and energy-aware band evidence
+- reference_tools: frozen session reference profiles and descriptive target/reference comparison
 - self_description: server instructions and Skill-backed MCP guide resources
 
 Set AI_ANALYZER_SELF_TEST=1 to validate source or packaged runtime without
@@ -85,6 +86,7 @@ import verification_tools as verification  # noqa: E402,F401
 import range_verification_tools as range_verification  # noqa: E402,F401
 import dynamics_tools as dynamics  # noqa: E402,F401
 import mono_compatibility_tools as mono_compatibility  # noqa: E402,F401
+import reference_tools as reference  # noqa: E402,F401
 
 self_description.register_resources(mcp)
 
@@ -137,6 +139,9 @@ EXPECTED_TOOLS = {
     "audio_range_verification_status",
     "audio_dynamics_distribution",
     "audio_mono_compatibility",
+    "audio_capture_reference",
+    "audio_list_references",
+    "audio_compare_reference",
 }
 
 
@@ -196,6 +201,7 @@ def self_test() -> None:
         "same-range verification",
         "Analysis Profile",
         "audio_mono_compatibility",
+        "audio_compare_reference",
     ):
         if required_phrase.casefold() not in mcp.instructions.casefold():
             raise RuntimeError(
