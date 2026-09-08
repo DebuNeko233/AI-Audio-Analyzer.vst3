@@ -18,6 +18,7 @@ import analyzer_core as core  # noqa: E402
 import masking_tools as masking  # noqa: E402
 import performance_tools as performance  # noqa: E402
 import project_tools as project  # noqa: E402
+import reference_tools as reference  # noqa: E402
 import section_tools as structure  # noqa: E402
 import semantic_tools as semantic  # noqa: E402
 import server as entry  # noqa: E402
@@ -140,6 +141,8 @@ def reset_state() -> None:
         core._identify_sequence = 0
     with project._snapshot_lock:
         project._project_snapshots.clear()
+    with reference._reference_lock:
+        reference._references.clear()
     with verification._verification_lock:
         verification._verifications.clear()
     with song._song_lock:
@@ -172,9 +175,12 @@ def main() -> None:
 
     names = {tool.name for tool in asyncio.run(entry.mcp.list_tools())}
     assert names == entry.EXPECTED_TOOLS, sorted(names ^ entry.EXPECTED_TOOLS)
-    assert len(names) == 44
+    assert len(names) == 47
     assert "audio_dynamics_distribution" in names
     assert "audio_mono_compatibility" in names
+    assert "audio_capture_reference" in names
+    assert "audio_list_references" in names
+    assert "audio_compare_reference" in names
 
     identity = entry.project_identity.audio_project_identity_status()
     assert identity["stable_project_id"] is None
@@ -270,6 +276,19 @@ def main() -> None:
     project_status = project.audio_project_status()
     assert project_status["project_ready"] is True
     assert project_status["bound_count"] == 2
+
+    captured_reference = reference.audio_capture_reference("mixer:7/slot:9", "Bass A reference", 5.0)
+    reference_id = captured_reference["reference"]["reference_id"]
+    assert captured_reference["reference"]["scope"]["session_scoped"] is True
+    assert captured_reference["feature_availability"]["spectrum_32_band"] is True
+    assert reference.audio_list_references()["count"] == 1
+    reference_cmp = reference.audio_compare_reference(reference_id, "mixer:8/slot:9", 5.0)
+    assert reference_cmp["provenance"]["reference_frozen"] is True
+    assert reference_cmp["comparability"]["same_section_or_song_assumed"] is False
+    assert len(reference_cmp["spectrum"]["absolute"]["bands"]) == 32
+    assert reference_cmp["spectrum"]["level_normalized"]["available"] is True
+    assert reference_cmp["interpretation_boundary"]["quality_score"] is None
+    assert reference_cmp["interpretation_boundary"]["automatic_eq_match"] is False
 
     perf_a = performance.audio_analysis_status("mixer:7/slot:9")
     assert perf_a["adaptive_analysis_supported"] is True
@@ -616,11 +635,11 @@ def main() -> None:
     assert float(vocal_story["sections"][0]["active_ratio"]) > float(vocal_story["sections"][1]["active_ratio"])
 
     print(
-        f"AI Audio Analyzer MCP SDK {mcp_sdk_version}: 44 tools; "
+        f"AI Audio Analyzer MCP SDK {mcp_sdk_version}: 47 tools; "
         "V0.4 mapping + project identity disclosure + project A/B + temporal + masking + stereo + tonal + "
         "V1.0 verification + V1.1 adaptive performance + V1.2 transport/song-memory + "
         "Analyzer-owned profile control + explainable section structure + Track Story + "
-        "P6a dynamics + P7a mono compatibility registry regressions OK"
+        "P6a dynamics + P7a mono compatibility + P8a session reference registry regressions OK"
     )
 
 
