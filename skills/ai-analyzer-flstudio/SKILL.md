@@ -1,6 +1,6 @@
 ---
 name: ai-analyzer-flstudio
-description: Technical usage skill for Cherry Studio + AI Audio Analyzer MCP. Teaches explicit project/runtime identity scope, deterministic Analyzer binding, adaptive Analysis Profile control, transport-aware Song Memory, explainable song structure, Track Story, bounded section-aware relationships, coverage-aware retained dynamics distributions, measurement validity, performance telemetry, recent-window verification, and transport-anchored same-range verification around externally controlled DAW changes. It does not prescribe a mixing style, LUFS target, EQ/compression/sidechain/stereo recipe, semantic section label, key change, harmony edit, or aesthetic decision.
+description: Technical usage skill for Cherry Studio + AI Audio Analyzer MCP. Teaches explicit project/runtime identity scope, deterministic Analyzer binding, adaptive Analysis Profile control, transport-aware Song Memory, explainable song structure, Track Story, bounded section-aware relationships, coverage-aware retained dynamics distributions, direct energy-aware mono-fold compatibility evidence, measurement validity, performance telemetry, recent-window verification, and transport-anchored same-range verification around externally controlled DAW changes. It does not prescribe a mixing style, LUFS target, EQ/compression/sidechain/stereo recipe, semantic section label, key change, harmony edit, or aesthetic decision.
 ---
 
 # AI Audio Analyzer MCP Usage Skill
@@ -49,6 +49,7 @@ aianalyzer://guide/section-structure
 aianalyzer://guide/track-story
 aianalyzer://guide/section-relationships
 aianalyzer://guide/dynamics-evidence
+aianalyzer://guide/mono-compatibility
 aianalyzer://guide/masking-evidence
 aianalyzer://guide/stereo-evidence
 aianalyzer://guide/tonal-evidence
@@ -127,11 +128,12 @@ audio_track_story(track, map_id)          # one track across sections
 audio_section_profile(section_id, map_id) # many tracks inside one section
 audio_section_relationships(map_id)       # bounded cross-track shortlist
 audio_dynamics_distribution(...)          # retained pass/range/section dynamics distributions
+audio_mono_compatibility(track, seconds)  # recent direct fold-down RMS / band-center energy evidence
 ```
 
 Use `audio_song_timeline()` only when raw DAW-time evolution is still required.
 
-Do not call all 43 tools mechanically.
+Do not call all 44 tools mechanically.
 
 ## 2. Deterministic Analyzer ↔ FL Mixer mapping
 
@@ -193,6 +195,7 @@ Transport / signal / Peak-RMS-Crest   Eco
 LUFS / True Peak                      Balanced
 Spectrum / basic masking              Balanced
 Deep Mid/Side / stereo                Balanced
+P7a mono-fold energy evidence         Balanced
 Temporal                              Mix
 Tonal / chroma / harmonic             Full
 ```
@@ -394,6 +397,98 @@ Critical terminology boundaries:
 
 Detailed rules: `references/dynamics-evidence.md`.
 
+## 6.1 Direct energy-aware mono-fold compatibility
+
+Use:
+
+```text
+audio_mono_compatibility(track, seconds=5.0)
+```
+
+P7a uses the Analyzer's existing Mid/Side measurement identity:
+
+```text
+M = 0.5 * (L + R)
+S = 0.5 * (L - R)
+(L_power + R_power)/2 = M_power + S_power
+```
+
+so it adds direct fold-down energy evidence without new realtime DSP or OSC fields.
+
+Current scope is a **recent receive-time window** from 0.5 to 60 seconds. It is not an arbitrary historical Song Memory / Section query.
+
+Full-band evidence includes:
+
+```text
+stereo_rms_db
+mono_fold_rms_db
+mono_fold_rms_delta_db
+floor_censored
+```
+
+`mono_fold_rms_db` is the existing Mid RMS, i.e. RMS of `(L+R)/2`.
+
+The 32 Analyzer band-center Mid/Side representation derives:
+
+```text
+stereo_equivalent_energy_db
+mono_fold_delta_db
+energy_loss_fraction
+relative_band_energy
+inspection_priority
+```
+
+with:
+
+```text
+stereo_equivalent_band_power ~= mid_power + side_power
+mono_fold_band_power         ~= mid_power
+mono_fold_delta_db           = 10*log10(mid_power / (mid_power + side_power))
+```
+
+These are **band-center sampled energy descriptors**, not perfect integrated-band transfer functions.
+
+`inspection_priority` is only an energy-aware shortlist aid:
+
+```text
+relative sampled stereo-equivalent energy
+*
+mono-fold energy-loss fraction
+```
+
+It is not audibility probability, phase-problem probability, quality score, pass/fail status, or processing advice.
+
+When Mid reaches the Analyzer `-120 dB` measurement floor, `floor_censored=true`. Interpret the returned delta as floor-limited evidence of strong cancellation; do not claim precise cancellation depth below the measurement floor.
+
+Completely unmeasurable Mid+Side energy remains unavailable rather than becoming a synthetic extreme-loss band.
+
+Keep existing stereo descriptors separate:
+
+```text
+L/R correlation
+frequency-dependent correlation
+Side/Mid ratio
+negative-cross energy
+low-band stereo evidence
+```
+
+Direct fold-down energy shows what energy changes; correlation/Side/Mid/negative-cross can help explain why. Do not combine them into one universal stereo-quality score.
+
+Current P7a limitations are explicit:
+
+```text
+historical arbitrary DAW-range 32-band mono fold   unavailable
+cached Section 32-band mono fold                   unavailable
+mono-fold Sample Peak                              unavailable
+mono-fold True Peak                                unavailable
+```
+
+Do not infer mono peak or mono True Peak from stereo Peak/True Peak, RMS, correlation, or Side/Mid. Direct peak/true-peak fold-down belongs to optional P7b.
+
+Never hard-code rules such as `all lows must be mono`, `correlation < 0 = bad`, or `mono_fold_delta < X = fail`.
+
+Detailed rules: `references/mono-compatibility.md`.
+
 ## 7. Validate evidence before interpreting it
 
 Inspect relevant validity/coverage fields:
@@ -415,6 +510,8 @@ The feature mask / retained field availability is authoritative. Disabled or unm
 For historical range evidence, use what was actually retained in that pass. Do not use the **current** live Analysis Profile as proof of what was measured earlier.
 
 Before reusing historical project-level evidence across a reopen/switch, inspect `audio_project_identity_status()` and require a trustworthy external project identity or a clean MCP session boundary.
+
+For P7a specifically, do not turn a recent receive-time result into a historical Section claim. Replay/measure that passage or wait for retained-detail support.
 
 ## 8. Choose the smallest evidence tool
 
@@ -449,6 +546,12 @@ Stereo:
 ```text
 audio_stereo_profile(...)
 audio_stereo_compare(...)
+```
+
+Direct mono fold-down compatibility:
+
+```text
+audio_mono_compatibility(...)
 ```
 
 Tonal:
@@ -588,6 +691,12 @@ Always keep these distinct:
 - spectrum dB != calibrated SPL.
 - stereo correlation != Side/Mid energy.
 - low correlation != anti-correlation.
+- correlation / Side-Mid / negative-cross != direct mono-fold energy change.
+- mono-fold band-center evidence != integrated-band transfer function.
+- floor-censored mono-fold delta != precise cancellation depth below -120 dB.
+- P7a mono-fold RMS/energy != mono-fold Sample Peak / True Peak.
+- recent P7a mono compatibility != arbitrary historical/Section mono compatibility.
+- mono-fold inspection priority != quality score / audibility probability / pass-fail.
 - overlap/masking heuristics != audible-masking probability.
 - chroma != MIDI note probability.
 - tonal-center correlation != key probability.
@@ -619,6 +728,7 @@ infer explainable structural boundaries / neutral recurrence families
 summarize Track Story
 shortlist bounded section-aware relationships
 compute coverage-aware retained dynamics distributions
+compute recent direct mono-fold RMS / energy-aware compatibility evidence
 compare measurements
 resolve retained DAW-time ranges
 verify Before/After measurement conditions
@@ -649,6 +759,7 @@ selector / runtime context
 DAW-time range + selected local epoch when retained evidence is used
 section_id / family_id / map_id when structure is used
 coverage / accepted-rejected-missing bins when distribution evidence is used
+recent receive-time window + floor_censored state when P7a mono evidence is used
 data age / lag / drops when relevant
 Analysis Profile / available feature group when relevant
 measurement window/resolution

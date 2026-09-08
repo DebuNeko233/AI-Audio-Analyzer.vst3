@@ -4,7 +4,7 @@
 
 **AI Audio Analyzer** 是面向 AI / LLM 音乐制作工作流的 JUCE VST3 机器可读音频测量层。
 
-它在 DAW 内测量音频，通过 OSC 向 Analyzer MCP Bridge 发送结构化数据，并向 Cherry Studio 或其他 MCP 客户端提供电平、响度、频谱、立体声、时间关系、遮蔽、调性、工程状态、DAW 时间轴 Song Memory、可解释歌曲结构、Track Story、Section-aware Mix Relationships、Coverage-aware Dynamics Distribution、性能遥测、身份范围说明和闭环验证证据。
+它在 DAW 内测量音频，通过 OSC 向 Analyzer MCP Bridge 发送结构化数据，并向 Cherry Studio 或其他 MCP 客户端提供电平、响度、频谱、立体声、时间关系、遮蔽、调性、工程状态、DAW 时间轴 Song Memory、可解释歌曲结构、Track Story、Section-aware Mix Relationships、Coverage-aware Dynamics Distribution、Energy-aware Mono-fold Compatibility、性能遥测、身份范围说明和闭环验证证据。
 
 当前产品版本：**1.2.0**。
 
@@ -56,6 +56,7 @@ FL Studio / DAW
                  +-- Track Story
                  +-- 有界 Section-aware Relationship Shortlist
                  +-- Coverage-aware Retained Dynamics Distribution
+                 +-- Recent-window Direct Mono-fold RMS / Energy Evidence
                  +-- Recent-window + Transport-range Verification
                  +-- Temporal / Masking / Stereo / Tonal Evidence
                          |
@@ -86,6 +87,7 @@ LLM 不在实时音频测量链路内。Agent 思考或调用其他工具时，A
 - 可解释 Section Boundary + 中性 A/B/C Recurrence Family；
 - Section Profile、Track Story、Section-aware Relationship Shortlist；
 - Coverage-aware RMS / LUFS-S / Crest / Observed Peak Distribution；
+- 基于现有 Mid/Side 证据的 Recent-window Direct Mono-fold RMS 与 32 Band-center Energy Compatibility；
 - Project Snapshot A/B、Recent-window Verification；
 - Transport-anchored Same-range Before/After Verification；
 - Adaptive Analysis Profile 与 Worker/FIFO Telemetry。
@@ -295,6 +297,60 @@ Accepted Bin 按 Covered Seconds 加权
 
 详细语义见 `skills/ai-analyzer-flstudio/references/dynamics-evidence.md`。
 
+## Energy-aware Mono-fold Compatibility
+
+P7a 新增一个直接的 Recent-window Fold-down 工具：
+
+```text
+audio_mono_compatibility(track, seconds=5.0)
+```
+
+VST3 现有 Worker 已经计算：
+
+```text
+M = 0.5 * (L + R)
+S = 0.5 * (L - R)
+```
+
+因此 P7a 不需要增加 Realtime DSP 或 OSC 字段。现有 Mid RMS 就是普通 `(L+R)/2` Mono Fold 的 RMS，并且：
+
+```text
+(L_power + R_power)/2 = M_power + S_power
+```
+
+工具会返回 Direct Full-band Fold-down Evidence 和 32 个 Analyzer Band-center Energy Evidence，包括：
+
+```text
+stereo_rms_db
+mono_fold_rms_db
+mono_fold_rms_delta_db
+mid_db / side_db
+stereo_equivalent_energy_db
+mono_fold_delta_db
+energy_loss_fraction
+relative_band_energy
+inspection_priority
+```
+
+还会按 `20-120 Hz`、`120-500 Hz`、`500 Hz-2 kHz`、`2-5 kHz`、`5-20 kHz` 给出分组摘要。
+
+`inspection_priority` 只是 Energy-aware Inspection Shortlist，不是 Audibility Probability、Phase-problem Probability、Quality Score、Pass/Fail Threshold 或处理建议。
+
+当 Mid 到达 Analyzer 的 `-120 dB` 测量地板时，结果会标记 `floor_censored=true`，返回受测量地板约束的相对损失，而不是伪造一个低于测量能力的“精确抵消深度”。
+
+当前边界是有意保留的：
+
+- P7a 是 Recent Receive-time Evidence，不是任意 Historical/Section 32-band 分析；
+- 当前 Song Memory 没有保留完整 Historical 32-band Mid/Side Detail；
+- P7a 不直接测量 Mono-fold Sample Peak；
+- P7a 不直接测量 Mono-fold True Peak；
+- 不能从 Stereo Peak、True Peak、RMS、Correlation 或 Side/Mid 推算这两个 Peak 指标；
+- Direct Peak / True-Peak Fold-down 属于可选 P7b；
+- Correlation、Side/Mid、Negative-cross 和 Direct Fold-down Loss 必须继续作为独立证据维度；
+- MCP 不内置 `correlation < 0 = bad`、`all lows must be mono`、`mono_fold_delta < X = fail` 这类固定规则。
+
+详细语义见 `skills/ai-analyzer-flstudio/references/mono-compatibility.md`。
+
 ## Closed-loop Verification
 
 现在有两条验证路径。
@@ -397,6 +453,7 @@ aianalyzer://guide/section-structure
 aianalyzer://guide/track-story
 aianalyzer://guide/section-relationships
 aianalyzer://guide/dynamics-evidence
+aianalyzer://guide/mono-compatibility
 aianalyzer://guide/masking-evidence
 aianalyzer://guide/stereo-evidence
 aianalyzer://guide/tonal-evidence
@@ -411,7 +468,7 @@ CI 会强制所有 MCP Tool 和 Guide Resource 都有非空 Description，并验
 
 ## MCP 工具
 
-MCP **1.2 在 P6a 分支共 43 个工具**。
+MCP **1.2 在当前 Stacked P7a 分支共 44 个工具**。
 
 高层工具包括：
 
@@ -428,6 +485,7 @@ audio_section_profile(...)
 audio_track_story(...)
 audio_section_relationships(...)
 audio_dynamics_distribution(...)
+audio_mono_compatibility(...)
 audio_begin_range_verification(...)
 audio_complete_range_verification(...)
 audio_range_verification_status(...)
@@ -435,7 +493,7 @@ audio_range_verification_status(...)
 
 新的 Agent/MCP Session 开始时，以及用户可能切换/重开工程时，优先检查 `audio_project_identity_status()`，再决定历史状态能不能继续使用。
 
-不要机械调用全部 43 个工具。先高层理解，再按问题下钻。
+不要机械调用全部 44 个工具。先高层理解，再按问题下钻。
 
 ## 用户安装
 
@@ -478,16 +536,16 @@ macOS Apple Silicon：解压后运行 `Install.command`。当前 macOS 包为 ad
 mcp/server.py
 ```
 
-P6a 分支版本关系：
+当前 Stacked P7a 分支版本关系：
 
 ```text
 Product version             1.2.0
 MCP version                 1.2
 OSC analysis protocol       1.2
 Analyzer control protocol   本机 revision 1
-MCP tools                   43
+MCP tools                   44
 Self-description schema     1
-Guide resources             14
+Guide resources             15
 ```
 
 Runtime Modules：
@@ -512,6 +570,7 @@ mcp/verification_tools.py
 mcp/range_tools.py
 mcp/range_verification_tools.py
 mcp/dynamics_tools.py
+mcp/mono_compatibility_tools.py
 ```
 
 仓库 CI-only Regression：
@@ -521,6 +580,7 @@ mcp/ci_regression.py
 mcp/relationship_regression.py
 mcp/range_verification_regression.py
 mcp/dynamics_regression.py
+mcp/mono_compatibility_regression.py
 ```
 
 这些 Regression 文件不会进入面向普通用户的 Release Runtime。
@@ -529,7 +589,7 @@ mcp/dynamics_regression.py
 
 Analysis Address：`/aianalyzer/frame`。
 
-OSC **1.2** 继续 Append-only。Track Story、Section Relationships、Transport-range Verification、Project Identity Disclosure、MCP Self-Description 和 P6a Retained Dynamics Distribution 都没有修改既有 `0..149` 索引。
+OSC **1.2** 继续 Append-only。Track Story、Section Relationships、Transport-range Verification、Project Identity Disclosure、MCP Self-Description、P6a Retained Dynamics Distribution 和 P7a Derived Mono-fold Energy Evidence 都没有修改既有 `0..149` 索引。
 
 Analyzer 自有 Analysis Profile Control 使用独立的本机 Loopback Control Protocol，Revision 1。
 
@@ -537,10 +597,11 @@ Analyzer 自有 Analysis Profile Control 使用独立的本机 Loopback Control 
 
 LLM-facing Skill/reference 内容继续保持英文。完整 Skill/Reference Markdown 仍是长篇使用方法的 canonical source，同时通过 `aianalyzer://guide/*` MCP Resources 按需暴露；不要在 `server.py` 里再维护一份重复全文。
 
-P6a 新增长篇 Reference：
+当前新增相关长篇 Reference：
 
 ```text
 skills/ai-analyzer-flstudio/references/dynamics-evidence.md
+skills/ai-analyzer-flstudio/references/mono-compatibility.md
 ```
 
 ## License

@@ -8,15 +8,15 @@ User-facing Release packages are created by:
 
 The normal `build` workflow is for development validation/artifacts, not final user distribution.
 
-Current P6a branch target:
+Current stacked P7a branch target:
 
 ```text
 AI Audio Analyzer 1.2.0
 MCP 1.2
 OSC analysis protocol 1.2
 Analyzer control protocol local revision 1
-43 MCP tools
-14 MCP guide resources
+44 MCP tools
+15 MCP guide resources
 ```
 
 ## Release audience
@@ -80,6 +80,7 @@ verification_tools.py
 range_tools.py
 range_verification_tools.py
 dynamics_tools.py
+mono_compatibility_tools.py
 ```
 
 Repository-only regressions include:
@@ -89,6 +90,7 @@ mcp/ci_regression.py
 mcp/relationship_regression.py
 mcp/range_verification_regression.py
 mcp/dynamics_regression.py
+mcp/mono_compatibility_regression.py
 ```
 
 Regression/test Python files must never be shipped to ordinary users.
@@ -102,7 +104,7 @@ Required protocol-facing layers:
 ```text
 Server instructions
 non-empty description for every MCP Tool
-14 discoverable aianalyzer://guide/* Resources
+15 discoverable aianalyzer://guide/* Resources
 ```
 
 The packaged/repository `skills/ai-analyzer-flstudio/SKILL.md` and `references/*.md` remain the canonical long-form content source. MCP Resources read those same files on demand instead of maintaining a second long-form copy in Python.
@@ -176,10 +178,10 @@ Before publication verify at least:
 
 ```text
 source MCP py_compile/self-test
-MCP 1.2 exact 43-tool registry
-non-empty Tool descriptions for all 43 tools
+MCP 1.2 exact 44-tool registry
+non-empty Tool descriptions for all 44 tools
 non-empty Server instructions
-exact 14-guide Resource registry + descriptions
+exact 15-guide Resource registry + descriptions
 source/repository guide lookup
 packaged/final-Release guide lookup with AI_ANALYZER_REQUIRE_GUIDES=1
 project/runtime identity disclosure regression
@@ -192,6 +194,7 @@ Section Relationship regression
 recent-window verification regressions
 transport-range verification regression
 P6a dynamics distribution regression
+P7a mono compatibility regression
 range normalization / coverage-first pass selection
 post-baseline After freshness fence
 cross-instance different-epoch same-range comparison
@@ -199,6 +202,12 @@ coverage-weighted P6a percentile determinism
 low-coverage-bin rejection / missing-is-not-silence
 LUFS-S-unavailable handling
 standardized LRA / arbitrary-range Integrated LUFS / PLR remain unavailable in P6a
+P7a identical-LR / left-only / hard anti-phase / unequal-stereo math
+P7a Mid-Side band-center power identity
+P7a floor-censored cancellation semantics
+P7a energy-aware shortlist prevents near-silent cancellation from dominating
+P7a historical/Section 32-band evidence remains unavailable until retained detail exists
+P7a mono-fold Sample Peak / True Peak remain unavailable until direct P7b measurement exists
 adaptive Full/Eco validity regressions
 PyInstaller -F one-file build
 packaged runtime native self-test
@@ -308,6 +317,40 @@ User-facing claims must preserve:
 - section-to-section deltas are descriptive only;
 - no fixed LUFS/LRA/PLR/Crest target or universal mastering quality score is provided.
 
+## P7a mono-compatibility note
+
+MCP 1.2 P7a adds:
+
+```text
+audio_mono_compatibility(track, seconds=5.0)
+aianalyzer://guide/mono-compatibility
+```
+
+It is MCP-side and reuses current Mid/Side evidence. No realtime VST3 DSP field or OSC schema change is required.
+
+Current measurement identity:
+
+```text
+M = 0.5 * (L + R)
+S = 0.5 * (L - R)
+(L_power + R_power)/2 = M_power + S_power
+```
+
+User-facing claims must preserve:
+
+- current P7a scope is a recent receive-time window, not arbitrary retained DAW ranges or cached Sections;
+- existing Mid RMS is the ordinary `(L+R)/2` mono-fold RMS;
+- 32-band results are Analyzer band-center sampled energy evidence, not a perfect integrated-band transfer function;
+- `inspection_priority` is relative sampled energy times fold-down energy-loss fraction and is only an inspection shortlist aid;
+- `inspection_priority` is not audibility probability, quality score, phase-problem probability, pass/fail result, or processing advice;
+- correlation, Side/Mid, negative-cross and direct fold-down loss remain independent evidence dimensions;
+- when Mid reaches the Analyzer `-120 dB` measurement floor, `floor_censored=true` and the relative loss is floor-limited rather than precise below-floor cancellation depth;
+- unmeasurable Mid+Side band-center energy remains unavailable, never artificial cancellation;
+- arbitrary historical/Section 32-band mono-fold evidence is unavailable until dedicated retained-detail support exists;
+- mono-fold Sample Peak and mono-fold True Peak are unavailable in P7a and must not be inferred from stereo metrics;
+- optional P7b owns any future direct peak/True-Peak fold-down worker/protocol extension;
+- no fixed rule such as `all lows must be mono`, `correlation < 0 is bad`, or `mono_fold_delta < X means fail` is provided.
+
 ## Closed-loop verification note
 
 MCP 1.2 contains **two** verification paths.
@@ -361,7 +404,7 @@ identity        live runtime UUID
 ACK             explicit request-scoped acknowledgement
 ```
 
-OSC analysis frame remains append-only 1.2 with existing indexes `0..149` unchanged by Track Story, relationships, range verification, identity disclosure, MCP self-description, or P6a retained dynamics distributions.
+OSC analysis frame remains append-only 1.2 with existing indexes `0..149` unchanged by Track Story, relationships, range verification, identity disclosure, MCP self-description, P6a retained dynamics distributions, or P7a derived mono-fold energy evidence.
 
 ## Draft / prerelease semantics
 
