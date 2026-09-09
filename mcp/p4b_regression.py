@@ -9,10 +9,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import analyzer_core as core  # noqa: E402
+import server as entry  # noqa: E402,F401
 import historical_detail_tools as historical  # noqa: E402
 import performance_tools as performance  # noqa: E402
 import section_tools as structure  # noqa: E402
-import server as entry  # noqa: E402,F401
 import song_tools as song  # noqa: E402
 
 
