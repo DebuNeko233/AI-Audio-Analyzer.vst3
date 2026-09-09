@@ -182,6 +182,10 @@ jobs:
             mcp/performance_tools.py \
             mcp/control_tools.py \
             mcp/song_tools.py \
+            mcp/historical_detail_store.py \
+            mcp/historical_detail_profile.py \
+            mcp/historical_detail_pair.py \
+            mcp/historical_detail_tools.py \
             mcp/section_tools.py \
             mcp/track_story_tools.py \
             mcp/section_relationship_tools.py \
@@ -194,6 +198,7 @@ jobs:
             mcp/ci_regression.py \
             mcp/relationship_regression.py \
             mcp/range_verification_regression.py \
+            mcp/p4b_regression.py \
             mcp/dynamics_regression.py \
             mcp/mono_compatibility_regression.py \
             mcp/reference_regression.py
@@ -201,6 +206,7 @@ jobs:
           python mcp/ci_regression.py
           python mcp/relationship_regression.py
           python mcp/range_verification_regression.py
+          python mcp/p4b_regression.py
           python mcp/dynamics_regression.py
           python mcp/mono_compatibility_regression.py
           python mcp/reference_regression.py
@@ -223,6 +229,10 @@ jobs:
           cp mcp/performance_tools.py dist/mcp/
           cp mcp/control_tools.py dist/mcp/
           cp mcp/song_tools.py dist/mcp/
+          cp mcp/historical_detail_store.py dist/mcp/
+          cp mcp/historical_detail_profile.py dist/mcp/
+          cp mcp/historical_detail_pair.py dist/mcp/
+          cp mcp/historical_detail_tools.py dist/mcp/
           cp mcp/section_tools.py dist/mcp/
           cp mcp/track_story_tools.py dist/mcp/
           cp mcp/section_relationship_tools.py dist/mcp/
@@ -236,12 +246,17 @@ jobs:
           cp mcp/cherry-studio.example.json dist/mcp/
           cp -R skills/ai-analyzer-flstudio/. dist/skill/
           test -s dist/mcp/self_description.py
+          test -s dist/mcp/historical_detail_store.py
+          test -s dist/mcp/historical_detail_profile.py
+          test -s dist/mcp/historical_detail_pair.py
+          test -s dist/mcp/historical_detail_tools.py
           test -s dist/mcp/dynamics_tools.py
           test -s dist/mcp/mono_compatibility_tools.py
           test -s dist/mcp/reference_tools.py
           test ! -e dist/mcp/ci_regression.py
           test ! -e dist/mcp/relationship_regression.py
           test ! -e dist/mcp/range_verification_regression.py
+          test ! -e dist/mcp/p4b_regression.py
           test ! -e dist/mcp/dynamics_regression.py
           test ! -e dist/mcp/mono_compatibility_regression.py
           test ! -e dist/mcp/reference_regression.py
