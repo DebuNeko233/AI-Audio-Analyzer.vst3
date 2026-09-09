@@ -20,7 +20,7 @@ GUIDE_URI_PREFIX = "aianalyzer://guide/"
 
 SERVER_DESCRIPTION = (
     "Realtime and retained audio measurement, Song Memory, structure, relationship, "
-    "dynamics, mono-compatibility, reference comparison and verification evidence for AI-assisted mixing. "
+    "historical detail, dynamics, mono-compatibility, reference comparison and verification evidence for AI-assisted mixing. "
     "Analyzer-owned writes are limited to its own Analysis Profile; sound/project changes belong "
     "to an external DAW-control MCP."
 )
@@ -32,22 +32,25 @@ Recommended start:
 1. Call audio_project_identity_status(). Current stable project identity may be unresolved.
 2. Call audio_project_status(). Establish deterministic Identify bindings when needed.
 3. For whole-song work, call audio_song_status() and prefer Section Map / Track Story / Section Relationships before raw timeline queries.
-4. Use audio_dynamics_distribution() for retained pass/range/section dynamics distributions; it is descriptive evidence, not standardized LRA/PLR.
-5. Use audio_mono_compatibility() when direct recent-window mono-fold RMS/energy evidence is needed; keep it separate from correlation/Side-Mid/negative-cross proxies.
-6. Use audio_capture_reference(), audio_list_references() and audio_compare_reference() for frozen session reference context. Reference differences are descriptive context, never an automatic EQ/master-match recipe.
-7. Drill into temporal, masking, stereo or tonal evidence only when the task needs it. Do not call every tool mechanically.
-8. For a known musical passage around an external DAW/plugin change, prefer transport-anchored same-range verification.
+4. Use audio_historical_detail() to inspect retained one-second Mid/Side, stereo, mono-fold and temporal evidence for a past DAW range or cached Section without forced replay. Optional pair comparison uses independently coverage-selected passes over the same effective DAW time.
+5. Use audio_dynamics_distribution() for retained pass/range/section dynamics distributions; it is descriptive evidence, not standardized LRA/PLR.
+6. Use audio_mono_compatibility() when direct recent-window mono-fold RMS/energy evidence is needed; keep it separate from correlation/Side-Mid/negative-cross proxies.
+7. Use audio_capture_reference(), audio_list_references() and audio_compare_reference() for frozen session reference context. Reference differences are descriptive context, never an automatic EQ/master-match recipe.
+8. Drill into recent-window temporal, masking, stereo or tonal evidence only when the task needs subsecond/current detail. Do not call every tool mechanically.
+9. For a known musical passage around an external DAW/plugin change, prefer transport-anchored same-range verification.
 
 Hard rules:
 - runtime_id identifies one live plugin instance; it is not persistent project or track identity and changes when the same project is reopened.
 - Until authoritative project identity exists, a suspected project switch/reopen requires strict isolation before reusing retained project-level state; audio_project_identity_status() gives the current required action.
 - transport_epoch is instance-local. Equal epoch numbers across tracks are not required and do not identify a project.
 - null means unavailable, not zero. Missing retained coverage is not silence. Low activity does not prove mute state.
+- P4b historical detail is attached to the canonical one-second Song Memory bins. It stores bounded derived summaries, not raw audio, and does not support subsecond historical alignment or sample-accurate reconstruction.
+- Historical pair evidence selects each track's best retained instance-local pass independently by coverage and aligns evidence by DAW-time bins; equal epoch numbers are never required.
 - A/B/C section families are neutral recurrence labels, not automatic Intro/Verse/Chorus/Drop labels.
 - Relationship shortlist_priority is inspection priority only, not masking probability, problem probability, quality score or a processing command.
 - LUFS-S interpercentile spread is descriptive distribution evidence, not EBU Loudness Range. Do not relabel it as LRA or derive arbitrary-range PLR from pass-cumulative LUFS-I.
 - Mono-fold inspection_priority is an energy-weighted shortlist aid only. Do not convert mono-fold delta, correlation, Side/Mid or negative-cross evidence into a universal stereo-quality/fail score.
-- P7a mono compatibility is recent-window evidence. Arbitrary historical/Section 32-band mono-fold evidence and direct mono-fold sample/true peak are unavailable until dedicated retained/detail or P7b measurement support exists.
+- P7a recent-window mono compatibility still has finer current-frame context. P4b can derive historical one-second Mid/Side energy compatibility, but direct historical mono-fold sample/true peak remains unavailable until dedicated P7b measurement support exists.
 - P8a references are frozen recent-window evidence scoped to the current MCP session. They do not prove whole-song coverage, do not persist across MCP restart, and do not silently equate section labels or musical roles across unrelated songs.
 - RMS level-normalized reference comparison is only a comparison view; it does not modify either source and does not imply that matching the reference is artistically correct.
 - controlled_comparison means technical comparability only; closed_loop_complete additionally requires caller-supplied actual host readback. Neither means the result sounds better.
@@ -66,7 +69,7 @@ GUIDE_MANIFEST: dict[str, tuple[str, str, str]] = {
     "analyzer-mcp": (
         "aianalyzer://guide/analyzer-mcp",
         "references/analyzer-mcp.md",
-        "Detailed MCP tool hierarchy, selectors, identity, Song Memory and verification reference.",
+        "Detailed MCP tool hierarchy, selectors, identity, Song Memory, historical detail and verification reference.",
     ),
     "parameters": (
         "aianalyzer://guide/parameters",
@@ -81,7 +84,7 @@ GUIDE_MANIFEST: dict[str, tuple[str, str, str]] = {
     "song-memory": (
         "aianalyzer://guide/song-memory",
         "references/song-memory.md",
-        "Transport-aware retained Song Memory, coverage and instance-local epoch semantics.",
+        "Transport-aware retained Song Memory, P4b bounded deep history, coverage and instance-local epoch semantics.",
     ),
     "section-structure": (
         "aianalyzer://guide/section-structure",
@@ -106,7 +109,7 @@ GUIDE_MANIFEST: dict[str, tuple[str, str, str]] = {
     "mono-compatibility": (
         "aianalyzer://guide/mono-compatibility",
         "references/mono-compatibility.md",
-        "Direct recent-window mono-fold RMS and energy-aware band evidence, limitations and interpretation boundaries.",
+        "Recent-window and P4b historical mono-fold energy evidence, limitations and interpretation boundaries.",
     ),
     "reference-comparison": (
         "aianalyzer://guide/reference-comparison",
@@ -116,12 +119,12 @@ GUIDE_MANIFEST: dict[str, tuple[str, str, str]] = {
     "masking-evidence": (
         "aianalyzer://guide/masking-evidence",
         "references/masking-evidence.md",
-        "Masking/overlap evidence semantics, heuristics and interpretation limits.",
+        "Recent-window and retained one-second masking/overlap evidence semantics, heuristics and interpretation limits.",
     ),
     "stereo-evidence": (
         "aianalyzer://guide/stereo-evidence",
         "references/stereo-evidence.md",
-        "Stereo, Mid/Side, correlation and negative-cross evidence semantics.",
+        "Stereo, Mid/Side, correlation, negative-cross and historical retained evidence semantics.",
     ),
     "tonal-evidence": (
         "aianalyzer://guide/tonal-evidence",
