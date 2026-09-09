@@ -16,6 +16,7 @@ Current layers:
 - performance_tools: Analysis Profile, feature-mask and worker telemetry parsing
 - control_tools: Analyzer-owned loopback Analysis Profile control
 - song_tools: DAW transport, continuous-pass song memory and latency-aware summaries
+- historical_detail_tools: P4b bounded one-second retained Mid/Side/stereo/temporal detail and historical pair evidence
 - section_tools: explainable boundaries, neutral recurring families and section profiles
 - track_story_tools: per-track behavior across sections/families
 - section_relationship_tools: bounded cross-track relationships across sections/families
@@ -78,6 +79,13 @@ import song_tools as song  # noqa: E402
 
 core._on_frame = song.on_frame_v12
 
+# P4b attaches bounded deep summaries to the same canonical Song Memory bins.
+# The wrapper must therefore run after song.on_frame_v12 has created/updated the
+# selected one-second accumulator, but it adds no OSC fields or realtime DSP.
+import historical_detail_tools as historical_detail  # noqa: E402,F401
+
+core._on_frame = historical_detail.on_frame_p4b
+
 import control_tools as control  # noqa: E402
 import section_tools as structure  # noqa: E402
 import track_story_tools as story  # noqa: E402
@@ -127,6 +135,7 @@ EXPECTED_TOOLS = {
     "audio_song_status",
     "audio_song_timeline",
     "audio_song_overview",
+    "audio_historical_detail",
     "audio_section_map",
     "audio_section_profile",
     "audio_track_story",
@@ -201,6 +210,7 @@ def self_test() -> None:
         "same-range verification",
         "Analysis Profile",
         "audio_mono_compatibility",
+        "audio_historical_detail",
         "audio_compare_reference",
     ):
         if required_phrase.casefold() not in mcp.instructions.casefold():
