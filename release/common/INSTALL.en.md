@@ -2,7 +2,7 @@
 
 [中文教程](INSTALL.zh-CN.md) | [Agent / MCP setup](MCP-SETUP.md)
 
-This Release is packaged for people who do not use programming tools. Normal installation requires **no Python, pip, venv, source code, package manager, Terminal, or PowerShell commands**.
+This Release is packaged for people who do not use programming tools. Normal installation requires **no Python, pip, venv, source code, package manager, Terminal or PowerShell commands**.
 
 Supported packages:
 
@@ -40,9 +40,8 @@ The user Release deliberately contains no MCP Python source, repository regressi
 6. Wait for **Installation completed successfully**.
 7. Restart FL Studio and rescan VST3 plugins if needed.
 8. Follow `MCP-SETUP.md` to enable the generated MCP configuration for the intended Agent.
-9. Optional: import the installed `skill` folder if the client supports Skills or does not expose MCP Resources.
 
-User-side Analyzer files are installed under:
+Installed Analyzer application files are under:
 
 ```text
 %LOCALAPPDATA%\AI Audio Analyzer\
@@ -58,7 +57,6 @@ User-side Analyzer files are installed under:
 6. Wait for installation success.
 7. Restart FL Studio and rescan plugins if needed.
 8. Follow `MCP-SETUP.md` to add Analyzer MCP to the Agent.
-9. Optional: import the installed `skill` folder if useful for that client.
 
 VST3 location:
 
@@ -76,9 +74,9 @@ Current macOS packages are ad-hoc signed and **not Apple Developer ID notarized*
 
 ## MCP setup
 
-The installer generates `cherry-studio-mcp.json` with the real absolute path to the installed standalone MCP executable. Prefer that generated file over typing paths manually.
+The installer generates `cherry-studio-mcp.json` with the real absolute path to the standalone MCP executable. Prefer that generated file over typing paths manually.
 
-AI Audio Analyzer MCP 1.2 exposes **47 tools** and **16 Guide Resources**.
+P4b PR #36 uses MCP 1.2 with **48 tools** and **16 Guide Resources**.
 
 The MCP is self-describing through Server instructions, Tool descriptions and `aianalyzer://guide/*` Resources. The installed `skill/` directory remains the canonical long-form Markdown source.
 
@@ -97,7 +95,7 @@ audio_project_status()
 audio_song_status()
 ```
 
-## Whole-song and mix evidence
+## Whole-song and historical evidence
 
 High-level tools include:
 
@@ -107,40 +105,42 @@ audio_section_map(...)
 audio_section_profile(...)
 audio_track_story(...)
 audio_section_relationships(...)
+audio_historical_detail(...)
 audio_dynamics_distribution(...)
 audio_mono_compatibility(...)
 ```
 
 Missing coverage is not silence. A/B/C Section families are neutral recurrence labels, not automatic Verse/Chorus/Drop names.
 
+P4b `audio_historical_detail()` can inspect a retained past DAW range or cached Section without replay when deep evidence was captured. Historical detail is one-second resolution; subsecond historical alignment is unsupported. Direct historical mono-fold Sample Peak/True Peak remain unavailable.
+
+Dedicated masking/stereo/temporal tools remain recent-window APIs and may provide finer current-frame context.
+
 P6a dynamics statistics are descriptive. LUFS-S P90-P10 is not standardized EBU LRA; arbitrary-range Integrated LUFS and PLR remain unavailable.
 
-P7a direct mono-fold evidence is recent-window only. Historical arbitrary Section 32-band mono evidence and mono-fold Sample Peak/True Peak are unavailable.
+P7a `audio_mono_compatibility()` remains a recent-window tool. Historical one-second mono energy is available separately through P4b when retained Mid/Side detail exists.
 
 ## Reference comparison
 
 P8a tools:
 
 ```text
-audio_capture_reference(track, label="", seconds=10.0)
+audio_capture_reference(...)
 audio_list_references()
-audio_compare_reference(reference_id, target, seconds=None)
+audio_compare_reference(...)
 ```
 
-A P8a reference is a frozen compact measurement profile, not copied source audio.
-
-Current scope:
+A P8a reference is a frozen compact **recent-window** measurement profile, not copied source audio.
 
 ```text
-recent receive-time window
 current MCP session only
 not persistent
 not a whole-song claim
 ```
 
-Comparison includes absolute `target - reference` evidence plus an explicit RMS-level-normalized spectral-shape view. The normalized view applies no real gain and changes no audio.
+P4b does not silently convert P8a into historical reference capture.
 
-A difference from a reference is context, not automatically a defect or processing command. P8a does not emit automatic EQ/master matching or a quality score.
+Comparison includes absolute `target - reference` evidence plus an explicit RMS-level-normalized spectral-shape view. This is context, not an automatic EQ/mastering recipe or quality score.
 
 ## Real DAW changes and verification
 
@@ -154,7 +154,7 @@ For a known passage, prefer:
 audio_begin_range_verification(...)
 -> external change + actual host readback
 -> replay effective_range
-audio_complete_range_verification(...)
+-> audio_complete_range_verification(...)
 ```
 
 `controlled_comparison=true` means technical comparability only. `closed_loop_complete=true` additionally requires actual host readback. Neither means After is artistically better.
@@ -167,6 +167,6 @@ If the Agent cannot see Analyzer tools:
 2. confirm the generated JSON points to the installed executable;
 3. confirm the MCP is enabled for the current Agent;
 4. restart/refresh the MCP client after configuration changes;
-5. ensure another Analyzer MCP process is not already using the local OSC endpoint `127.0.0.1:9855`.
+5. ensure another Analyzer MCP process is not already using `127.0.0.1:9855`.
 
 Normal user Releases must run the installed one-file MCP executable, not repository Python source.
