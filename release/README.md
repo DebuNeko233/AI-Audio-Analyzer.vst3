@@ -1,25 +1,19 @@
 # Release packaging policy
 
-User-facing Release packages are created by:
+User-facing Release packages are created by `.github/workflows/release.yml`. The normal `build` workflow is for development validation/artifacts, not final user distribution.
 
-```text
-.github/workflows/release.yml
-```
-
-The normal `build` workflow is for development validation/artifacts, not final user distribution.
-
-Current target:
+Current P4b PR #36 target:
 
 ```text
 AI Audio Analyzer 1.2.0
 MCP 1.2
 OSC analysis protocol 1.2
 Analyzer control protocol local revision 1
-47 MCP tools
+48 MCP tools
 16 MCP guide resources
 ```
 
-## Release audience
+## Audience and package rule
 
 GitHub Release is designed for users with **no programming experience**.
 
@@ -28,15 +22,15 @@ Expected flow:
 ```text
 download one platform ZIP
 -> extract once
--> double-click installer
+-> run installer
 -> restart/rescan FL Studio if needed
--> add generated MCP config to the intended Agent
--> optionally import the packaged Skill when useful for that client
+-> add generated MCP config to the Agent
+-> optionally import packaged Skill
 ```
 
-Do not require Python, pip, venv, source code, build tools, package managers, repository knowledge, or client-side Skill import for basic MCP use.
+Do not require Python, pip, venv, source code, build tools, package managers or repository knowledge for normal use.
 
-## Supported targets
+Supported targets:
 
 ```text
 Windows x64
@@ -45,7 +39,7 @@ macOS Apple Silicon arm64
 
 Intel/x86_64 macOS is not packaged.
 
-## MCP runtime
+## Runtime packaging
 
 Release MCP uses PyInstaller one-file mode:
 
@@ -73,6 +67,10 @@ semantic_tools.py
 performance_tools.py
 control_tools.py
 song_tools.py
+historical_detail_store.py
+historical_detail_profile.py
+historical_detail_pair.py
+historical_detail_tools.py
 section_tools.py
 track_story_tools.py
 section_relationship_tools.py
@@ -90,28 +88,27 @@ Repository-only regressions include:
 mcp/ci_regression.py
 mcp/relationship_regression.py
 mcp/range_verification_regression.py
+mcp/p4b_regression.py
 mcp/dynamics_regression.py
 mcp/mono_compatibility_regression.py
 mcp/reference_regression.py
 ```
 
-Regression/test Python files must never be shipped to ordinary users.
+Regression/test Python files must never ship in beginner Releases.
 
-## MCP Self-Describing API
+## Self-describing MCP
 
-The Release MCP must remain understandable without requiring a client-imported Skill.
+The Release MCP must remain understandable without client-side Skill import.
 
 Required protocol-facing layers:
 
 ```text
 Server instructions
-non-empty description for every one of the 47 MCP Tools
+non-empty descriptions for all 48 MCP Tools
 16 discoverable aianalyzer://guide/* Resources
 ```
 
-The packaged/repository `skills/ai-analyzer-flstudio/SKILL.md` and `references/*.md` remain the canonical long-form content source. MCP Resources read those same files on demand.
-
-The complete beginner Release must include the physical `skill/` directory and must fail package validation if canonical guide files are unavailable.
+The packaged `skill/` directory remains the canonical long-form Markdown source used by Resources and must be present in the final package.
 
 ## User package layout
 
@@ -147,7 +144,7 @@ VERSION.txt
 LICENSE
 ```
 
-The following must **never** appear in a user Release:
+Never include:
 
 ```text
 mcp/source/
@@ -157,133 +154,118 @@ cherry-studio.example.json
 venv/
 _internal/
 repository regression/test scripts
-inner Release ZIP files
+nested Release ZIP files
 ```
 
-`MCP-SETUP.md`, `skill/`, and `LICENSE` are required.
-
-## Single-compression rule
-
-Platform jobs stage ordinary directories. The publish job creates each final user ZIP exactly once.
-
-A final Release ZIP must not contain another `.zip` file. GitHub Actions artifacts are transport containers only.
+`MCP-SETUP.md`, `skill/` and `LICENSE` are required.
 
 ## Required validation
 
 Before publication verify at least:
 
 ```text
-source MCP py_compile/self-test
-MCP 1.2 exact 47-tool registry
-non-empty Tool descriptions for all tools
+source py_compile + MCP self-test
+exact 48-tool registry
+non-empty Tool descriptions
 non-empty Server instructions
 exact 16-guide Resource registry + descriptions
-source/repository guide lookup
-packaged/final-Release guide lookup with AI_ANALYZER_REQUIRE_GUIDES=1
-project/runtime identity disclosure regression
+source/package Guide lookup
+project/runtime identity regression
 Analyzer control revision 1 regression
-transport parser + Song Memory coverage/epoch regressions
-section boundary/recurrence regressions
-Track Story regression
-Section Relationship regression
-recent-window verification regressions
-transport-range verification regression
-P6a dynamics distribution regression
+transport/Song Memory coverage regressions
+Section Map / Track Story / Relationships regressions
+recent verification regression
+same-range verification regression
+P4b historical detail regression
+P6a dynamics regression
 P7a mono compatibility regression
-P8a reference comparison regression
-P8a pure-gain absolute-vs-normalized behavior
-P8a missing feature families remain unavailable
-P8a no automatic match / quality score semantics
+P8a reference regression
 adaptive Full/Eco validity regressions
-PyInstaller -F one-file build
-packaged runtime native self-test
+PyInstaller -F build + packaged self-test
 no _internal tree
 Windows x64 VST3 build
 macOS arm64 VST3 build/signature
-Windows installer parse
-macOS installer syntax
-MCP-SETUP.md + Skill guides + LICENSE present
-no MCP source/developer/test files
+installer syntax
+no user-facing source/test files
 no nested ZIP
 final checksums
-Release draft/prerelease/public state matches workflow inputs
 ```
 
-A successful source self-test alone does not prove PyInstaller, guide lookup, VST3, package assembly, or publication succeeded.
+A successful source self-test alone does not prove the final user package is correct.
 
-## Identity and retained-state note
-
-`audio_project_identity_status()` currently reports no stable project identity.
+## Identity note
 
 Release docs must preserve:
 
 - `runtime_id` is live plugin-instance identity, not persistent project/track identity;
 - reopening the same project creates new runtime UUIDs;
 - a new UUID does not prove another project opened;
-- current Mixer/Slot bindings are session locations, not persistent identity;
-- MCP session memory can remain after a project switch/reopen;
-- Song Memory, Section Maps, snapshots, relationships, P8a references and verification sessions are not partitioned by a stable Project ID;
-- restart Analyzer MCP after changing/reopening projects when strict state isolation is required and authoritative identity is unavailable.
+- Mixer/Slot bindings are session locations, not persistent identity;
+- retained MCP state can outlive a project switch/reopen;
+- retained state is not partitioned by a stable Project ID;
+- restart Analyzer MCP when strict isolation is required and authoritative project identity is unavailable.
 
 ## Analysis Profile note
 
-`Eco / Balanced / Mix / Full` are Analyzer measurement-performance profiles only.
+`Eco / Balanced / Mix / Full` are measurement-performance profiles only.
 
-`audio_set_analysis_profile()` and `audio_set_project_analysis_profile()` may change only Analyzer's own `analysis_profile` through loopback-only control with explicit ACK.
+Analyzer profile tools may change only Analyzer's own `analysis_profile`. Keep `control_acknowledged` distinct from `telemetry_confirmed`.
 
-Keep `control_acknowledged` distinct from `telemetry_confirmed`. Do not market `worker_load_ratio` as DAW realtime audio-thread CPU.
+## Song Memory / P4b note
 
-## Song Memory / structure note
+Song Memory is bounded and MCP-session scoped:
 
-MCP/OSC 1.2 provides transport-aware retained evidence.
+```text
+canonical bin       1 second
+coverage slot       100 ms
+max bins            1200 / instance
+```
+
+P4b adds `audio_historical_detail(...)` on top of the same memory and common P4 range resolver. It stores no raw audio and adds no OSC fields.
 
 User-facing claims must preserve:
 
-- Song Memory is bounded and MCP-session scoped;
 - transport epochs are instance-local;
+- equal epoch numbers are not required across tracks;
 - transport coordinates are not sample-accurate;
-- missing coverage is not silence;
-- A/B/C recurrence families are not automatic Verse/Chorus/Drop names;
-- Track Story does not infer roles or prescribe processing;
-- relationship `shortlist_priority` is an inspection heuristic;
-- detailed masking/stereo/temporal pair tools remain recent-window based.
+- missing coverage/detail is not silence;
+- A/B/C families are not semantic Verse/Chorus/Drop labels;
+- historical deep detail is one-second resolution;
+- subsecond historical alignment is unsupported;
+- dedicated masking/stereo/temporal tools remain recent-window APIs with finer current-frame context;
+- historical mono Sample Peak / True Peak remain unavailable;
+- no P4b quality score or processing recommendation exists.
+
+Current CI memory guard reports a shallow Python container/array estimate around 1918 B/detail-bin, about 2.20 MiB at 1200 detail bins/track. This is not exact process RSS.
 
 ## P6a dynamics note
 
-P6a is MCP-side and adds no new realtime DSP or OSC fields.
+P6a is descriptive retained evidence. LUFS-S P90-P10 is not standardized EBU LRA. Arbitrary-range Integrated LUFS and PLR remain unavailable.
 
-Do not relabel LUFS-S P90-P10 as standardized EBU LRA. Arbitrary-range Integrated LUFS and PLR remain unavailable until authoritative compatible-scope measurement exists.
+## P7 mono note
 
-## P7a mono note
+`audio_mono_compatibility()` remains recent-window P7a evidence.
 
-P7a is MCP-side and reuses current Mid/Side evidence.
-
-Do not interpret `inspection_priority` as a quality score/probability. Historical arbitrary Section 32-band mono evidence and direct mono Sample Peak/True Peak are unavailable in P7a.
+P4b may derive historical one-second mono-fold energy from retained Mid/Side summaries via `audio_historical_detail()`. Direct mono Sample Peak/True Peak remain unavailable.
 
 ## P8a reference note
 
-P8a adds:
+P8a references are frozen recent-window measurement profiles only:
 
 ```text
 audio_capture_reference(...)
 audio_list_references()
 audio_compare_reference(...)
-aianalyzer://guide/reference-comparison
 ```
 
-It stores compact derived measurement profiles only, never source audio.
+No source audio is stored. References are MCP-session scoped, not persistent and not whole-song truth. P4b does not silently convert P8a into historical reference capture.
 
-User-facing claims must preserve:
-
-- current references are frozen and MCP-session scoped;
-- capture is recent-window and does not prove whole-song coverage;
-- comparison direction is target-minus-reference;
-- RMS-level-normalized spectrum is a comparison view only and applies no gain;
-- a difference from the reference is not automatically a defect;
-- no automatic EQ/master matching, quality score or processing recommendation is emitted;
-- no cross-song Section semantic equivalence is assumed;
-- persistent libraries, historical arbitrary Section 32-band reference capture, and external-file fast scan remain future work.
+Reference differences are context, not automatic EQ/master-match instructions or quality scores.
 
 ## Protocol/version note
 
-P8a adds no VST3 DSP, GUI, OSC fields or Analyzer control field. OSC 1.2 indexes `0..149` remain unchanged, so no protocol/version bump is justified by P8a alone.
+P4b, P6a, P7a and P8a add no new OSC fields. OSC 1.2 indexes `0..149` remain unchanged, so these MCP-side additions alone do not justify an OSC/control/Product version bump.
+
+## Merge policy
+
+Release docs/workflow changes must follow the same repository rule: never merge a PR with pending/failing relevant CI, and never merge unless the user explicitly authorizes it in the current turn.

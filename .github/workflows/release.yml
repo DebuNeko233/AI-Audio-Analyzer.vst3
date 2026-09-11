@@ -31,6 +31,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: mcp/requirements.txt
+
       - name: Validate scripts, docs and MCP source
         shell: bash
         run: |
@@ -45,8 +52,14 @@ jobs:
           test -s release/common/INSTALL.zh-CN.md
           test -s skills/ai-analyzer-flstudio/SKILL.md
           test -s skills/ai-analyzer-flstudio/references/analyzer-mcp.md
-          test -s skills/ai-analyzer-flstudio/references/dynamics-evidence.md
+          test -s skills/ai-analyzer-flstudio/references/song-memory.md
+          test -s skills/ai-analyzer-flstudio/references/mono-compatibility.md
+          test -s skills/ai-analyzer-flstudio/references/reference-comparison.md
           test -s LICENSE
+
+          python -m pip install --upgrade pip
+          python -m pip install -r mcp/requirements.txt
+
           python -m py_compile \
             mcp/server.py \
             mcp/analyzer_core.py \
@@ -60,13 +73,35 @@ jobs:
             mcp/performance_tools.py \
             mcp/control_tools.py \
             mcp/song_tools.py \
+            mcp/historical_detail_store.py \
+            mcp/historical_detail_profile.py \
+            mcp/historical_detail_pair.py \
+            mcp/historical_detail_tools.py \
             mcp/section_tools.py \
             mcp/track_story_tools.py \
             mcp/section_relationship_tools.py \
             mcp/verification_tools.py \
             mcp/range_tools.py \
             mcp/range_verification_tools.py \
-            mcp/dynamics_tools.py
+            mcp/dynamics_tools.py \
+            mcp/mono_compatibility_tools.py \
+            mcp/reference_tools.py \
+            mcp/ci_regression.py \
+            mcp/relationship_regression.py \
+            mcp/range_verification_regression.py \
+            mcp/p4b_regression.py \
+            mcp/dynamics_regression.py \
+            mcp/mono_compatibility_regression.py \
+            mcp/reference_regression.py
+
+          AI_ANALYZER_SELF_TEST=1 python mcp/server.py
+          python mcp/ci_regression.py
+          python mcp/relationship_regression.py
+          python mcp/range_verification_regression.py
+          python mcp/p4b_regression.py
+          python mcp/dynamics_regression.py
+          python mcp/mono_compatibility_regression.py
+          python mcp/reference_regression.py
 
   mcp-runtime:
     name: MCP runtime (${{ matrix.label }})
@@ -84,6 +119,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -166,6 +202,7 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+
       - name: Configure and build VST3
         shell: pwsh
         run: |
@@ -206,6 +243,8 @@ jobs:
           AI Audio Analyzer $version
           Platform: Windows x64
           MCP: 1.2 standalone one-file executable
+          MCP tools: 48
+          Guide Resources: 16
           OSC protocol: 1.2 append-only
           Analyzer control protocol: local revision 1
           Release commit: $env:GITHUB_SHA
@@ -245,6 +284,7 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+
       - name: Configure and build arm64 VST3
         shell: bash
         run: |
@@ -291,14 +331,16 @@ jobs:
           chmod +x package/install.sh package/Install.command
           AI_ANALYZER_SKILL_DIR="$PWD/package/skill" AI_ANALYZER_REQUIRE_GUIDES=1 AI_ANALYZER_SELF_TEST=1 package/mcp/ai-audio-analyzer-mcp
 
-          cat > package/VERSION.txt <<EOF
+          cat > package/VERSION.txt <<EOF_VERSION
           AI Audio Analyzer ${VERSION}
           Platform: macOS Apple Silicon arm64
           MCP: 1.2 standalone one-file executable
+          MCP tools: 48
+          Guide Resources: 16
           OSC protocol: 1.2 append-only
           Analyzer control protocol: local revision 1
           Release commit: ${GITHUB_SHA}
-          EOF
+          EOF_VERSION
 
           if find package -type f \( -name '*.py' -o -name '*.zip' -o -name 'requirements.txt' -o -name 'cherry-studio.example.json' \) | grep -q .; then
             echo 'Forbidden developer/nested archive file found in user package.' >&2
@@ -409,38 +451,30 @@ jobs:
         env:
           TAG: ${{ steps.meta.outputs.tag }}
         run: |
-          cat > release-assets/RELEASE-NOTES.md <<EOF
-          # AI Audio Analyzer ${TAG}
+          cat > release-assets/RELEASE-NOTES.md <<'EOF_NOTES'
+          # AI Audio Analyzer Release
 
           Download the package for your computer, unzip it once, and run the installer inside.
 
-          - Windows: unzip AI-Audio-Analyzer-*-Windows.zip, then double-click Install.cmd.
-          - macOS Apple Silicon: unzip AI-Audio-Analyzer-*-macOS.zip, then double-click Install.command.
+          - Windows: unzip the Windows ZIP, then double-click Install.cmd.
+          - macOS Apple Silicon: unzip the macOS ZIP, then double-click Install.command.
           - No Python, source code, package manager, or programming setup is required.
-          - MCP-SETUP.md explains how to add the generated MCP server configuration to an MCP-capable Agent/client.
-          - Project code is released under the MIT License and each package includes LICENSE.
-          - MCP 1.2 exposes 43 tools. OSC analysis protocol remains append-only 1.2; Analyzer profile control remains separate local revision 1.
-          - MCP is self-describing: server instructions provide the minimum startup/safety contract, all tools expose descriptions, and `aianalyzer://guide/*` Resources expose the packaged Skill/reference Markdown on demand without duplicating the long-form content in the server handshake.
-          - The packaged `skill/` remains the canonical long-form guide source and can still be imported directly by clients that support Skills.
-          - audio_project_identity_status explicitly reports that stable project identity is currently UNRESOLVED, runtime UUIDs are live-instance/session identity, reopening the same project recreates UUIDs, and cross-project retained-state isolation is not yet guaranteed while MCP keeps running.
-          - Until exact DAW project identity is integrated, restart Analyzer MCP when changing/reopening projects if strict state isolation is required; a new runtime UUID alone does not prove the project changed.
-          - Adaptive Analysis provides Eco, Balanced, Mix and Full measurement-performance profiles. Analyzer-owned profile tools affect measurement computation only and do not change audio.
+          - MCP 1.2 exposes 48 tools and 16 Guide Resources. OSC analysis protocol remains append-only 1.2; Analyzer profile control remains local revision 1.
+          - MCP is self-describing through Server instructions, Tool descriptions, and aianalyzer://guide/* Resources backed by the packaged Skill Markdown.
+          - audio_project_identity_status() reports that stable project identity is currently unresolved; restart Analyzer MCP after changing/reopening projects when strict retained-state isolation is required.
           - Song Memory retains one-second DAW-time evidence with explicit coverage and instance-local playback epochs.
-          - audio_section_map provides explainable section novelty and neutral recurrence families; audio_track_story summarizes one Analyzer across sections; audio_section_relationships returns a bounded cross-track inspection shortlist.
-          - audio_dynamics_distribution provides coverage-weighted retained RMS, LUFS-S, crest, sample-peak and True-Peak distributions for a selected pass span, explicit DAW-time range or cached section. Low-coverage bins are rejected and accepted observations are weighted by covered seconds; missing coverage is never inserted as silence.
-          - LUFS-S interpercentile spread is descriptive evidence, not EBU Loudness Range. P6a intentionally leaves standardized EBU LRA, arbitrary-range integrated LUFS and PLR unavailable instead of fabricating them from pass-cumulative retained state.
-          - Dynamics/section deltas are descriptive context only; Analyzer does not emit a universal mastering quality score or fixed loudness/dynamics target.
-          - A/B/C families are not automatic Verse/Chorus/Drop labels. Track Story does not infer Bass/Vocal/Drums roles. Relationship shortlist priority is not a masking/mix-problem probability or processing command.
-          - For a known musical passage, audio_begin_range_verification / audio_complete_range_verification provide transport-anchored same-range Before/After measurement. Requested fractional boundaries are normalized to retained one-second bins, pass selection is coverage-first, and After must come from a clean pass observed after the baseline fence.
-          - Same-range verification does not require equal epoch numbers across Analyzer instances and does not fake arbitrary-range LUFS-I from pass-cumulative retained state.
-          - controlled_comparison means technical comparability only. closed_loop_complete additionally requires actual caller-supplied host readback; neither means the result sounds better or establishes persistent project identity.
-          - Recent-window verification remains available when explicit retained DAW-time anchoring is not practical.
-          - Detailed masking/stereo/temporal pair tools remain recent-window based; replay the target historical section before presenting those tools as section-specific deeper evidence.
-          - All sound-changing/project writes such as EQ, compression, gain, pan, synth, routing and automation remain the responsibility of the actual DAW-control MCP with real host readback.
+          - P4b audio_historical_detail() can query bounded one-second historical Mid/Side, stereo, mono-energy, masking and temporal-pair evidence for retained DAW ranges/Sections without forced replay when those measurements were captured.
+          - P4b stores no raw audio, does not provide subsecond historical alignment, and does not provide historical mono-fold Sample Peak/True Peak.
+          - P6a audio_dynamics_distribution() is descriptive retained evidence; LUFS-S spread is not standardized EBU LRA and arbitrary-range Integrated LUFS/PLR remain unavailable.
+          - P7a audio_mono_compatibility() remains a recent-window direct mono energy tool. P4b historical mono energy is a separate one-second retained path.
+          - P8a references remain frozen recent-window MCP-session measurement profiles; P4b does not silently make them historical or persistent.
+          - A/B/C Section families are neutral recurrence labels. Relationship shortlist priority is not a problem probability or processing command.
+          - Same-range verification requires actual external host readback for closed_loop_complete=true. Technical comparability does not mean a change sounds better.
+          - All sound-changing/project writes remain the responsibility of the external DAW-control MCP.
           - macOS Release is Apple Silicon arm64 only and is currently ad-hoc signed rather than Apple-notarized.
 
           See START-HERE.md inside the package for the shortest setup path.
-          EOF
+          EOF_NOTES
 
       - name: Create or update GitHub Release
         shell: bash
@@ -472,10 +506,6 @@ jobs:
             gh release create "$TAG" "${files[@]}" --target "$GITHUB_SHA" --title "AI Audio Analyzer $TAG" --notes-file release-assets/RELEASE-NOTES.md --prerelease
           else
             gh release create "$TAG" "${files[@]}" --target "$GITHUB_SHA" --title "AI Audio Analyzer $TAG" --notes-file release-assets/RELEASE-NOTES.md
-          fi
-
-          if [ "$DRAFT" = 'true' ]; then
-            echo '::notice::Release is intentionally a Draft. It is not public and will not become Latest until Draft is turned off.'
           fi
 
       - name: Show release URL
