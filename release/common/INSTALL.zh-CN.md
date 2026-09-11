@@ -39,8 +39,7 @@ LICENSE
 5. 如果 Windows 弹出权限提示，允许安装；
 6. 等待提示 **Installation completed successfully**；
 7. 重新打开 FL Studio，需要时重新扫描 VST3；
-8. 按 `MCP-SETUP.md` 把安装程序生成的 MCP 配置加入目标 Agent；
-9. 可选：如果客户端支持 Skill 或不支持 MCP Resources，可以导入已安装的 `skill` 目录。
+8. 按 `MCP-SETUP.md` 把安装程序生成的 MCP 配置加入目标 Agent。
 
 用户侧 Analyzer 文件安装到：
 
@@ -57,8 +56,7 @@ LICENSE
 5. 如果 macOS 阻止运行，右键 `Install.command` -> **打开**；
 6. 等待安装成功；
 7. 重新打开 FL Studio，需要时重新扫描插件；
-8. 按 `MCP-SETUP.md` 把 Analyzer MCP 加入 Agent；
-9. 可选：按客户端能力导入 `skill`。
+8. 按 `MCP-SETUP.md` 把 Analyzer MCP 加入 Agent。
 
 VST3 安装位置：
 
@@ -78,7 +76,7 @@ MCP / Skill：
 
 安装程序会生成带真实绝对路径的 `cherry-studio-mcp.json`。优先使用生成的文件，不要手动猜路径。
 
-AI Audio Analyzer MCP 1.2 当前暴露 **47 个工具**和 **16 个 Guide Resources**。
+P4b PR #36 当前的 MCP 1.2 暴露 **48 个工具**和 **16 个 Guide Resources**。
 
 MCP 通过 Server Instructions、Tool Descriptions 和 `aianalyzer://guide/*` 自解释；已安装的 `skill/` 仍是长篇 Markdown 的唯一规范来源。
 
@@ -97,7 +95,7 @@ audio_project_status()
 audio_song_status()
 ```
 
-## 整首歌与混音证据
+## 整首歌与历史证据
 
 高层工具包括：
 
@@ -107,40 +105,42 @@ audio_section_map(...)
 audio_section_profile(...)
 audio_track_story(...)
 audio_section_relationships(...)
+audio_historical_detail(...)
 audio_dynamics_distribution(...)
 audio_mono_compatibility(...)
 ```
 
 缺失 Coverage 不是静音。A/B/C Section Family 是中性的重复结构标签，不自动代表 Verse/Chorus/Drop。
 
-P6a 的 Dynamics Distribution 是描述性统计。LUFS-S P90-P10 不是标准 EBU LRA；Arbitrary-range Integrated LUFS 和 PLR 当前不可用。
+P4b `audio_historical_detail()` 可以在不重播的情况下查询已经保留的历史 DAW 区间或 Section 深度证据。历史分辨率为 1 秒，不支持亚秒历史对齐。直接历史 Mono-fold Sample Peak / True Peak 仍不可用。
 
-P7a Direct Mono-fold Evidence 只支持 Recent-window。历史任意 Section 的 32-band Mono Evidence，以及 Mono-fold Sample Peak / True Peak 当前不可用。
+专门的 Masking / Stereo / Temporal 工具仍是 Recent-window API，可以提供更细的当前帧上下文。
+
+P6a Dynamics Distribution 是描述性统计。LUFS-S P90-P10 不是标准 EBU LRA；Arbitrary-range Integrated LUFS 和 PLR 当前不可用。
+
+P7a `audio_mono_compatibility()` 本身仍是 Recent-window 工具。历史 1 秒级 Mono 能量由 P4b 在保留了 Mid/Side 证据时单独提供。
 
 ## Reference Comparison
 
 P8a 工具：
 
 ```text
-audio_capture_reference(track, label="", seconds=10.0)
+audio_capture_reference(...)
 audio_list_references()
-audio_compare_reference(reference_id, target, seconds=None)
+audio_compare_reference(...)
 ```
 
-P8a Reference 是冻结的结构化测量 Profile，不复制源音频。
-
-当前范围：
+P8a Reference 是冻结的**近期窗口**结构化测量 Profile，不复制源音频。
 
 ```text
-Recent Receive-time Window
 仅当前 MCP Session
 不持久化
 不能声称 Whole-song Coverage
 ```
 
-比较同时提供 Absolute `target - reference` 证据和明确的 RMS-level-normalized Spectral Shape 视图。Normalized View 不会真正施加 Gain，也不会改变声音。
+P4b 有历史深度数据，并不表示 P8a 自动支持历史 Reference Capture。
 
-与 Reference 不同只是上下文，不代表一定有问题，也不代表必须执行某个处理。P8a 不输出自动 EQ / Master Match 或质量分数。
+Reference 差异只是上下文，不代表一定有问题，也不是自动 EQ / Master Match 配方或质量分数。
 
 ## 真实 DAW 修改与验证
 
@@ -154,7 +154,7 @@ Analyzer MCP 只允许修改自己的 `Analysis Profile` 测量设置。
 audio_begin_range_verification(...)
 -> 外部修改 + 真实 Host Readback
 -> 重播 effective_range
-audio_complete_range_verification(...)
+-> audio_complete_range_verification(...)
 ```
 
 `controlled_comparison=true` 只表示技术上可比较；`closed_loop_complete=true` 还要求真实 Host Readback。两者都不表示 After 在艺术上一定更好。
