@@ -32,11 +32,9 @@ macOS:
 ~/Library/Application Support/AI Audio Analyzer/mcp/ai-audio-analyzer-mcp
 ```
 
-The installer also creates `cherry-studio-mcp.json` in the AI Audio Analyzer application-data folder and prints its location.
+### 2. Add the MCP server
 
-### 2. Add the MCP server to the Agent/client
-
-Import the generated JSON into Cherry Studio or another MCP-compatible client, then enable/select the `ai-audio-analyzer` server for the Agent that will use Analyzer.
+Import the generated JSON into Cherry Studio or another MCP-compatible client, then enable the `ai-audio-analyzer` server for the Agent that will use Analyzer.
 
 Manual Windows example:
 
@@ -74,40 +72,27 @@ Manual macOS example:
 
 ### 3. Skill import is optional
 
-AI Audio Analyzer MCP is self-describing. A client does **not** have to import the packaged Skill for the basic server contract.
-
-The MCP exposes:
+AI Audio Analyzer MCP is self-describing through:
 
 ```text
 Server instructions
-47 Tool descriptions
+48 Tool descriptions
 16 MCP Resources under aianalyzer://guide/*
 ```
 
-The packaged `skill` folder remains the canonical long-form guide content used by those MCP Resources.
+The packaged `skill/` directory remains the canonical long-form Markdown source used by those Resources.
 
-If the client supports Resources, read:
+If your client supports Resources, start with:
 
 ```text
 aianalyzer://guide/index
 ```
 
-and then only the relevant guide. Useful specialized Resources include:
+and load only the guide needed for the task.
 
-```text
-aianalyzer://guide/dynamics-evidence
-aianalyzer://guide/mono-compatibility
-aianalyzer://guide/reference-comparison
-aianalyzer://guide/verification-evidence
-```
+### 4. Start with identity scope
 
-If the client does not expose MCP Resources, importing the packaged `skill` folder into the Agent/Assistant is the preferred way to provide the same long-form guidance.
-
-### 4. Verify identity scope and tool surface
-
-AI Audio Analyzer MCP 1.2 exposes **47 tools**.
-
-First call at a new session or after a possible project switch/reopen:
+At a new session, or after a possible project switch/reopen, first call:
 
 ```text
 audio_project_identity_status()
@@ -125,29 +110,49 @@ binding scope                           mcp_session
 cross-project retained-state isolation  not guaranteed
 ```
 
-Reopening the same FL Studio project recreates Analyzer runtime UUIDs. A new UUID therefore does not prove that another project was opened.
+Reopening the same project recreates Analyzer runtime UUIDs. A new UUID does not prove another project opened.
 
-If Analyzer MCP keeps running through a project switch/reopen, old Song Memory, Section Maps, snapshots, relationships, P8a references or verification sessions may remain in RAM and are not partitioned by a stable Project ID.
+If strict retained-state isolation matters after changing/reopening a project, restart Analyzer MCP until authoritative project identity is integrated.
 
-Until exact DAW project identity is integrated, restart Analyzer MCP after changing/reopening projects when strict state isolation is required.
-
-Then inspect current readiness:
+Then inspect:
 
 ```text
 audio_project_status()
 audio_song_status()
 ```
 
-High-level whole-song/structure tools include:
+### 5. Whole-song and historical evidence
+
+High-level tools include:
 
 ```text
-audio_section_map()
-audio_track_story(...)
+audio_song_overview()
+audio_section_map(...)
 audio_section_profile(...)
+audio_track_story(...)
 audio_section_relationships(...)
+audio_historical_detail(...)
+audio_dynamics_distribution(...)
+audio_mono_compatibility(...)
 ```
 
-### 5. Dynamics, mono and reference evidence
+Use `audio_historical_detail()` for a retained past DAW range or cached Section when replay should be avoided.
+
+P4b historical detail can expose one-second retained Mid/Side, stereo, historical mono energy, masking and temporal-pair evidence when those features were measured during capture.
+
+Important limits:
+
+```text
+historical resolution        1 second
+subsecond historical align   unsupported
+raw audio retained           no
+missing detail               unavailable, not silence
+mono Sample Peak/True Peak   unavailable
+```
+
+Dedicated masking/stereo/temporal tools remain recent-window APIs with potentially finer current-frame context.
+
+### 6. Dynamics, mono and references
 
 Retained dynamics:
 
@@ -155,7 +160,7 @@ Retained dynamics:
 audio_dynamics_distribution(...)
 ```
 
-Do not interpret `lufs_s_interpercentile_range_lu` as EBU Loudness Range. P6a leaves standardized EBU LRA, arbitrary-range Integrated LUFS and arbitrary-range PLR unavailable.
+P6a is descriptive. LUFS-S P90-P10 is not standardized EBU LRA. Arbitrary-range Integrated LUFS and PLR remain unavailable.
 
 Recent mono compatibility:
 
@@ -163,7 +168,7 @@ Recent mono compatibility:
 audio_mono_compatibility(track, seconds=5.0)
 ```
 
-`inspection_priority` is an energy-aware shortlist aid, not a quality score, audibility probability, pass/fail result, or processing instruction. Historical arbitrary Section 32-band mono evidence and direct mono-fold Sample Peak/True Peak are unavailable in P7a.
+Historical one-second mono energy is available separately through `audio_historical_detail()` when retained Mid/Side detail exists. Direct mono-fold Sample Peak/True Peak remain unavailable.
 
 Session reference comparison:
 
@@ -173,64 +178,41 @@ audio_list_references()
 audio_compare_reference(reference_id, target, seconds=None)
 ```
 
-P8a references are frozen compact measurement profiles only. No source audio is stored.
+P8a references are frozen compact **recent-window** measurement profiles. No source audio is stored. They are MCP-session scoped, not persistent and not whole-song truth.
 
-Current scope:
+P4b does not silently convert P8a references into historical reference captures.
 
-```text
-recent receive-time window
-MCP-session scoped
-not persistent
-not a whole-song claim
-```
+Reference differences are context, not automatic EQ/master-match commands.
 
-Comparison direction is `target - reference`. The spectral result also includes an explicit RMS-level-normalized shape view. That normalization is only a comparison view and does not change the audio.
+### 7. Verify real DAW changes
 
-Do not convert reference deltas directly into inverse EQ/master-matching commands. A difference from the reference is context, not automatically a defect.
-
-### 6. Verify real DAW changes
-
-For a real DAW change over a known passage, prefer transport-anchored same-range verification:
+For a real change over a known passage, prefer:
 
 ```text
 audio_begin_range_verification(...)
--> external DAW-control write + actual host readback
+-> external DAW-control write
+-> actual host readback
 -> replay returned effective_range
-audio_complete_range_verification(...)
+-> audio_complete_range_verification(...)
 ```
 
-When explicit retained range anchoring is impractical, recent-window verification remains available:
+When explicit retained range anchoring is unnecessary, recent-window verification remains available.
 
-```text
-audio_begin_verification(...)
-audio_complete_verification(...)
-audio_verification_status(...)
-```
+`controlled_comparison=true` means technical comparability only. `closed_loop_complete=true` additionally requires actual host readback. Neither means the result sounds better.
 
-Neither verification path establishes persistent project identity.
+Analyzer-owned profile tools may change only Analyzer's own `Eco / Balanced / Mix / Full` measurement profile. All sound/project writes remain external.
 
-The Analyzer does not perform sound-changing DAW writes. EQ, compression, gain, pan, routing, synth, automation and project changes remain the responsibility of the actual DAW-control MCP.
-
-Analyzer-owned profile tools:
-
-```text
-audio_set_analysis_profile(track, profile)
-audio_set_project_analysis_profile(profile, tracks=None)
-```
-
-These may change only Analyzer's own `Eco / Balanced / Mix / Full` measurement-performance profile and do not alter audio.
-
-### 7. Troubleshooting
+### 8. Troubleshooting
 
 If the Agent cannot see Analyzer tools:
 
 1. confirm installation completed;
-2. confirm the generated JSON `command` points to the installed executable;
+2. confirm generated JSON points to the installed executable;
 3. confirm the MCP server is enabled for the current Agent;
 4. refresh/restart the MCP client after configuration changes;
-5. make sure another Analyzer MCP process is not already using the same local OSC endpoint.
+5. make sure another Analyzer MCP process is not already using `127.0.0.1:9855`.
 
-Do not configure a normal user Release to run repository Python source. The Release uses a standalone PyInstaller `-F` one-file executable and does not require Python.
+Normal user Releases run the standalone PyInstaller `-F` executable and do not require Python.
 
 ---
 
@@ -242,25 +224,25 @@ Windows：双击 `Install.cmd`。
 
 macOS Apple Silicon：双击 `Install.command`。
 
-安装程序会安装单文件 MCP 运行时，并生成带正确绝对路径的 `cherry-studio-mcp.json`。
+安装程序会安装单文件 MCP Runtime，并生成带正确绝对路径的 `cherry-studio-mcp.json`。
 
 ### 2. 把 MCP 加入 Agent
 
-优先把安装程序生成的 JSON 导入 Cherry Studio 或其他 MCP 客户端，并为需要使用 Analyzer 的 Agent 启用 `ai-audio-analyzer`。
+优先导入安装程序生成的 JSON，并为需要使用 Analyzer 的 Agent 启用 `ai-audio-analyzer`。
 
 普通用户不需要 Python、pip、venv 或仓库源码。
 
-### 3. Skill 不是基本使用的前置条件
+### 3. MCP 可以自解释
 
-MCP 自带 Server Instructions、47 个 Tool Description 和 16 个 `aianalyzer://guide/*` Resources。
-
-如果客户端支持 Resource，可以先读 `aianalyzer://guide/index`，然后只加载当前任务需要的 Guide。Reference Comparison 的专用 Guide 是：
+当前 P4b PR #36 的 MCP 1.2 提供：
 
 ```text
-aianalyzer://guide/reference-comparison
+Server Instructions
+48 个 Tool Descriptions
+16 个 aianalyzer://guide/* Resources
 ```
 
-如果客户端不支持 Resource，可以导入安装包里的 `skill` 目录。
+如果客户端支持 Resource，先读取 `aianalyzer://guide/index`，然后只加载当前任务需要的 Guide。`skill/` 目录仍是长篇指导文档的规范来源。
 
 ### 4. 新 Session 先检查 Identity
 
@@ -270,9 +252,23 @@ audio_project_identity_status()
 
 当前没有可信的稳定 Project ID。Runtime UUID 是当前插件实例身份，不是持久 Project/Track ID。
 
-如果切换或重新打开工程并需要严格隔离历史状态，应重启 Analyzer MCP。
+如果切换或重新打开工程后需要严格隔离历史状态，应重启 Analyzer MCP。
 
-### 5. P8a Reference Comparison
+### 5. 历史 Section / DAW 区间
+
+```text
+audio_historical_detail(...)
+```
+
+P4b 可以在不重播的情况下查询已经保留下来的 1 秒级 Mid/Side、Stereo、历史 Mono 能量、Masking 和 Temporal pair 证据。
+
+必须明确：历史分辨率只有 1 秒；不支持亚秒历史对齐；缺失数据不是静音；Mono Sample Peak / True Peak 仍不可用。
+
+近期窗口 `audio_masking_evidence()`、`audio_stereo_profile()`、`audio_temporal_*()` 仍是另一类更细的当前帧工具，不能冒充历史 Section 结果。
+
+### 6. Reference 仍是 Recent-window
+
+P8a：
 
 ```text
 audio_capture_reference(...)
@@ -280,10 +276,10 @@ audio_list_references()
 audio_compare_reference(...)
 ```
 
-当前 Reference 是冻结的 Recent-window 测量 Profile，只存在于当前 MCP Session 中，不保存原始音频，也不能声称 Whole-song Coverage。
+Reference 是冻结的近期窗口测量 Profile，只存在于当前 MCP Session 中，不保存源音频，也不能代表整首歌。
 
-Reference 差异只是上下文，不是自动 EQ / Master Match 配方。
+P4b 有历史深度数据，并不表示 P8a 已经支持历史 Reference Capture。
 
-### 6. 真实声音修改仍由 DAW-control MCP 执行
+### 7. 真实声音修改仍由 DAW-control MCP 执行
 
 Analyzer MCP 只允许修改自己的 `Analysis Profile`。真实 EQ、Compression、Gain、Pan、Routing、Synth、Automation 和工程修改必须由外部 DAW-control MCP 完成，并在需要时用 Analyzer 做 Before/After 验证。
